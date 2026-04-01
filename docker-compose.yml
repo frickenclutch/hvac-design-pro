@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: hvacpro-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: supersecretpassword
+      # The default database created
+      POSTGRES_DB: hvacpro_default
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Map our migrations and seeds so we can auto-apply them
+      - ./infrastructure/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
+      - ./database:/docker-entrypoint-initdb.d/database
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
