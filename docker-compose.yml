@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -7,13 +5,11 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: supersecretpassword
-      # The default database created
       POSTGRES_DB: hvacpro_default
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # Map our migrations and seeds so we can auto-apply them
       - ./infrastructure/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
       - ./database:/docker-entrypoint-initdb.d/database
     healthcheck:
@@ -21,6 +17,51 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - hvac-network
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: hvacpro-api-gateway
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:supersecretpassword@postgres:5432/hvacpro_default
+    networks:
+      - hvac-network
+
+  calc-service:
+    build:
+      context: ./calc-service
+      dockerfile: Dockerfile
+    container_name: hvacpro-calc-service
+    ports:
+      - "8000:8000"
+    networks:
+      - hvac-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: hvacpro-frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/index.html:/app/index.html
+    networks:
+      - hvac-network
 
 volumes:
   postgres_data:
+
+networks:
+  hvac-network:
+    driver: bridge

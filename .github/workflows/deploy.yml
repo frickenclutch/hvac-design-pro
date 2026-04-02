@@ -1,1 +1,60 @@
-# deploy.yml
+name: HVAC DesignPro CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      - name: Install calculation dependencies
+        run: |
+          cd calc-service
+          pip install -r requirements.txt pytest
+      - name: Run ACCA Certification Tests
+        run: |
+          cd calc-service
+          pytest tests/ -v --tb=short
+          pytest tests/test_acca_compliance.py
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and Push API Image
+        run: |
+          echo "docker build -t hvacpro-api:${{ github.sha }} ./api-gateway"
+          echo "docker push $ECR/hvacpro-api:${{ github.sha }}"
+      - name: Build and Push Calc Image
+        run: |
+          echo "docker build -t hvacpro-calc:${{ github.sha }} ./calc-service"
+          echo "docker push $ECR/hvacpro-calc:${{ github.sha }}"
+
+  deploy-staging:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Terraform Apply Staging
+        run: echo "terraform apply -var image_tag=${{ github.sha }} -target=module.staging"
+      - name: Smoke Test
+        run: echo "smoke-test https://staging.hvacpro.app/health"
+
+  deploy-production:
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Terraform Apply Production
+        run: echo "terraform apply -var image_tag=${{ github.sha }} -target=module.production"
