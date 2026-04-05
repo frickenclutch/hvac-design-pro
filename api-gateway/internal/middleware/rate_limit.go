@@ -1,1 +1,3 @@
-# rate_limit.go
+package middleware
+
+// Rate limit placeholder

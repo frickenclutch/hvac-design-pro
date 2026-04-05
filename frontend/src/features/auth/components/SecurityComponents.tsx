@@ -64,3 +64,18 @@ export function SecurityPanel({ children, title, description }: { children: Reac
     </div>
   );
 }
+
+import { Fingerprint } from 'lucide-react';
+
+export function PasskeyButton({ onClick, loading }: { onClick: () => void; loading?: boolean }) {
+  return (
+    <button 
+      onClick={onClick}
+      disabled={loading}
+      className="w-full flex items-center justify-center gap-4 py-4 px-6 rounded-2xl bg-white text-slate-950 font-bold hover:shadow-[0_0_30px_rgba(255,255,255,0.3)] transition-all transform hover:-translate-y-1 active:scale-95 disabled:opacity-50"
+    >
+      <Fingerprint className="w-5 h-5 text-slate-900" />
+      <span>{loading ? "Initializing..." : "Continue with Passkey"}</span>
+    </button>
+  );
+}

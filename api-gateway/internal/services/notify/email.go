@@ -26,21 +26,26 @@ func NewEmailService() *EmailService {
 
 func (s *EmailService) SendWelcomeEmail(toEmail string, name string) error {
 	timestamp := time.Now().Format(time.RFC3339)
+	accessCode := "888-999" // In production, this would be a random TOTP
+	
 	content := fmt.Sprintf(`
 [SENDING EMAIL]
 Timestamp: %s
 To: %s
-Subject: Welcome to HVAC DesignPro
+Subject: Welcome to HVAC DesignPro — Secure Access Code Inside
 Body:
 Hello %s,
 
 Welcome to HVAC DesignPro. Your professional engineering workspace is ready.
-You can now start your first project and perform load calculations according to your selected regional standards.
+
+Your temporary Secure Access Code is: %s
+
+Please use this code and your email (%s) to sign in to the Command Center.
 
 Stay cool,
 The DesignPro Team
 -----------------------------------------------------------
-`, timestamp, toEmail, name)
+`, timestamp, toEmail, name, accessCode, toEmail)
 
 	// Log to console
 	fmt.Printf("EMITTING EMAIL: %s\n", toEmail)

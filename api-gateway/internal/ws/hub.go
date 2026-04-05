@@ -1,1 +1,3 @@
-# hub.go
+package ws
+
+// Hub placeholder

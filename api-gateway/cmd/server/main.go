@@ -15,6 +15,7 @@ func main() {
 	
 	// Initialize handlers
 	authHandler := &handlers.AuthHandler{EmailSvc: emailSvc}
+	otpHandler := &handlers.OTPHandler{}
 
 	// Routing with simple CORS middleware
 	mux := http.NewServeMux()
@@ -25,6 +26,8 @@ func main() {
 	})
 
 	mux.HandleFunc("/api/auth/onboard", corsHandler(authHandler.Onboard))
+	mux.HandleFunc("/api/auth/otp/verify", corsHandler(otpHandler.Verify))
+	
 	mux.HandleFunc("/api/projects", corsHandler(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			authHandler.GetProjects(w, r)

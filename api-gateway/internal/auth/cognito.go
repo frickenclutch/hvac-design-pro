@@ -1,1 +1,3 @@
-# cognito.go
+package auth
+
+// Cognito placeholder

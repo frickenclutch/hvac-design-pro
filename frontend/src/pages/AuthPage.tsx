@@ -1,16 +1,35 @@
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { SecureInput, SecurityBadge } from '../features/auth/components/SecurityComponents';
-import { Compass, Mail, KeyRound } from 'lucide-react';
+import { Compass, Mail, ShieldCheck, ArrowRight, ArrowLeft } from 'lucide-react';
 
 export default function AuthPage() {
-  const login = useAuthStore(s => s.login);
+  const { login, setAuthenticated } = useAuthStore();
   const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState('');
+  const [otp, setOtp] = useState('');
+  const [authStep, setAuthStep] = useState(1); // 1: Identity, 2: Authenticator
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleIdentitySubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    login('engineer@hvacpro.app');
-    navigate('/dashboard');
+    if (email) {
+      setLoading(true);
+      setTimeout(() => {
+        setAuthStep(2);
+        setLoading(false);
+      }, 800);
+    }
+  };
+
+  const handleOTPSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (otp.length === 6) {
+      login(email || 'engineer@hvacpro.app');
+      setAuthenticated(true);
+      navigate('/dashboard');
+    }
   };
 
   return (
@@ -54,44 +73,76 @@ export default function AuthPage() {
         <div className="absolute -top-40 -right-40 w-80 h-80 bg-emerald-500/5 blur-[120px] rounded-full pointer-events-none group-focus-within:bg-emerald-500/10 transition-all duration-700" />
         
         <div className="max-w-md mx-auto w-full">
-          <div className="mb-10">
-            <h2 className="text-3xl font-extrabold text-white mb-2 tracking-tight">Professional Authentication</h2>
-            <p className="text-slate-500 font-medium">Please enter your credentials to continue.</p>
-          </div>
+          {authStep === 1 ? (
+            <div className="animate-in fade-in slide-in-from-right-4 duration-500">
+              <div className="mb-10">
+                <h2 className="text-3xl font-extrabold text-white mb-2 tracking-tight">Identity Initialization</h2>
+                <p className="text-slate-500 font-medium">Verify your engineering credentials to continue.</p>
+              </div>
 
-          <form onSubmit={handleLogin} className="space-y-6 mb-10">
-            <SecureInput 
-              label="Engineering ID (Email)" 
-              type="email" 
-              placeholder="e.g. name@firm.app" 
-              icon={<Mail className="w-5 h-5" />}
-              required
-            />
-            <SecureInput 
-              label="Access Code" 
-              type="password" 
-              placeholder="••••••••••••" 
-              icon={<KeyRound className="w-5 h-5" />}
-              required
-            />
-            
-            <div className="flex items-center justify-between px-1">
-              <label className="flex items-center gap-2 cursor-pointer group/check">
-                <input type="checkbox" className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-emerald-500 focus:ring-emerald-500/50" />
-                <span className="text-sm font-medium text-slate-500 group-hover/check:text-slate-300 transition-colors">Trust this secure machine</span>
-              </label>
-              <button type="button" className="text-sm font-bold text-emerald-400 hover:text-emerald-300 opacity-60 hover:opacity-100 transition-all">Forgot code?</button>
+              <form onSubmit={handleIdentitySubmit} className="space-y-6">
+                <SecureInput 
+                  label="Engineering ID (Email)" 
+                  type="email" 
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="name@firm.app" 
+                  icon={<Mail className="w-5 h-5" />}
+                  required
+                />
+
+                <button 
+                  type="submit" 
+                  disabled={loading}
+                  className="w-full bg-slate-100 text-slate-950 py-4 rounded-2xl font-bold text-lg hover:bg-white hover:shadow-[0_0_30px_rgba(255,255,255,0.2)] transition-all transform hover:-translate-y-1 active:scale-95 shadow-xl flex items-center justify-center gap-2"
+                >
+                  {loading ? "Verifying..." : "Initialize Session"}
+                  {!loading && <ArrowRight className="w-5 h-5" />}
+                </button>
+              </form>
             </div>
+          ) : (
+            <div className="animate-in fade-in slide-in-from-right-4 duration-500">
+              <button 
+                onClick={() => setAuthStep(1)}
+                className="flex items-center gap-2 text-slate-500 hover:text-slate-300 transition-colors mb-6 font-bold text-xs uppercase tracking-widest"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Change Identity
+              </button>
 
-            <button 
-              type="submit" 
-              className="w-full bg-slate-100 text-slate-950 py-4 rounded-2xl font-bold text-lg hover:bg-white hover:shadow-[0_0_30px_rgba(255,255,255,0.2)] transition-all transform hover:-translate-y-1 active:scale-95"
-            >
-              Sign In to Command Center
-            </button>
-          </form>
+              <div className="mb-10">
+                <h2 className="text-3xl font-extrabold text-white mb-2 tracking-tight">Secure Node Verification</h2>
+                <p className="text-slate-500 font-medium">Enter the 6-digit code from <b>Google Authenticator</b>.</p>
+              </div>
 
-          <div className="pt-10 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-center gap-4">
+              <form onSubmit={handleOTPSubmit} className="space-y-8">
+                <SecureInput 
+                  label="6-Digit Secure Node" 
+                  type="text" 
+                  maxLength={6}
+                  value={otp}
+                  onChange={e => setOtp(e.target.value)}
+                  placeholder="000 000" 
+                  icon={<ShieldCheck className="w-5 h-5 text-emerald-500" />}
+                  required
+                />
+
+                <button 
+                  type="submit" 
+                  className="w-full bg-emerald-500 text-slate-950 py-4 rounded-2xl font-black text-lg hover:bg-emerald-400 hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all transform hover:-translate-y-1 active:scale-95 shadow-xl"
+                >
+                  Confirm Command Entry
+                </button>
+              </form>
+
+              <p className="mt-8 text-center text-xs text-slate-600 font-medium">
+                Lost access to your device? <button className="text-emerald-500 font-bold hover:underline">Contact System Admin</button>
+              </p>
+            </div>
+          )}
+
+          <div className="pt-10 mt-10 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-center gap-4">
              <span className="text-slate-500 text-sm font-medium">New to DesignPro?</span>
              <Link to="/onboarding" className="text-emerald-400 hover:text-emerald-300 font-bold text-sm tracking-tight border-b-2 border-emerald-500/20 hover:border-emerald-500 pb-0.5 transition-all">
                Get Started

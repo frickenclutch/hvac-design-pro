@@ -1,9 +1,32 @@
 import React from 'react';
 import { ArrowLeft, Save, Undo2, Redo2, Download, Zap } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
+import { useCadStore } from '../store/useCadStore';
+import { useAuthStore } from '../../auth/store/useAuthStore';
+import { generatePdfPlot } from '../utils/pdfGenerator';
 
 export default function TopNavigationBar() {
   const { id } = useParams();
+  const { canvas } = useCadStore();
+  const { user, organisation } = useAuthStore();
+
+  const handleExport = () => {
+    if (!canvas) {
+      console.warn('Canvas not found for PDF export.');
+      return;
+    }
+
+    const metadata = {
+      projectName: 'BUILDING_SCHEMA_1029_A',
+      engineerName: user ? `${user.firstName} ${user.lastName}` : 'UNAUTHORIZED_PRO',
+      organisationName: organisation?.name || 'GENERIC_FIRM',
+      date: new Date().toLocaleDateString(),
+      region: organisation?.regionCode || 'NA_ASHRAE',
+      projectId: id || '1029-A',
+    };
+
+    generatePdfPlot(canvas, metadata);
+  };
 
   return (
     <div className="absolute top-0 left-0 right-0 h-16 z-20 pointer-events-none">
@@ -34,7 +57,10 @@ export default function TopNavigationBar() {
 
         {/* Right Side */}
         <div className="flex items-center gap-3">
-           <button className="flex items-center gap-2 bg-slate-900/80 text-slate-300 px-4 py-2.5 rounded-xl text-sm font-semibold hover:text-white hover:bg-slate-800 transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] border border-slate-700/50 backdrop-blur-md">
+           <button 
+             onClick={handleExport}
+             className="flex items-center gap-2 bg-slate-900/80 text-slate-300 px-4 py-2.5 rounded-xl text-sm font-semibold hover:text-white hover:bg-slate-800 transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] border border-slate-700/50 backdrop-blur-md"
+           >
              <Download className="w-4 h-4" /> Export PDF
            </button>
            <button className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-500/20 hover:shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] border border-emerald-500/30 backdrop-blur-md">

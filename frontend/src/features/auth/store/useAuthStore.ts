@@ -43,6 +43,7 @@ interface AuthState {
   // Actions
   login: (email: string) => void;
   logout: () => void;
+  setAuthenticated: (isAuthenticated: boolean) => void;
   setOnboarding: (isOnboarding: boolean) => void;
   completeOnboarding: (user: User, org: Organisation) => void;
 }
@@ -70,12 +71,15 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   logout: () => set({ user: null, organisation: null, isAuthenticated: false, isOnboarding: false }),
 
+  setAuthenticated: (isAuthenticated) => set({ isAuthenticated }),
+
   setOnboarding: (isOnboarding) => set({ isOnboarding }),
 
   completeOnboarding: async (user, org) => {
     try {
       // 🚀 Trigger real backend onboarding & email
-      await fetch('http://localhost:8081/api/auth/onboard', {
+      const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8081';
+      await fetch(`${baseUrl}/api/auth/onboard`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -89,8 +93,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ 
         user, 
         organisation: org, 
-        isAuthenticated: true, 
-        isOnboarding: false 
+        isAuthenticated: false, 
+        isOnboarding: true 
       });
     } catch (err) {
       console.error('Onboarding API failed, but continuing with local state for now:', err);
@@ -98,8 +102,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ 
         user, 
         organisation: org, 
-        isAuthenticated: true, 
-        isOnboarding: false 
+        isAuthenticated: false, 
+        isOnboarding: true 
       });
     }
   },

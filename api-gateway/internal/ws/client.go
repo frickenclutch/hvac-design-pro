@@ -1,1 +1,3 @@
-# client.go
+package ws
+
+// Client placeholder

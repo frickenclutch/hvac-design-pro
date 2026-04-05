@@ -20,6 +20,6 @@ WORKDIR /root/
 # Copy the binary from builder
 COPY --from=builder /app/server .
 
-EXPOSE 8080
+EXPOSE 8081
 
 CMD ["./server"]

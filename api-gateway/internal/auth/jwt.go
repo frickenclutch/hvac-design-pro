@@ -1,1 +1,3 @@
-# jwt.go
+package auth
+
+// JWT placeholder

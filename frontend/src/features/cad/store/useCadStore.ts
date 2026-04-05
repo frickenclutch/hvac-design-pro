@@ -45,6 +45,10 @@ interface CadState {
   panOffset: { x: number; y: number };
   setPanOffset: (offset: { x: number; y: number }) => void;
 
+  // ── Canvas instance (for exports) ──────────────────────────────────────────
+  canvas: fabric.Canvas | null;
+  setCanvas: (canvas: fabric.Canvas | null) => void;
+
   // ── Canvas selection ──────────────────────────────────────────────────────
   selectedObject: fabric.Object | null;
   setSelectedObject: (obj: fabric.Object | null) => void;
@@ -81,6 +85,10 @@ export const useCadStore = create<CadState>((set) => ({
 
   panOffset: { x: 0, y: 0 },
   setPanOffset: (offset) => set({ panOffset: offset }),
+
+  // Canvas instance (for exports)
+  canvas: null,
+  setCanvas: (canvas) => set({ canvas }),
 
   // Canvas selection
   selectedObject: null,

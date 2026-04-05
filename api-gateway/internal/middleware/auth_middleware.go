@@ -1,1 +1,3 @@
-# auth_middleware.go
+package middleware
+
+// Auth middleware placeholder

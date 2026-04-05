@@ -23,7 +23,7 @@ export default function CadCanvas() {
     startY: 0,
   });
 
-  const { activeTool, setZoom, setPanOffset, setSelectedObject } = useCadStore();
+  const { activeTool, setZoom, setPanOffset, setSelectedObject, setCanvas } = useCadStore();
 
   // ── Main canvas setup (runs once) ─────────────────────────────────────────
   useEffect(() => {
@@ -42,6 +42,7 @@ export default function CadCanvas() {
     });
 
     fabricRef.current = canvas;
+    setCanvas(canvas);
 
     // ── Dot grid ──────────────────────────────────────────────────────────
     const renderGrid = () => {
@@ -209,9 +210,10 @@ export default function CadCanvas() {
 
       // ─ Select mode — detect wall clicks ─────────────────────────────────
       if (tool === 'select') {
-        if (opt.target && opt.target.name?.startsWith('wall-')) {
-          setSelectedWallId(opt.target.name);
-        } else if (!opt.target) {
+        const target = opt.target as any;
+        if (target && target.name?.startsWith('wall-')) {
+          setSelectedWallId(target.name);
+        } else if (!target) {
           setSelectedWallId(null);
         }
       }
@@ -267,14 +269,14 @@ export default function CadCanvas() {
 
     // ── Selection syncing ────────────────────────────────────────────────
     canvas.on('selection:created', (e) => {
-      const obj = e.selected?.[0] ?? null;
+      const obj = (e.selected?.[0] as any) ?? null;
       setSelectedObject(obj);
       if (obj?.name?.startsWith('wall-')) {
         useCadStore.getState().setSelectedWallId(obj.name);
       }
     });
     canvas.on('selection:updated', (e) => {
-      const obj = e.selected?.[0] ?? null;
+      const obj = (e.selected?.[0] as any) ?? null;
       setSelectedObject(obj);
       if (obj?.name?.startsWith('wall-')) {
         useCadStore.getState().setSelectedWallId(obj.name);
