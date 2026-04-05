@@ -43,13 +43,41 @@ body {
   background-image: linear-gradient(to right, var(--color-hvac-400), #34d399);
 }
 
-/* Custom Scrollbar */
+/* ── Theme Variants ──────────────────────────────────────────────────────── */
+:root {
+  --accent-rgb: 16 185 129;
+  --density-scale: 1;
+}
+
+.theme-light {
+  --color-slate-950: #f8fafc;
+  --color-slate-900: #f1f5f9;
+}
+
+.theme-light body,
+.theme-light .glass-panel {
+  color: #0f172a;
+}
+
+/* ── Reduced Motion ─────────────────────────────────────────────────────── */
+.reduce-motion,
+.reduce-motion * {
+  animation-duration: 0.01ms !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* ── Density Scaling ────────────────────────────────────────────────────── */
+.glass-panel {
+  padding: calc(var(--density-scale) * 1rem);
+}
+
+/* ── Custom Scrollbar ───────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background-color: var(--color-slate-900);
+  background-color: transparent;
 }
 ::-webkit-scrollbar-thumb {
   background-color: #334155;
@@ -57,4 +85,9 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background-color: #475569;
+}
+
+/* ── PWA Install Banner ─────────────────────────────────────────────────── */
+@media (display-mode: standalone) {
+  .pwa-install-prompt { display: none; }
 }

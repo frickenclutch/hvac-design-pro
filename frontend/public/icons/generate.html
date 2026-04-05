@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html><body>
+<p>Open console, right-click each canvas → Save Image As icon-192.png / icon-512.png / icon-maskable-512.png</p>
+<canvas id="c192" width="192" height="192"></canvas>
+<canvas id="c512" width="512" height="512"></canvas>
+<canvas id="cm512" width="512" height="512"></canvas>
+<script>
+function draw(canvas, size, maskable) {
+  const ctx = canvas.getContext('2d');
+  // Background
+  ctx.fillStyle = '#020617';
+  if (maskable) {
+    ctx.fillRect(0, 0, size, size);
+  } else {
+    ctx.beginPath();
+    ctx.roundRect(0, 0, size, size, size * 0.2);
+    ctx.fill();
+  }
+  // Compass icon
+  const s = size * 0.45;
+  const cx = size / 2, cy = size / 2;
+  ctx.strokeStyle = '#10b981';
+  ctx.lineWidth = s * 0.08;
+  ctx.beginPath();
+  ctx.arc(cx, cy, s / 2, 0, Math.PI * 2);
+  ctx.stroke();
+  // Needle
+  ctx.fillStyle = '#10b981';
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - s * 0.38);
+  ctx.lineTo(cx - s * 0.08, cy);
+  ctx.lineTo(cx + s * 0.08, cy);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#64748b';
+  ctx.beginPath();
+  ctx.moveTo(cx, cy + s * 0.38);
+  ctx.lineTo(cx - s * 0.08, cy);
+  ctx.lineTo(cx + s * 0.08, cy);
+  ctx.closePath();
+  ctx.fill();
+}
+draw(document.getElementById('c192'), 192, false);
+draw(document.getElementById('c512'), 512, false);
+draw(document.getElementById('cm512'), 512, true);
+</script>
+</body></html>
