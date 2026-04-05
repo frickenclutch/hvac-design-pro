@@ -20,22 +20,20 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
   
   if (!isOpen) return null;
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     setLoading(true);
-    try {
-      const res = await fetch('http://localhost:8081/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, type, address, city })
-      });
-      const newProject = await res.json();
-      onSuccess(newProject);
-      onClose();
-    } catch (err) {
-      console.error('Failed to create project', err);
-    } finally {
-      setLoading(false);
-    }
+    const newProject = {
+      id: `proj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      name,
+      type,
+      address,
+      city,
+      date: new Date().toISOString(),
+      status: 'In Progress',
+    };
+    onSuccess(newProject);
+    onClose();
+    setLoading(false);
   };
 
   return (
