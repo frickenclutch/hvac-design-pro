@@ -1,1 +1,3 @@
-# rooms.go
+package handlers
+
+// Rooms handler placeholder

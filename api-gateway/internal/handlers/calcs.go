@@ -1,1 +1,3 @@
-# calcs.go
+package handlers
+
+// Calcs handler placeholder

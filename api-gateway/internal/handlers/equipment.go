@@ -1,1 +1,3 @@
-# equipment.go
+package handlers
+
+// Equipment handler placeholder

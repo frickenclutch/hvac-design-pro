@@ -1,12 +1,46 @@
-import { Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, MapPin, Calendar, ArrowRight } from 'lucide-react';
+import NewProjectModal from '../features/projects/components/NewProjectModal';
 
-const projects = [
-  { id: 'proj-1', name: 'The Walker Residence', address: '123 Fake Street, IL', date: 'Oct 14, 2026', status: 'In Progress', type: 'Residential' },
-  { id: 'proj-2', name: 'Smith Commercial', address: '456 Tech Blvd, TX', date: 'Oct 12, 2026', status: 'Completed', type: 'Commercial' },
-];
+interface Project {
+  id: string;
+  name: string;
+  address: string;
+  city: string;
+  date: string;
+  status: string;
+  type: string;
+}
 
 export default function Dashboard() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    fetchProjects();
+  }, []);
+
+  const fetchProjects = async () => {
+    try {
+      const res = await fetch('http://localhost:8081/api/projects');
+      const data = await res.json();
+      setProjects(data);
+    } catch (err) {
+      console.error('Failed to fetch projects', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleNewProjectSuccess = (newProject: Project) => {
+    setProjects(prev => [newProject, ...prev]);
+    // Navigate to CAD workspace for the new project
+    navigate(`/project/${newProject.id}/cad`);
+  };
+
   return (
     <div className="p-8 h-full flex flex-col pt-12">
       <header className="flex justify-between items-center mb-10">
@@ -14,11 +48,20 @@ export default function Dashboard() {
           <h2 className="text-3xl font-bold text-white mb-2">Project Workspace</h2>
           <p className="text-slate-400">Manage your active load calculations and duct designs.</p>
         </div>
-        <button className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold py-2.5 px-6 rounded-full shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all transform hover:-translate-y-1">
+        <button 
+          onClick={() => setIsModalOpen(true)}
+          className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold py-2.5 px-6 rounded-full shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all transform hover:-translate-y-1"
+        >
           <Plus className="w-5 h-5" />
           <span className="hidden sm:block">New Project</span>
         </button>
       </header>
+
+      <NewProjectModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        onSuccess={handleNewProjectSuccess}
+      />
 
       <div className="flex gap-4 mb-8">
         <div className="relative flex-1 max-w-md">
@@ -31,42 +74,48 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 lg:gap-8 gap-6 overflow-y-auto pb-20 pr-4">
-        {projects.map(proj => (
-          <div key={proj.id} className="glass-panel p-6 rounded-3xl hover:border-emerald-500/30 transition-all duration-300 group relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-4">
-              <span className={`text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full ${proj.status === 'Completed' ? 'bg-slate-800 text-slate-300' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}>
-                {proj.status}
-              </span>
-            </div>
-            
-            <h3 className="text-xl font-bold text-white mb-1 group-hover:text-emerald-300 transition-colors">{proj.name}</h3>
-            <div className="flex items-center gap-2 text-slate-400 text-sm mb-6">
-              <span className="bg-slate-800 px-2 py-0.5 rounded-md text-slate-300 text-xs">{proj.type}</span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 mb-8">
-              <div className="flex items-center gap-2 text-slate-400 text-sm">
-                <MapPin className="w-4 h-4 text-slate-500" />
-                <span className="truncate">{proj.address}</span>
+      {loading ? (
+        <div className="flex-1 flex items-center justify-center">
+           <div className="animate-spin w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full" />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 lg:gap-8 gap-6 overflow-y-auto pb-20 pr-4">
+          {projects.map(proj => (
+            <div key={proj.id} className="glass-panel p-6 rounded-3xl hover:border-emerald-500/30 transition-all duration-300 group relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-4">
+                <span className={`text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full ${proj.status === 'Completed' ? 'bg-slate-800 text-slate-300' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}>
+                  {proj.status}
+                </span>
               </div>
-              <div className="flex items-center gap-2 text-slate-400 text-sm">
-                <Calendar className="w-4 h-4 text-slate-500" />
-                <span>{proj.date}</span>
+              
+              <h3 className="text-xl font-bold text-white mb-1 group-hover:text-emerald-300 transition-colors">{proj.name}</h3>
+              <div className="flex items-center gap-2 text-slate-400 text-sm mb-6">
+                <span className="bg-slate-800 px-2 py-0.5 rounded-md text-slate-300 text-xs">{proj.type}</span>
               </div>
-            </div>
 
-            <div className="flex justify-end border-t border-slate-800/50 pt-4 mt-auto">
-              <Link to={`/project/${proj.id}/cad`} className="flex items-center gap-2 text-emerald-400 hover:text-emerald-300 font-semibold group-hover:gap-3 transition-all">
-                Open Workspace <ArrowRight className="w-4 h-4" />
-              </Link>
+              <div className="grid grid-cols-2 gap-4 mb-8">
+                <div className="flex items-center gap-2 text-slate-400 text-sm">
+                  <MapPin className="w-4 h-4 text-slate-500" />
+                  <span className="truncate">{proj.address}{proj.city ? `, ${proj.city}` : ''}</span>
+                </div>
+                <div className="flex items-center gap-2 text-slate-400 text-sm">
+                  <Calendar className="w-4 h-4 text-slate-500" />
+                  <span>{new Date(proj.date).toLocaleDateString()}</span>
+                </div>
+              </div>
+
+              <div className="flex justify-end border-t border-slate-800/50 pt-4 mt-auto">
+                <Link to={`/project/${proj.id}/cad`} className="flex items-center gap-2 text-emerald-400 hover:text-emerald-300 font-semibold group-hover:gap-3 transition-all">
+                  Open Workspace <ArrowRight className="w-4 h-4" />
+                </Link>
+              </div>
+              
+              {/* Ambient Background Glow on Hover */}
+              <div className="absolute -inset-1 bg-gradient-to-r from-emerald-500/0 via-emerald-500/0 to-emerald-500/0 group-hover:via-emerald-500/5 blur-2xl transition-all duration-700 pointer-events-none rounded-3xl" />
             </div>
-            
-            {/* Ambient Background Glow on Hover */}
-            <div className="absolute -inset-1 bg-gradient-to-r from-emerald-500/0 via-emerald-500/0 to-emerald-500/0 group-hover:via-emerald-500/5 blur-2xl transition-all duration-700 pointer-events-none rounded-3xl" />
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
