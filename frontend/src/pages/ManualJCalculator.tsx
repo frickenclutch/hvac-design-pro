@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   Thermometer, Wind, Sun, Droplets, ArrowRight, RotateCcw,
-  ChevronDown, ChevronUp, Home, Building2, Info
+  ChevronDown, ChevronUp, Home, Building2, Info,
+  FileDown, Printer
 } from 'lucide-react';
+import jsPDF from 'jspdf';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface RoomInput {
@@ -195,6 +197,191 @@ export default function ManualJCalculator() {
 
   const totalHeating = results?.reduce((sum, r) => sum + r.heatingBtu, 0) ?? 0;
   const totalCooling = results?.reduce((sum, r) => sum + r.coolingBtuTotal, 0) ?? 0;
+  const resultsRef = useRef<HTMLDivElement>(null);
+
+  // ── Print ───────────────────────────────────────────────────────────────
+  const handlePrint = () => {
+    if (!resultsRef.current) return;
+    const win = window.open('', '_blank');
+    if (!win) return;
+    win.document.write(`<!DOCTYPE html><html><head><title>Manual J Report - HVAC DesignPro</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; color: #0f172a; padding: 40px; font-size: 13px; }
+        h3 { font-size: 18px; margin-bottom: 12px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+        th, td { padding: 8px 12px; border-bottom: 1px solid #e2e8f0; text-align: right; font-size: 12px; }
+        th { text-align: right; font-weight: 600; color: #64748b; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
+        th:first-child, td:first-child { text-align: left; }
+        tr:last-child td { font-weight: 700; border-top: 2px solid #0f172a; }
+        .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+        .summary-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; }
+        .summary-label { font-size: 11px; color: #64748b; font-weight: 600; }
+        .summary-value { font-size: 22px; font-weight: 800; margin-top: 4px; }
+        .summary-sub { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+        .header { text-align: center; margin-bottom: 32px; border-bottom: 2px solid #0f172a; padding-bottom: 16px; }
+        .header h1 { font-size: 24px; font-weight: 800; }
+        .header p { color: #64748b; font-size: 12px; margin-top: 4px; }
+        .timestamp { font-size: 10px; color: #94a3b8; text-align: right; margin-top: 4px; }
+        @media print { body { padding: 20px; } }
+      </style>
+    </head><body>
+      <div class="header">
+        <h1>HVAC DesignPro — Manual J Load Report</h1>
+        <p>ACCA Manual J Residential Heating & Cooling Load Calculation</p>
+      </div>
+      <div class="timestamp">Generated: ${new Date().toLocaleString()}</div>
+      <div class="summary-grid">
+        <div class="summary-card">
+          <div class="summary-label">Total Heating Load</div>
+          <div class="summary-value">${totalHeating.toLocaleString()} BTU/hr</div>
+          <div class="summary-sub">${tonnageFromBtu(totalHeating)} tons</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">Total Cooling Load</div>
+          <div class="summary-value">${totalCooling.toLocaleString()} BTU/hr</div>
+          <div class="summary-sub">${tonnageFromBtu(totalCooling)} tons</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">Recommended System</div>
+          <div class="summary-value">${Math.ceil(totalCooling / 12000 * 2) / 2} Ton</div>
+          <div class="summary-sub">${rooms.length} zone${rooms.length > 1 ? 's' : ''}</div>
+        </div>
+      </div>
+      <h3>Design Conditions</h3>
+      <table>
+        <tr><td>Outdoor Heating</td><td>${conditions.outdoorHeatingTemp}°F</td><td>Indoor Heating</td><td>${conditions.indoorHeatingTemp}°F</td></tr>
+        <tr><td>Outdoor Cooling</td><td>${conditions.outdoorCoolingTemp}°F</td><td>Indoor Cooling</td><td>${conditions.indoorCoolingTemp}°F</td></tr>
+        <tr><td>Building Type</td><td>${buildingType}</td><td>Latitude</td><td>${conditions.latitude}°</td></tr>
+      </table>
+      <br/>
+      <h3>Room-by-Room Results</h3>
+      <table>
+        <thead><tr><th style="text-align:left">Room</th><th>Heating (BTU/hr)</th><th>Cooling Sensible</th><th>Cooling Latent</th><th>Cooling Total</th></tr></thead>
+        <tbody>
+          ${results!.map(r => `<tr><td style="font-weight:600">${r.roomName}</td><td>${r.heatingBtu.toLocaleString()}</td><td>${r.coolingBtuSensible.toLocaleString()}</td><td>${r.coolingBtuLatent.toLocaleString()}</td><td style="font-weight:700">${r.coolingBtuTotal.toLocaleString()}</td></tr>`).join('')}
+          <tr><td>TOTAL</td><td>${totalHeating.toLocaleString()}</td><td>${results!.reduce((s,r)=>s+r.coolingBtuSensible,0).toLocaleString()}</td><td>${results!.reduce((s,r)=>s+r.coolingBtuLatent,0).toLocaleString()}</td><td>${totalCooling.toLocaleString()}</td></tr>
+        </tbody>
+      </table>
+    </body></html>`);
+    win.document.close();
+    win.focus();
+    win.print();
+  };
+
+  // ── Export PDF ──────────────────────────────────────────────────────────
+  const handleExportPdf = () => {
+    if (!results) return;
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
+    const pw = doc.internal.pageSize.getWidth();
+    const margin = 50;
+    let y = 50;
+
+    // Title block
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(20);
+    doc.text('HVAC DesignPro', pw / 2, y, { align: 'center' });
+    y += 18;
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100);
+    doc.text('Manual J Load Calculation Report', pw / 2, y, { align: 'center' });
+    y += 12;
+    doc.setFontSize(8);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, pw / 2, y, { align: 'center' });
+    y += 6;
+    doc.setDrawColor(0); doc.setLineWidth(1.5);
+    doc.line(margin, y, pw - margin, y);
+    y += 24;
+
+    // Summary
+    doc.setTextColor(0);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.text('Summary', margin, y); y += 16;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    const summaryData = [
+      ['Total Heating Load', `${totalHeating.toLocaleString()} BTU/hr`, `${tonnageFromBtu(totalHeating)} tons`],
+      ['Total Cooling Load', `${totalCooling.toLocaleString()} BTU/hr`, `${tonnageFromBtu(totalCooling)} tons`],
+      ['Recommended System', `${Math.ceil(totalCooling / 12000 * 2) / 2} Ton`, `${rooms.length} zone${rooms.length > 1 ? 's' : ''}`],
+    ];
+    summaryData.forEach(([label, val, sub]) => {
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(100);
+      doc.text(label, margin, y);
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(0);
+      doc.text(val, margin + 180, y);
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(130);
+      doc.text(sub, margin + 360, y);
+      y += 16;
+    });
+    y += 10;
+
+    // Design Conditions
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(0);
+    doc.text('Design Conditions', margin, y); y += 16;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(60);
+    const condData = [
+      [`Outdoor Heating: ${conditions.outdoorHeatingTemp}°F`, `Indoor Heating: ${conditions.indoorHeatingTemp}°F`],
+      [`Outdoor Cooling: ${conditions.outdoorCoolingTemp}°F`, `Indoor Cooling: ${conditions.indoorCoolingTemp}°F`],
+      [`Building Type: ${buildingType}`, `Latitude: ${conditions.latitude}°`],
+    ];
+    condData.forEach(([left, right]) => {
+      doc.text(left, margin, y);
+      doc.text(right, margin + 220, y);
+      y += 14;
+    });
+    y += 10;
+
+    // Room-by-Room Table
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(0);
+    doc.text('Room-by-Room Results', margin, y); y += 18;
+
+    // Table header
+    const cols = [margin, margin + 140, margin + 260, margin + 360, margin + 440];
+    const headers = ['Room', 'Heating (BTU/hr)', 'Cooling Sensible', 'Cooling Latent', 'Cooling Total'];
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100);
+    headers.forEach((h, i) => {
+      doc.text(h, cols[i], y, { align: i === 0 ? 'left' : 'right' });
+    });
+    y += 4;
+    doc.setDrawColor(200); doc.setLineWidth(0.5);
+    doc.line(margin, y, pw - margin, y);
+    y += 12;
+
+    // Table rows
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(30);
+    results.forEach((r) => {
+      if (y > 700) { doc.addPage(); y = 50; }
+      doc.setFont('helvetica', 'bold');
+      doc.text(r.roomName, cols[0], y);
+      doc.setFont('helvetica', 'normal');
+      doc.text(r.heatingBtu.toLocaleString(), cols[1], y, { align: 'right' });
+      doc.text(r.coolingBtuSensible.toLocaleString(), cols[2], y, { align: 'right' });
+      doc.text(r.coolingBtuLatent.toLocaleString(), cols[3], y, { align: 'right' });
+      doc.setFont('helvetica', 'bold');
+      doc.text(r.coolingBtuTotal.toLocaleString(), cols[4], y, { align: 'right' });
+      y += 16;
+    });
+
+    // Totals row
+    doc.setDrawColor(0); doc.setLineWidth(1);
+    doc.line(margin, y - 4, pw - margin, y - 4);
+    y += 8;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(0);
+    doc.text('TOTAL', cols[0], y);
+    doc.text(totalHeating.toLocaleString(), cols[1], y, { align: 'right' });
+    doc.text(results.reduce((s,r)=>s+r.coolingBtuSensible,0).toLocaleString(), cols[2], y, { align: 'right' });
+    doc.text(results.reduce((s,r)=>s+r.coolingBtuLatent,0).toLocaleString(), cols[3], y, { align: 'right' });
+    doc.text(totalCooling.toLocaleString(), cols[4], y, { align: 'right' });
+
+    // Footer
+    y = doc.internal.pageSize.getHeight() - 30;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(150);
+    doc.text('HVAC DesignPro — Simplified ACCA Manual J — For reference only, not a substitute for PE-stamped calculations.', pw / 2, y, { align: 'center' });
+
+    doc.save(`ManualJ_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
+  };
 
   return (
     <div className="h-full overflow-y-auto">
@@ -317,7 +504,7 @@ export default function ManualJCalculator() {
 
         {/* Results */}
         {results && (
-          <section className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <section ref={resultsRef} className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {/* Summary Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <SummaryCard
@@ -337,10 +524,26 @@ export default function ManualJCalculator() {
               <SummaryCard
                 label="Recommended System"
                 value={`${Math.ceil(totalCooling / 12000 * 2) / 2} Ton`}
-                sub={`${rooms.length} zones`}
+                sub={`${rooms.length} zone${rooms.length > 1 ? 's' : ''}`}
                 color="emerald"
                 icon={<Wind className="w-6 h-6" />}
               />
+            </div>
+
+            {/* Export / Print Buttons */}
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={handleExportPdf}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-400 font-semibold text-sm hover:bg-sky-500/20 hover:border-sky-500/50 transition-all"
+              >
+                <FileDown className="w-4 h-4" /> Export PDF
+              </button>
+              <button
+                onClick={handlePrint}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-slate-300 font-semibold text-sm hover:bg-slate-700/50 hover:text-white transition-all"
+              >
+                <Printer className="w-4 h-4" /> Print
+              </button>
             </div>
 
             {/* Room Breakdown Table */}
