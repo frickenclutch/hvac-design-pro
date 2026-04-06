@@ -2,7 +2,7 @@ import { useState, useRef } from 'react';
 import {
   Thermometer, Wind, Sun, Droplets, ArrowRight, RotateCcw,
   ChevronDown, ChevronUp, Home, Building2, Info,
-  FileDown, Printer, Gauge, Shield
+  FileDown, Printer, Gauge, Shield, MapPin
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import {
@@ -10,6 +10,8 @@ import {
   type GlassType, type DuctLocation, type WallGradeType, type Construction, type DailyRange,
   calculateWholeHouse, tonnageFromBtu, createDefaultRoom, createDefaultConditions, GLASS_PRESETS,
 } from '../engines/manualJ';
+import RetailerFinderPanel from '../features/retailer/components/RetailerFinderPanel';
+import { useRetailerStore } from '../features/retailer/store/useRetailerStore';
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function ManualJCalculator() {
@@ -439,6 +441,13 @@ export default function ManualJCalculator() {
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-slate-300 font-semibold text-sm hover:bg-slate-700/50 hover:text-white transition-all">
                 <Printer className="w-4 h-4" /> Print
               </button>
+              <button onClick={() => {
+                  useRetailerStore.getState().open();
+                  if (wholeHouse) useRetailerStore.getState().generateEstimate(wholeHouse, conditions);
+                }}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 font-semibold text-sm hover:bg-amber-500/20 hover:border-amber-500/50 transition-all">
+                <MapPin className="w-4 h-4" /> Find Retailer & Estimate
+              </button>
             </div>
 
             {/* Room Breakdown Table */}
@@ -482,6 +491,11 @@ export default function ManualJCalculator() {
               </div>
             </div>
           </section>
+        )}
+
+        {/* Retailer Finder Slide-Over */}
+        {wholeHouse && (
+          <RetailerFinderPanel wholeHouse={wholeHouse} conditions={conditions} />
         )}
       </div>
     </div>
