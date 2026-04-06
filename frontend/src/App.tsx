@@ -37,7 +37,7 @@ function AppLayout() {
   const showSidebar = isAuthenticated && !isCadRoute;
 
   // Public pages that need full-page scroll (not locked in app shell)
-  const isPublicScrollPage = ['/', '/terms', '/login', '/onboarding'].includes(location.pathname);
+  const isPublicScrollPage = ['/', '/terms', '/login', '/onboarding', '/landing'].includes(location.pathname);
 
   return (
     <div className="flex flex-col md:flex-row bg-slate-950 text-slate-100 font-sans min-h-screen md:h-screen md:overflow-hidden">
@@ -145,21 +145,22 @@ function AppLayout() {
       {/* Main Content Area */}
       <main id="main-content" role="main" className={`flex-1 relative overflow-y-auto ${isPublicScrollPage ? '' : 'md:overflow-hidden'} bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black`}>
         <Routes>
-          {/* Public Routes */}
-          <Route path="/" element={!isAuthenticated ? <LandingPage /> : <Navigate to="/dashboard" />} />
+          {/* Landing & info pages */}
+          <Route path="/" element={<Navigate to="/dashboard" />} />
+          <Route path="/landing" element={<LandingPage />} />
           <Route path="/onboarding" element={<OnboardingPage />} />
-          <Route path="/login" element={<AuthPage />} />
+          <Route path="/login" element={<Navigate to="/dashboard" />} />
           <Route path="/terms" element={<TermsPage />} />
 
-          {/* Protected Routes */}
-          <Route path="/dashboard" element={isAuthenticated ? <Dashboard /> : <Navigate to="/login" />} />
-          <Route path="/calculator" element={isAuthenticated ? <ManualJCalculator /> : <Navigate to="/login" />} />
-          <Route path="/settings" element={isAuthenticated ? <SettingsPage /> : <Navigate to="/login" />} />
-          <Route path="/cad" element={isAuthenticated ? <CadWorkspace /> : <Navigate to="/login" />} />
-          <Route path="/project/:id/cad" element={isAuthenticated ? <CadWorkspace /> : <Navigate to="/login" />} />
+          {/* App Routes — open access (auth gate removed temporarily) */}
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/calculator" element={<ManualJCalculator />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/cad" element={<CadWorkspace />} />
+          <Route path="/project/:id/cad" element={<CadWorkspace />} />
 
           {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" />} />
+          <Route path="*" element={<Navigate to="/dashboard" />} />
         </Routes>
       </main>
     </div>
