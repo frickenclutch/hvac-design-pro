@@ -1,0 +1,20 @@
+{
+  "name": "hvac-api",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate": "wrangler d1 execute hvac-design-pro --file=./migrations/0001_init.sql",
+    "db:migrate:dev": "wrangler d1 execute hvac-design-pro-dev --file=./migrations/0001_init.sql --local"
+  },
+  "dependencies": {
+    "hono": "^4.7.0",
+    "itty-router": "^5.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241230.0",
+    "typescript": "^5.7.0",
+    "wrangler": "^3.100.0"
+  }
+}

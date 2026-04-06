@@ -96,3 +96,68 @@ body {
 @media (display-mode: standalone) {
   .pwa-install-prompt { display: none; }
 }
+
+/* ── Accessibility Layer ── */
+
+/* Screen reader only utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Reduced Motion */
+.a11y-reduced-motion,
+.a11y-reduced-motion * {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* High Contrast */
+.a11y-high-contrast {
+  --contrast-boost: 1;
+}
+
+.a11y-high-contrast .text-slate-400 {
+  color: rgb(203 213 225) !important; /* slate-300 */
+}
+
+.a11y-high-contrast .text-slate-500 {
+  color: rgb(203 213 225) !important;
+}
+
+.a11y-high-contrast .text-slate-600 {
+  color: rgb(148 163 184) !important; /* slate-400 */
+}
+
+.a11y-high-contrast .border-slate-800\/60 {
+  border-color: rgb(100 116 139) !important; /* slate-500 */
+}
+
+.a11y-high-contrast .bg-slate-800\/50 {
+  background-color: rgb(51 65 85 / 0.7) !important;
+}
+
+/* Focus Visible — enhanced outlines */
+.a11y-focus-visible *:focus-visible {
+  outline: 2px solid rgb(52 211 153) !important;
+  outline-offset: 2px !important;
+  border-radius: 4px;
+}
+
+/* Font Size Scaling */
+.a11y-font-large {
+  font-size: 112.5%; /* 18px base instead of 16px */
+}
+
+.a11y-font-xlarge {
+  font-size: 125%; /* 20px base instead of 16px */
+}

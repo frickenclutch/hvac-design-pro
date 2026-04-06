@@ -1,0 +1,39 @@
+import { Hono } from 'hono';
+import { cors } from 'hono/cors';
+import { authRoutes } from './routes/auth';
+import { projectRoutes } from './routes/projects';
+import { calcRoutes } from './routes/calculations';
+import { uploadRoutes } from './routes/uploads';
+import { cadRoutes } from './routes/cad';
+import { authMiddleware } from './middleware/auth';
+
+export interface Env {
+  DB: D1Database;
+  STORAGE: R2Bucket;
+  ENVIRONMENT: string;
+}
+
+const app = new Hono<{ Bindings: Env }>();
+
+// CORS for frontend
+app.use('*', cors({
+  origin: ['https://hvac-design-pro.pages.dev', 'http://localhost:5173'],
+  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+}));
+
+// Health check
+app.get('/health', (c) => c.json({ status: 'ok', env: c.env.ENVIRONMENT }));
+
+// Public auth routes
+app.route('/api/auth', authRoutes);
+
+// Protected routes
+app.use('/api/*', authMiddleware);
+app.route('/api/projects', projectRoutes);
+app.route('/api/calculations', calcRoutes);
+app.route('/api/uploads', uploadRoutes);
+app.route('/api/cad', cadRoutes);
+
+export default app;

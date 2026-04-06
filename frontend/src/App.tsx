@@ -12,12 +12,17 @@ import TermsPage from './pages/TermsPage';
 import { useAuthStore } from './features/auth/store/useAuthStore';
 import { usePreferencesStore } from './stores/usePreferencesStore';
 import SpotlightSearch, { SpotlightTrigger } from './features/spotlight/SpotlightSearch';
+import SkipLinks from './components/accessibility/SkipLinks';
+import A11yProvider from './components/accessibility/A11yProvider';
 
 function App() {
   return (
-    <BrowserRouter>
-      <AppLayout />
-    </BrowserRouter>
+    <A11yProvider>
+      <BrowserRouter>
+        <SkipLinks />
+        <AppLayout />
+      </BrowserRouter>
+    </A11yProvider>
   );
 }
 
@@ -80,7 +85,7 @@ function AppLayout() {
 
       {/* ── Desktop Sidebar ── */}
       {showSidebar && (
-        <nav className={`hidden md:flex ${sidebarCollapsed ? 'w-16' : 'w-56'} glass-panel border-r border-slate-800/60 flex-col justify-between py-4 transition-all duration-300 z-50 flex-shrink-0`}>
+        <nav aria-label="Main navigation" className={`hidden md:flex ${sidebarCollapsed ? 'w-16' : 'w-56'} glass-panel border-r border-slate-800/60 flex-col justify-between py-4 transition-all duration-300 z-50 flex-shrink-0`}>
           <div className="px-2.5">
             <button
               onClick={() => updatePrefs({ sidebarCollapsed: !sidebarCollapsed })}
@@ -138,7 +143,7 @@ function AppLayout() {
       {isAuthenticated && !isCadRoute && <SpotlightTrigger />}
 
       {/* Main Content Area */}
-      <main className={`flex-1 relative overflow-y-auto ${isPublicScrollPage ? '' : 'md:overflow-hidden'} bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black`}>
+      <main id="main-content" role="main" className={`flex-1 relative overflow-y-auto ${isPublicScrollPage ? '' : 'md:overflow-hidden'} bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black`}>
         <Routes>
           {/* Public Routes */}
           <Route path="/" element={!isAuthenticated ? <LandingPage /> : <Navigate to="/dashboard" />} />

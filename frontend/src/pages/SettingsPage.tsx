@@ -1,5 +1,6 @@
 import { usePreferencesStore, type ThemeMode, type UIDensity, type UnitSystem, type AccentColor } from '../stores/usePreferencesStore';
-import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw } from 'lucide-react';
+import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility } from 'lucide-react';
+import A11yPanel from '../components/accessibility/A11yPanel';
 
 export default function SettingsPage() {
   const prefs = usePreferencesStore();
@@ -134,6 +135,11 @@ export default function SettingsPage() {
               checked={prefs.autosave}
               onChange={(v) => prefs.update({ autosave: v })}
             />
+          </Section>
+
+          {/* Accessibility */}
+          <Section icon={<Accessibility className="w-5 h-5 text-cyan-400" />} title="Accessibility">
+            <A11yPanel />
           </Section>
 
           {/* System */}
