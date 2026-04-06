@@ -35,7 +35,7 @@ export default function RetailerFinderPanel({ wholeHouse, conditions }: Props) {
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={store.close} />
 
       {/* Panel */}
-      <div className="relative ml-auto w-full max-w-xl h-full bg-slate-950 border-l border-slate-800/60 overflow-y-auto animate-in slide-in-from-right-5 duration-300">
+      <div className="relative ml-auto w-full max-w-[92vw] sm:max-w-xl h-full bg-slate-950 border-l border-slate-800/60 overflow-y-auto animate-in slide-in-from-right-5 duration-300 -webkit-overflow-scrolling-touch">
         {/* Header */}
         <div className="sticky top-0 z-10 bg-slate-950/95 backdrop-blur-xl border-b border-slate-800/60 p-5 flex items-center justify-between">
           <div className="flex items-center gap-3">

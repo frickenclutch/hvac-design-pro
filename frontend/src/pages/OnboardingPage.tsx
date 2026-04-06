@@ -61,7 +61,7 @@ export default function OnboardingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-8 overflow-hidden relative selection:bg-emerald-500/30 selection:text-emerald-300">
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center px-4 py-6 md:p-8 overflow-y-auto relative selection:bg-emerald-500/30 selection:text-emerald-300">
       {/* Background Decor */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,_var(--color-slate-900),_var(--color-slate-950))] opacity-50" />
       

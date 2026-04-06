@@ -33,7 +33,7 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col md:flex-row overflow-hidden relative selection:bg-emerald-500/30 selection:text-emerald-300">
+    <div className="min-h-screen bg-slate-950 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden relative selection:bg-emerald-500/30 selection:text-emerald-300">
       
       {/* Background Decor */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -42,7 +42,7 @@ export default function AuthPage() {
       </div>
 
       {/* Hero Side - SpaceX aesthetic */}
-      <div className="md:w-1/2 p-12 flex flex-col justify-between relative z-10">
+      <div className="md:w-1/2 p-6 md:p-12 flex flex-col justify-between relative z-10">
         <div className="flex items-center gap-2.5">
           <div className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-900 border border-slate-700 shadow-xl">
              <Compass className="w-6 h-6 text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.5)]" />
@@ -69,7 +69,7 @@ export default function AuthPage() {
       </div>
 
       {/* Sign In Side */}
-      <div className="md:w-1/2 bg-slate-900 md:rounded-l-[4rem] border-l border-slate-800 shadow-2xl p-12 flex flex-col justify-center relative z-10 overflow-hidden group">
+      <div className="md:w-1/2 bg-slate-900 md:rounded-l-[4rem] border-l border-slate-800 shadow-2xl p-6 md:p-12 flex flex-col justify-center relative z-10 overflow-y-auto group">
         <div className="absolute -top-40 -right-40 w-80 h-80 bg-emerald-500/5 blur-[120px] rounded-full pointer-events-none group-focus-within:bg-emerald-500/10 transition-all duration-700" />
         
         <div className="max-w-md mx-auto w-full">

@@ -7,7 +7,7 @@ import {
 
 export default function LandingPage() {
   return (
-    <div className="h-screen overflow-y-auto bg-slate-950 text-slate-100 selection:bg-emerald-500/30 selection:text-emerald-200 scroll-smooth">
+    <div className="min-h-screen overflow-y-auto bg-slate-950 text-slate-100 selection:bg-emerald-500/30 selection:text-emerald-200 scroll-smooth">
 
       {/* Background Decor */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">

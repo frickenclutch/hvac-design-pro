@@ -262,8 +262,8 @@ export default function ManualJCalculator() {
   };
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="max-w-6xl mx-auto p-8 pt-12 pb-24">
+    <div className="h-full overflow-y-auto -webkit-overflow-scrolling-touch">
+      <div className="max-w-6xl mx-auto px-4 py-6 pt-8 pb-24 md:p-8 md:pt-12 md:pb-24">
         {/* Header */}
         <header className="mb-10">
           <div className="flex items-center gap-3 mb-3">
@@ -285,7 +285,7 @@ export default function ManualJCalculator() {
           </h3>
 
           {/* Temperatures */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
             <NumericField label="Outdoor Heating (°F)" value={conditions.outdoorHeatingTemp}
               onChange={v => setConditions(c => ({ ...c, outdoorHeatingTemp: v }))} />
             <NumericField label="Outdoor Cooling (°F)" value={conditions.outdoorCoolingTemp}
@@ -297,7 +297,7 @@ export default function ManualJCalculator() {
           </div>
 
           {/* Humidity & Location */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
             <NumericField label="Outdoor Grains (gr/lb)" value={conditions.outdoorGrains}
               onChange={v => setConditions(c => ({ ...c, outdoorGrains: v }))} />
             <NumericField label="Indoor Grains (gr/lb)" value={conditions.indoorGrains}
@@ -309,7 +309,7 @@ export default function ManualJCalculator() {
           </div>
 
           {/* Building & Construction */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
             <div>
               <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Building Type</label>
               <div className="flex gap-2">
@@ -334,7 +334,7 @@ export default function ManualJCalculator() {
           </div>
 
           {/* Bedrooms */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             <NumericField label="Bedrooms (#)" value={conditions.numBedrooms}
               onChange={v => setConditions(c => ({ ...c, numBedrooms: v }))} />
           </div>
@@ -346,7 +346,7 @@ export default function ManualJCalculator() {
             <Gauge className="w-5 h-5 text-violet-400" />
             Duct System
           </h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             <SelectField label="Duct Location" value={conditions.ductLocation}
               options={[
                 ['conditioned', 'Conditioned Space'],
@@ -395,13 +395,13 @@ export default function ManualJCalculator() {
         </section>
 
         {/* Action Buttons */}
-        <div className="flex gap-4 mb-10">
+        <div className="flex flex-col sm:flex-row gap-3 mb-10">
           <button onClick={runCalculation}
-            className="flex-1 py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold text-lg hover:bg-emerald-400 hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all flex items-center justify-center gap-3">
+            className="flex-1 py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold text-base sm:text-lg hover:bg-emerald-400 hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all flex items-center justify-center gap-3 min-h-[48px]">
             Calculate Loads <ArrowRight className="w-5 h-5" />
           </button>
           <button onClick={resetAll}
-            className="py-4 px-6 rounded-2xl bg-slate-800 text-slate-400 font-bold hover:text-white transition-colors flex items-center gap-2">
+            className="py-4 px-6 rounded-2xl bg-slate-800 text-slate-400 font-bold hover:text-white transition-colors flex items-center justify-center gap-2 min-h-[48px]">
             <RotateCcw className="w-5 h-5" /> Reset
           </button>
         </div>
@@ -410,7 +410,7 @@ export default function ManualJCalculator() {
         {wholeHouse && results && (
           <section ref={resultsRef} className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {/* Summary Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <SummaryCard label="Total Heating" value={`${totalHeating.toLocaleString()}`} sub={`${tonnageFromBtu(totalHeating)} tons`}
                 color="orange" icon={<Thermometer className="w-5 h-5" />} unit="BTU/hr" />
               <SummaryCard label="Total Cooling" value={`${totalCooling.toLocaleString()}`} sub={`${tonnageFromBtu(totalCooling)} tons`}
@@ -422,7 +422,7 @@ export default function ManualJCalculator() {
             </div>
 
             {/* Advanced Breakdown */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               <MiniStat label="Duct Loss (Heating)" value={`${wholeHouse.ductLossHeating.toLocaleString()} BTU/hr`} />
               <MiniStat label="Duct Loss (Cooling)" value={`${wholeHouse.ductLossCooling.toLocaleString()} BTU/hr`} />
               <MiniStat label="Sensible Heat Ratio" value={`${wholeHouse.sensibleHeatRatio}`} />
@@ -432,20 +432,20 @@ export default function ManualJCalculator() {
             </div>
 
             {/* Export / Print Buttons */}
-            <div className="flex gap-3 justify-end">
+            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 sm:justify-end">
               <button onClick={handleExportPdf}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-400 font-semibold text-sm hover:bg-sky-500/20 hover:border-sky-500/50 transition-all">
+                className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-400 font-semibold text-sm hover:bg-sky-500/20 hover:border-sky-500/50 transition-all min-h-[44px]">
                 <FileDown className="w-4 h-4" /> Export PDF
               </button>
               <button onClick={handlePrint}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-slate-300 font-semibold text-sm hover:bg-slate-700/50 hover:text-white transition-all">
+                className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-slate-800/50 border border-slate-700/50 text-slate-300 font-semibold text-sm hover:bg-slate-700/50 hover:text-white transition-all min-h-[44px]">
                 <Printer className="w-4 h-4" /> Print
               </button>
               <button onClick={() => {
                   useRetailerStore.getState().open();
                   if (wholeHouse) useRetailerStore.getState().generateEstimate(wholeHouse, conditions);
                 }}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 font-semibold text-sm hover:bg-amber-500/20 hover:border-amber-500/50 transition-all">
+                className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 font-semibold text-sm hover:bg-amber-500/20 hover:border-amber-500/50 transition-all min-h-[44px]">
                 <MapPin className="w-4 h-4" /> Find Retailer & Estimate
               </button>
             </div>
@@ -507,13 +507,13 @@ export default function ManualJCalculator() {
 function NumericField({ label, value, onChange, step }: { label: string; value: number; onChange: (v: number) => void; step?: number }) {
   return (
     <div>
-      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{label}</label>
+      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5 sm:mb-2">{label}</label>
       <input
         type="number"
         value={value}
         step={step}
         onChange={e => onChange(Number(e.target.value))}
-        className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl py-3 px-4 text-white font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all"
+        className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl py-3.5 px-4 text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all min-h-[44px]"
       />
     </div>
   );
@@ -522,9 +522,9 @@ function NumericField({ label, value, onChange, step }: { label: string; value: 
 function SelectField({ label, value, options, onChange }: { label: string; value: string; options: [string, string][]; onChange: (v: string) => void }) {
   return (
     <div>
-      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{label}</label>
+      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5 sm:mb-2">{label}</label>
       <select value={value} onChange={e => onChange(e.target.value)}
-        className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl py-3 px-4 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all">
+        className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl py-3.5 px-4 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all min-h-[44px]">
         {options.map(([val, lbl]) => <option key={val} value={val}>{lbl}</option>)}
       </select>
     </div>
@@ -607,7 +607,7 @@ function RoomInputCard({ room, index, expanded, onToggle, onChange, onRemove, ca
         <div className="p-5 pt-0 border-t border-slate-800/40 animate-in slide-in-from-top-2 fade-in duration-300">
           {/* Dimensions */}
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mt-5 mb-3">Dimensions</p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <NumericField label="Length (ft)" value={room.lengthFt} onChange={v => onChange({ lengthFt: v })} />
             <NumericField label="Width (ft)" value={room.widthFt} onChange={v => onChange({ widthFt: v })} />
             <NumericField label="Ceiling Ht (ft)" value={room.ceilingHeightFt} onChange={v => onChange({ ceilingHeightFt: v })} />
@@ -616,7 +616,7 @@ function RoomInputCard({ room, index, expanded, onToggle, onChange, onRemove, ca
 
           {/* Walls */}
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mt-5 mb-3">Walls</p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <NumericField label="Wall R-Value" value={room.wallRValue} onChange={v => onChange({ wallRValue: v })} />
             <SelectField label="Wall Grade" value={room.wallGrade}
               options={[['above', 'Above Grade'], ['below_partial', 'Partial Below Grade'], ['below_full', 'Fully Below Grade']]}
@@ -632,7 +632,7 @@ function RoomInputCard({ room, index, expanded, onToggle, onChange, onRemove, ca
 
           {/* Windows / Solar */}
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mt-5 mb-3">Windows & Solar</p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <NumericField label="Window Area (ft²)" value={room.windowSqFt} onChange={v => onChange({ windowSqFt: v })} />
             <NumericField label="Window Count" value={room.windowCount} onChange={v => onChange({ windowCount: v })} />
             <SelectField label="Glass Type" value={room.glassType}
@@ -640,14 +640,14 @@ function RoomInputCard({ room, index, expanded, onToggle, onChange, onRemove, ca
               onChange={v => applyGlassPreset(v as GlassType)} />
             <NumericField label="SHGC" value={room.windowSHGC} onChange={v => onChange({ windowSHGC: v })} step={0.01} />
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
             <NumericField label="Window U-Value" value={room.windowUValue} onChange={v => onChange({ windowUValue: v })} step={0.01} />
             <NumericField label="Interior Shading" value={room.interiorShading} onChange={v => onChange({ interiorShading: v })} step={0.1} />
           </div>
 
           {/* Ceiling & Floor */}
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mt-5 mb-3">Ceiling & Floor</p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <NumericField label="Ceiling R-Value" value={room.ceilingRValue} onChange={v => onChange({ ceilingRValue: v })} />
             <NumericField label="Floor R-Value" value={room.floorRValue} onChange={v => onChange({ floorRValue: v })} />
             <SelectField label="Floor Type" value={room.floorType}

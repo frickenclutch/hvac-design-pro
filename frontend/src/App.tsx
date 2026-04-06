@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
-import { Home, Compass, Settings, Users, LogOut, Thermometer, PenTool } from 'lucide-react';
+import { Home, Compass, Settings, Users, LogOut, Thermometer, PenTool, Menu, X } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import CadWorkspace from './pages/CadWorkspace';
 import ManualJCalculator from './pages/ManualJCalculator';
@@ -10,6 +11,7 @@ import AuthPage from './pages/AuthPage';
 import TermsPage from './pages/TermsPage';
 import { useAuthStore } from './features/auth/store/useAuthStore';
 import { usePreferencesStore } from './stores/usePreferencesStore';
+import SpotlightSearch, { SpotlightTrigger } from './features/spotlight/SpotlightSearch';
 
 function App() {
   return (
@@ -23,16 +25,53 @@ function AppLayout() {
   const { isAuthenticated, organisation, logout } = useAuthStore();
   const { sidebarCollapsed, update: updatePrefs } = usePreferencesStore();
   const location = useLocation();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   // CAD workspace is full-screen — no sidebar
   const isCadRoute = location.pathname.includes('/cad');
+  const showSidebar = isAuthenticated && !isCadRoute;
 
   return (
-    <div className="flex bg-slate-950 text-slate-100 font-sans h-screen w-screen overflow-hidden">
+    <div className="flex flex-col md:flex-row bg-slate-950 text-slate-100 font-sans min-h-screen md:h-screen md:overflow-hidden">
 
-      {/* Sidebar - Only show if authenticated and not on CAD/landing/onboarding */}
-      {isAuthenticated && !isCadRoute && (
-        <nav className={`${sidebarCollapsed ? 'w-16' : 'w-16 md:w-56'} glass-panel border-r border-slate-800/60 flex flex-col justify-between py-4 transition-all duration-300 z-50 flex-shrink-0`}>
+      {/* ── Mobile Top Bar ── */}
+      {showSidebar && (
+        <div className="md:hidden flex items-center justify-between px-4 py-3 glass-panel border-b border-slate-800/60 z-50 flex-shrink-0">
+          <div className="flex items-center gap-2.5">
+            <Compass className={`w-6 h-6 flex-shrink-0 drop-shadow-[0_0_12px_rgba(52,211,153,0.5)] ${organisation?.type === 'municipality' ? 'text-amber-400' : 'text-emerald-400'}`} />
+            <span className="text-sm font-bold premium-gradient-text">DesignPro</span>
+          </div>
+          <button onClick={() => setMobileNavOpen(!mobileNavOpen)}
+            className="p-2.5 rounded-xl hover:bg-slate-800/50 text-slate-400 min-w-[44px] min-h-[44px] flex items-center justify-center">
+            {mobileNavOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+        </div>
+      )}
+
+      {/* ── Mobile Nav Drawer ── */}
+      {showSidebar && mobileNavOpen && (
+        <div className="md:hidden fixed inset-0 top-[57px] z-40">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setMobileNavOpen(false)} />
+          <nav className="relative glass-panel border-b border-slate-800/60 p-4 space-y-1 animate-in slide-in-from-top-2 duration-200">
+            <MobileNavLink to="/dashboard" icon={<Home className="w-5 h-5" />} label="Projects" onClick={() => setMobileNavOpen(false)} />
+            <MobileNavLink to="/calculator" icon={<Thermometer className="w-5 h-5" />} label="Manual J" onClick={() => setMobileNavOpen(false)} />
+            <MobileNavLink to="/cad" icon={<PenTool className="w-5 h-5" />} label="CAD" onClick={() => setMobileNavOpen(false)} />
+            <div className="h-px bg-slate-800/60 my-2" />
+            <MobileNavLink to="/team" icon={<Users className="w-5 h-5" />} label="Team" onClick={() => setMobileNavOpen(false)} />
+            <MobileNavLink to="/settings" icon={<Settings className="w-5 h-5" />} label="Settings" onClick={() => setMobileNavOpen(false)} />
+            <div className="h-px bg-slate-800/60 my-2" />
+            <button onClick={() => { logout(); setMobileNavOpen(false); }}
+              className="flex w-full items-center gap-3 p-3 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors min-h-[44px]">
+              <LogOut className="w-5 h-5" />
+              <span className="font-medium text-sm">Sign Out</span>
+            </button>
+          </nav>
+        </div>
+      )}
+
+      {/* ── Desktop Sidebar ── */}
+      {showSidebar && (
+        <nav className={`hidden md:flex ${sidebarCollapsed ? 'w-16' : 'w-56'} glass-panel border-r border-slate-800/60 flex-col justify-between py-4 transition-all duration-300 z-50 flex-shrink-0`}>
           <div className="px-2.5">
             <button
               onClick={() => updatePrefs({ sidebarCollapsed: !sidebarCollapsed })}
@@ -40,7 +79,7 @@ function AppLayout() {
             >
               <Compass className={`w-7 h-7 flex-shrink-0 drop-shadow-[0_0_12px_rgba(52,211,153,0.5)] ${organisation?.type === 'municipality' ? 'text-amber-400 drop-shadow-[0_0_12px_rgba(245,158,11,0.5)]' : ''}`} />
               {!sidebarCollapsed && (
-                <h1 className="text-base font-bold tracking-tight hidden md:block premium-gradient-text truncate">
+                <h1 className="text-base font-bold tracking-tight premium-gradient-text truncate">
                   DesignPro
                 </h1>
               )}
@@ -64,14 +103,18 @@ function AppLayout() {
               className="flex w-full items-center gap-2.5 p-2.5 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors group"
              >
                 <LogOut className="w-5 h-5 flex-shrink-0 group-hover:scale-110 transition-transform" />
-                {!sidebarCollapsed && <span className="font-medium text-sm hidden md:block">Sign Out</span>}
+                {!sidebarCollapsed && <span className="font-medium text-sm">Sign Out</span>}
               </button>
           </div>
         </nav>
       )}
 
+      {/* Spotlight Search — Global Cmd+K */}
+      {isAuthenticated && <SpotlightSearch />}
+      {isAuthenticated && !isCadRoute && <SpotlightTrigger />}
+
       {/* Main Content Area */}
-      <main className="flex-1 relative overflow-hidden bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black">
+      <main className="flex-1 relative overflow-y-auto md:overflow-hidden bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black">
         <Routes>
           {/* Public Routes */}
           <Route path="/" element={!isAuthenticated ? <LandingPage /> : <Navigate to="/dashboard" />} />
@@ -94,6 +137,25 @@ function AppLayout() {
   );
 }
 
+function MobileNavLink({ to, icon, label, onClick }: { to: string; icon: React.ReactNode; label: string; onClick: () => void }) {
+  const location = useLocation();
+  const { organisation } = useAuthStore();
+  const isMuni = organisation?.type === 'municipality';
+  const active = location.pathname === to;
+
+  const activeClass = isMuni
+    ? "bg-amber-500/10 text-amber-300 border-amber-500/20"
+    : "bg-emerald-500/10 text-emerald-300 border-emerald-500/20";
+
+  return (
+    <Link to={to} onClick={onClick}
+      className={`flex items-center gap-3 p-3 rounded-xl transition-all border border-transparent min-h-[44px] ${active ? activeClass : 'text-slate-300 hover:bg-slate-800/50'}`}>
+      <div className="flex-shrink-0">{icon}</div>
+      <span className="font-medium text-sm">{label}</span>
+    </Link>
+  );
+}
+
 function NavigationLink({ to, icon, label, collapsed = false }: { to: string; icon: React.ReactNode; label: string; collapsed?: boolean }) {
   const location = useLocation();
   const { organisation } = useAuthStore();
@@ -105,9 +167,9 @@ function NavigationLink({ to, icon, label, collapsed = false }: { to: string; ic
     : "bg-slate-800/50 text-emerald-300 border-emerald-500/20 shadow-[0_0_8px_rgba(52,211,153,0.1)]";
 
   return (
-    <Link to={to} className={`flex items-center gap-2.5 p-2.5 rounded-xl transition-all border border-transparent hover:bg-slate-800/50 ${active ? activeClass : 'text-slate-400 hover:text-slate-100'} ${collapsed ? 'justify-center' : ''}`} title={collapsed ? label : undefined}>
+    <Link to={to} className={`flex items-center gap-2.5 p-3 rounded-xl transition-all border border-transparent hover:bg-slate-800/50 min-h-[44px] ${active ? activeClass : 'text-slate-400 hover:text-slate-100'} ${collapsed ? 'justify-center' : ''}`} title={collapsed ? label : undefined}>
       <div className="flex-shrink-0">{icon}</div>
-      {!collapsed && <span className="font-medium text-sm hidden md:block">{label}</span>}
+      {!collapsed && <span className="font-medium text-sm">{label}</span>}
     </Link>
   );
 }

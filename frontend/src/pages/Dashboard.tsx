@@ -52,15 +52,15 @@ export default function Dashboard() {
   );
 
   return (
-    <div className="p-8 h-full flex flex-col pt-12">
-      <header className="flex justify-between items-center mb-10">
+    <div className="px-4 py-6 pt-8 md:p-8 md:pt-12 h-full flex flex-col overflow-y-auto">
+      <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 md:mb-10">
         <div>
-          <h2 className="text-3xl font-bold text-white mb-2">Project Workspace</h2>
-          <p className="text-slate-400">Manage your active load calculations and duct designs.</p>
+          <h2 className="text-2xl md:text-3xl font-bold text-white mb-1 md:mb-2">Project Workspace</h2>
+          <p className="text-slate-400 text-sm md:text-base">Manage your active load calculations and duct designs.</p>
         </div>
         <button
           onClick={() => setIsModalOpen(true)}
-          className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold py-2.5 px-6 rounded-full shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all transform hover:-translate-y-1"
+          className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold py-2.5 px-5 sm:px-6 rounded-full shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all transform hover:-translate-y-1 min-h-[44px] flex-shrink-0"
         >
           <Plus className="w-5 h-5" />
           <span className="hidden sm:block">New Project</span>

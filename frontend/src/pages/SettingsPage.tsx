@@ -6,7 +6,7 @@ export default function SettingsPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-3xl mx-auto p-8 pt-12 pb-24">
+      <div className="max-w-3xl mx-auto px-4 py-6 pt-8 pb-24 md:p-8 md:pt-12 md:pb-24">
         <header className="mb-10">
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2.5 rounded-xl bg-slate-800/50 border border-slate-700/30">

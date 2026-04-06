@@ -8,7 +8,7 @@
 export interface RetailerLocation {
   id: string;
   name: string;
-  brand: 'howland' | 'co_supply' | 'other';
+  brand: 'howland' | 'co_supply' | 'hulbert' | 'other';
   preferred: boolean;
   priority: number; // 0 = preferred (always first), 1+ = standard
   address: {
@@ -88,6 +88,42 @@ export const PREFERRED_RETAILERS: RetailerLocation[] = [
     hours: 'Mon-Fri 7AM-4:30PM',
     capabilities: ['residential', 'commercial', 'equipment', 'ductwork', 'controls', 'plumbing', 'hydronics'],
     description: 'A Howland Pump & Supply company. Central NY\'s leading HVAC and plumbing wholesale distributor.',
+  },
+  {
+    id: 'hulbert-supply-main',
+    name: 'Hulbert Supply',
+    brand: 'hulbert',
+    preferred: true,
+    priority: 0,
+    address: {
+      line1: '1245 Salt Springs Rd',
+      city: 'Youngstown',
+      state: 'OH',
+      zip: '44509',
+    },
+    coordinates: { lat: 41.0710, lng: -80.7025 },
+    phone: '(330) 799-2211',
+    hours: 'Mon-Fri 7:30AM-5PM',
+    capabilities: ['residential', 'commercial', 'plumbing', 'heating', 'industrial', 'pipe_valves_fittings'],
+    description: 'Full-line plumbing, heating, and industrial supply. Preferred partner for project materials and quoting.',
+  },
+  {
+    id: 'hulbert-supply-warren',
+    name: 'Hulbert Supply — Warren',
+    brand: 'hulbert',
+    preferred: true,
+    priority: 0,
+    address: {
+      line1: '850 Elm Rd NE',
+      city: 'Warren',
+      state: 'OH',
+      zip: '44483',
+    },
+    coordinates: { lat: 41.2475, lng: -80.7990 },
+    phone: '(330) 372-8411',
+    hours: 'Mon-Fri 7:30AM-5PM',
+    capabilities: ['residential', 'commercial', 'plumbing', 'heating', 'pipe_valves_fittings'],
+    description: 'Warren branch — plumbing, heating, and industrial supply.',
   },
 ];
 
