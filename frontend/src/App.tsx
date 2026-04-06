@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
-import { Home, Compass, Settings, Users, LogOut, Thermometer, PenTool, Menu, X } from 'lucide-react';
+import { Home, Compass, Settings, Users, LogOut, Thermometer, PenTool, Menu, X, Search } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import CadWorkspace from './pages/CadWorkspace';
 import ManualJCalculator from './pages/ManualJCalculator';
@@ -31,6 +31,9 @@ function AppLayout() {
   const isCadRoute = location.pathname.includes('/cad');
   const showSidebar = isAuthenticated && !isCadRoute;
 
+  // Public pages that need full-page scroll (not locked in app shell)
+  const isPublicScrollPage = ['/', '/terms', '/login', '/onboarding'].includes(location.pathname);
+
   return (
     <div className="flex flex-col md:flex-row bg-slate-950 text-slate-100 font-sans min-h-screen md:h-screen md:overflow-hidden">
 
@@ -41,10 +44,16 @@ function AppLayout() {
             <Compass className={`w-6 h-6 flex-shrink-0 drop-shadow-[0_0_12px_rgba(52,211,153,0.5)] ${organisation?.type === 'municipality' ? 'text-amber-400' : 'text-emerald-400'}`} />
             <span className="text-sm font-bold premium-gradient-text">DesignPro</span>
           </div>
-          <button onClick={() => setMobileNavOpen(!mobileNavOpen)}
-            className="p-2.5 rounded-xl hover:bg-slate-800/50 text-slate-400 min-w-[44px] min-h-[44px] flex items-center justify-center">
-            {mobileNavOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-          </button>
+          <div className="flex items-center gap-1">
+            <button onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))}
+              className="p-2.5 rounded-xl hover:bg-slate-800/50 text-slate-400 hover:text-emerald-400 min-w-[44px] min-h-[44px] flex items-center justify-center">
+              <Search className="w-5 h-5" />
+            </button>
+            <button onClick={() => setMobileNavOpen(!mobileNavOpen)}
+              className="p-2.5 rounded-xl hover:bg-slate-800/50 text-slate-400 min-w-[44px] min-h-[44px] flex items-center justify-center">
+              {mobileNavOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
+          </div>
         </div>
       )}
 
@@ -97,14 +106,29 @@ function AppLayout() {
             </div>
           </div>
 
-          <div className="px-2.5">
-             <button
+          <div className="px-2.5 space-y-1">
+            <button
+              onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))}
+              className={`flex w-full items-center gap-2.5 p-3 rounded-xl text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors group min-h-[44px] ${sidebarCollapsed ? 'justify-center' : ''}`}
+              title={sidebarCollapsed ? 'Search (Ctrl+K)' : undefined}
+            >
+              <Search className="w-5 h-5 flex-shrink-0 group-hover:scale-110 transition-transform" />
+              {!sidebarCollapsed && (
+                <span className="font-medium text-sm flex-1">Search</span>
+              )}
+              {!sidebarCollapsed && (
+                <kbd className="text-[10px] text-slate-600 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 font-mono">
+                  ⌘K
+                </kbd>
+              )}
+            </button>
+            <button
               onClick={logout}
-              className="flex w-full items-center gap-2.5 p-2.5 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors group"
-             >
-                <LogOut className="w-5 h-5 flex-shrink-0 group-hover:scale-110 transition-transform" />
-                {!sidebarCollapsed && <span className="font-medium text-sm">Sign Out</span>}
-              </button>
+              className="flex w-full items-center gap-2.5 p-3 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors group min-h-[44px]"
+            >
+              <LogOut className="w-5 h-5 flex-shrink-0 group-hover:scale-110 transition-transform" />
+              {!sidebarCollapsed && <span className="font-medium text-sm">Sign Out</span>}
+            </button>
           </div>
         </nav>
       )}
@@ -114,7 +138,7 @@ function AppLayout() {
       {isAuthenticated && !isCadRoute && <SpotlightTrigger />}
 
       {/* Main Content Area */}
-      <main className="flex-1 relative overflow-y-auto md:overflow-hidden bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black">
+      <main className={`flex-1 relative overflow-y-auto ${isPublicScrollPage ? '' : 'md:overflow-hidden'} bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black`}>
         <Routes>
           {/* Public Routes */}
           <Route path="/" element={!isAuthenticated ? <LandingPage /> : <Navigate to="/dashboard" />} />
