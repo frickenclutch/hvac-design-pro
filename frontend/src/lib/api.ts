@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://hvac-api.c4technologies.workers.dev';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://hvac-api.c4-parent-account.workers.dev';
 
 class ApiClient {
   private token: string | null = null;
