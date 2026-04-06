@@ -210,8 +210,9 @@ export default function LandingPage() {
       {/* ── Footer ────────────────────────────────────────────────────────── */}
       <footer className="relative z-10 border-t border-slate-800/40 py-6">
         <div className="max-w-6xl mx-auto px-6 flex items-center justify-between text-xs text-slate-600">
-          <span>&copy; {new Date().getFullYear()} HVAC DesignPro</span>
+          <span>&copy; {new Date().getFullYear()} C4 Technologies — HVAC DesignPro</span>
           <div className="flex gap-6">
+            <Link to="/terms" className="hover:text-slate-400 transition-colors">Terms of Service</Link>
             <span>ACCA Manual J/D/S</span>
             <span>ASHRAE Compliant</span>
           </div>

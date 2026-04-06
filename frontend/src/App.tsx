@@ -7,6 +7,7 @@ import SettingsPage from './pages/SettingsPage';
 import LandingPage from './pages/LandingPage';
 import OnboardingPage from './pages/OnboardingPage';
 import AuthPage from './pages/AuthPage';
+import TermsPage from './pages/TermsPage';
 import { useAuthStore } from './features/auth/store/useAuthStore';
 import { usePreferencesStore } from './stores/usePreferencesStore';
 
@@ -76,6 +77,7 @@ function AppLayout() {
           <Route path="/" element={!isAuthenticated ? <LandingPage /> : <Navigate to="/dashboard" />} />
           <Route path="/onboarding" element={<OnboardingPage />} />
           <Route path="/login" element={<AuthPage />} />
+          <Route path="/terms" element={<TermsPage />} />
 
           {/* Protected Routes */}
           <Route path="/dashboard" element={isAuthenticated ? <Dashboard /> : <Navigate to="/login" />} />
