@@ -1,65 +1,49 @@
-const CACHE_NAME = 'hvac-designpro-v1';
-const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/favicon.svg',
-];
+const CACHE_NAME = 'hvac-designpro-v2';
 
-// Install — pre-cache shell
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
-  );
+// Install — skip waiting to activate immediately
+self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
-// Activate — clean old caches
+// Activate — delete ALL old caches, then claim clients
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+    ).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
-// Fetch — network-first for navigations, cache-first for assets
+// Fetch — network-first for everything, cache as fallback for offline
 self.addEventListener('fetch', (event) => {
   const { request } = event;
 
-  // HTML navigations: network-first, fallback to cache
-  if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-          return response;
-        })
-        .catch(() => caches.match('/index.html'))
-    );
-    return;
-  }
+  // Skip non-GET requests
+  if (request.method !== 'GET') return;
 
-  // Static assets: cache-first
-  if (request.destination === 'script' || request.destination === 'style' ||
-      request.destination === 'image' || request.destination === 'font') {
-    event.respondWith(
-      caches.match(request).then((cached) => {
-        if (cached) return cached;
-        return fetch(request).then((response) => {
+  // Skip API calls and websockets
+  if (request.url.includes('/api/') || request.url.includes('ws://')) return;
+
+  event.respondWith(
+    fetch(request)
+      .then((response) => {
+        // Only cache successful responses
+        if (response.ok) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-          return response;
+        }
+        return response;
+      })
+      .catch(() => {
+        // Offline fallback — serve from cache
+        return caches.match(request).then((cached) => {
+          if (cached) return cached;
+          // For navigations, fall back to cached index.html
+          if (request.mode === 'navigate') {
+            return caches.match('/index.html');
+          }
+          return new Response('Offline', { status: 503 });
         });
       })
-    );
-    return;
-  }
-
-  // Everything else: network with cache fallback
-  event.respondWith(
-    fetch(request).catch(() => caches.match(request))
   );
 });
