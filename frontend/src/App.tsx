@@ -145,22 +145,22 @@ function AppLayout() {
       {/* Main Content Area */}
       <main id="main-content" role="main" className={`flex-1 relative overflow-y-auto ${isPublicScrollPage ? '' : 'md:overflow-hidden'} bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black`}>
         <Routes>
-          {/* Landing & info pages */}
-          <Route path="/" element={<Navigate to="/dashboard" />} />
+          {/* Sign-in landing — skip button available */}
+          <Route path="/" element={isAuthenticated ? <Navigate to="/dashboard" /> : <AuthPage />} />
+          <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" /> : <AuthPage />} />
           <Route path="/landing" element={<LandingPage />} />
           <Route path="/onboarding" element={<OnboardingPage />} />
-          <Route path="/login" element={<Navigate to="/dashboard" />} />
           <Route path="/terms" element={<TermsPage />} />
 
-          {/* App Routes — open access (auth gate removed temporarily) */}
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/calculator" element={<ManualJCalculator />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/cad" element={<CadWorkspace />} />
-          <Route path="/project/:id/cad" element={<CadWorkspace />} />
+          {/* App Routes — redirect to sign-in if not authenticated */}
+          <Route path="/dashboard" element={isAuthenticated ? <Dashboard /> : <Navigate to="/" />} />
+          <Route path="/calculator" element={isAuthenticated ? <ManualJCalculator /> : <Navigate to="/" />} />
+          <Route path="/settings" element={isAuthenticated ? <SettingsPage /> : <Navigate to="/" />} />
+          <Route path="/cad" element={isAuthenticated ? <CadWorkspace /> : <Navigate to="/" />} />
+          <Route path="/project/:id/cad" element={isAuthenticated ? <CadWorkspace /> : <Navigate to="/" />} />
 
           {/* Fallback */}
-          <Route path="*" element={<Navigate to="/dashboard" />} />
+          <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </main>
     </div>

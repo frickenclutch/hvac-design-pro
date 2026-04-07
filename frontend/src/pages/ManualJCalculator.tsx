@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   Thermometer, Wind, Sun, Droplets, ArrowRight, RotateCcw,
   ChevronDown, ChevronUp, Home, Building2, Info,
@@ -13,14 +13,43 @@ import {
 import RetailerFinderPanel from '../features/retailer/components/RetailerFinderPanel';
 import { useRetailerStore } from '../features/retailer/store/useRetailerStore';
 
+// ── Persistence helpers ───────────────────────────────────────────────────────
+const STORAGE_KEY = 'hvac_manualj_inputs';
+
+function loadSavedInputs(): { buildingType: 'residential' | 'commercial'; rooms: RoomInput[]; conditions: DesignConditions } | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch { return null; }
+}
+
+function saveInputs(buildingType: string, rooms: RoomInput[], conditions: DesignConditions) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ buildingType, rooms, conditions }));
+  } catch { /* storage full — silently fail */ }
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function ManualJCalculator() {
-  const [buildingType, setBuildingType] = useState<'residential' | 'commercial'>('residential');
-  const [rooms, setRooms] = useState<RoomInput[]>([createDefaultRoom(0)]);
+  const saved = useRef(loadSavedInputs()).current;
+  const [buildingType, setBuildingType] = useState<'residential' | 'commercial'>(saved?.buildingType ?? 'residential');
+  const [rooms, setRooms] = useState<RoomInput[]>(saved?.rooms ?? [createDefaultRoom(0)]);
   const [wholeHouse, setWholeHouse] = useState<WholeHouseResult | null>(null);
   const [expandedRoom, setExpandedRoom] = useState<string | null>(null);
-  const [conditions, setConditions] = useState<DesignConditions>(createDefaultConditions());
+  const [conditions, setConditions] = useState<DesignConditions>(saved?.conditions ?? createDefaultConditions());
   const resultsRef = useRef<HTMLDivElement>(null);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
+
+  // Auto-save all inputs to localStorage whenever they change
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) { isFirstRender.current = false; return; }
+    saveInputs(buildingType, rooms, conditions);
+    setSaveStatus('saved');
+    const t = setTimeout(() => setSaveStatus('idle'), 1500);
+    return () => clearTimeout(t);
+  }, [buildingType, rooms, conditions]);
 
   const addRoom = () => {
     setRooms(prev => [...prev, createDefaultRoom(prev.length)]);
@@ -46,7 +75,9 @@ export default function ManualJCalculator() {
   const resetAll = () => {
     setRooms([createDefaultRoom(0)]);
     setConditions(createDefaultConditions());
+    setBuildingType('residential');
     setWholeHouse(null);
+    localStorage.removeItem(STORAGE_KEY);
   };
 
   const results = wholeHouse?.rooms ?? null;
@@ -271,6 +302,11 @@ export default function ManualJCalculator() {
               <Thermometer className="w-6 h-6 text-orange-400" />
             </div>
             <h2 className="text-3xl font-bold text-white">Manual J Calculator</h2>
+            {saveStatus === 'saved' && (
+              <span className="text-xs text-emerald-400 font-medium bg-emerald-500/10 px-2.5 py-1 rounded-lg animate-in fade-in duration-300">
+                Inputs saved
+              </span>
+            )}
           </div>
           <p className="text-slate-400 ml-14">
             ACCA Manual J 8th Edition — residential & light commercial heating/cooling load calculation.

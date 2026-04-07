@@ -48,8 +48,7 @@ interface AuthState {
   completeOnboarding: (user: User, org: Organisation) => void;
 }
 
-// Auto-authenticate: skip login screen, give immediate access to all tools
-const defaultUser: User = {
+const guestUser: User = {
   id: 'guest',
   email: 'guest@designpro.app',
   role: 'admin',
@@ -58,7 +57,7 @@ const defaultUser: User = {
   isVerified: true,
 };
 
-const defaultOrg: Organisation = {
+const guestOrg: Organisation = {
   id: 'org-default',
   name: 'DesignPro',
   type: 'individual',
@@ -67,22 +66,23 @@ const defaultOrg: Organisation = {
 };
 
 export const useAuthStore = create<AuthState>((set) => ({
-  user: defaultUser,
-  organisation: defaultOrg,
-  isAuthenticated: true,
+  user: null,
+  organisation: null,
+  isAuthenticated: false,
   isOnboarding: false,
 
   login: (email) => {
     set({
       isAuthenticated: true,
-      user: {
+      user: email === 'guest@designpro.app' ? guestUser : {
         id: 'user-1',
         email,
         role: 'admin',
         firstName: 'Dev',
         lastName: 'User',
         isVerified: true
-      }
+      },
+      organisation: guestOrg,
     });
   },
 

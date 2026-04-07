@@ -142,11 +142,19 @@ export default function AuthPage() {
             </div>
           )}
 
-          <div className="pt-10 mt-10 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-center gap-4">
-             <span className="text-slate-500 text-sm font-medium">New to DesignPro?</span>
-             <Link to="/onboarding" className="text-emerald-400 hover:text-emerald-300 font-bold text-sm tracking-tight border-b-2 border-emerald-500/20 hover:border-emerald-500 pb-0.5 transition-all">
-               Get Started
-             </Link>
+          <div className="pt-10 mt-10 border-t border-slate-800 space-y-4">
+            <button
+              onClick={() => { login('guest@designpro.app'); setAuthenticated(true); navigate('/dashboard'); }}
+              className="w-full py-3.5 rounded-2xl border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 hover:bg-slate-800/50 transition-all font-bold text-sm tracking-tight"
+            >
+              Skip — explore tools without signing in
+            </button>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+               <span className="text-slate-500 text-sm font-medium">New to DesignPro?</span>
+               <Link to="/onboarding" className="text-emerald-400 hover:text-emerald-300 font-bold text-sm tracking-tight border-b-2 border-emerald-500/20 hover:border-emerald-500 pb-0.5 transition-all">
+                 Get Started
+               </Link>
+            </div>
           </div>
         </div>
       </div>
