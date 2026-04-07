@@ -12,6 +12,7 @@ import {
 } from '../engines/manualJ';
 import RetailerFinderPanel from '../features/retailer/components/RetailerFinderPanel';
 import { useRetailerStore } from '../features/retailer/store/useRetailerStore';
+import Steve from '../components/Steve';
 
 // ── Persistence helpers ───────────────────────────────────────────────────────
 const STORAGE_KEY = 'hvac_manualj_inputs';
@@ -534,6 +535,9 @@ export default function ManualJCalculator() {
           <RetailerFinderPanel wholeHouse={wholeHouse} conditions={conditions} />
         )}
       </div>
+
+      {/* Steve — AI HVAC Assistant */}
+      <Steve context="manualj" />
     </div>
   );
 }

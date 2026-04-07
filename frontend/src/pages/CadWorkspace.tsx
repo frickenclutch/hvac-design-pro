@@ -7,7 +7,7 @@ import FloorSelector from '../features/cad/components/FloorSelector';
 import LayerManager from '../features/cad/components/LayerManager';
 import { useAutoSave } from '../features/cad/hooks/useAutoSave';
 import HelpCenter from '../features/cad/components/HelpCenter';
-import HvacAssistant from '../features/cad/components/HvacAssistant';
+import Steve from '../components/Steve';
 
 export default function CadWorkspace() {
   // Auto-save drawing to D1 / localStorage
@@ -37,8 +37,8 @@ export default function CadWorkspace() {
       {/* Live wall length / selection HUD overlay */}
       <WallLengthOverlay />
 
-      {/* HVAC Expert Assistant */}
-      <HvacAssistant />
+      {/* Steve — AI HVAC Assistant */}
+      <Steve context="cad" />
 
       {/* Help Center */}
       <HelpCenter />
