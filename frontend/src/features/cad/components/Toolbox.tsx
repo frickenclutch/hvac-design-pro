@@ -1,5 +1,5 @@
 import React from 'react';
-import { MousePointer2, Hand, SquarePen, LayoutGrid, DoorOpen, Wind } from 'lucide-react';
+import { MousePointer2, Hand, SquarePen, LayoutGrid, DoorOpen, Wind, Ruler, Type, ScanLine } from 'lucide-react';
 import { useCadStore } from '../store/useCadStore';
 import type { ToolType } from '../store/useCadStore';
 
@@ -9,60 +9,86 @@ export default function Toolbox() {
   return (
     <div className="absolute left-6 top-1/2 -translate-y-1/2 z-10">
       <div className="glass-panel rounded-2xl flex flex-col items-center py-4 gap-2 shadow-[0_0_40px_rgba(0,0,0,0.8)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/60 transition-all duration-300">
-        
-        <ToolButton 
-          id="select" 
-          icon={<MousePointer2 className="w-5 h-5" />} 
-          label="Select (V)" 
-          active={activeTool === 'select'} 
-          onClick={() => setActiveTool('select')} 
+
+        <ToolButton
+          id="select"
+          icon={<MousePointer2 className="w-5 h-5" />}
+          label="Select (V)"
+          active={activeTool === 'select'}
+          onClick={() => setActiveTool('select')}
         />
-        
-        <ToolButton 
-          id="pan" 
-          icon={<Hand className="w-5 h-5" />} 
-          label="Pan (H)" 
-          active={activeTool === 'pan'} 
-          onClick={() => setActiveTool('pan')} 
+
+        <ToolButton
+          id="pan"
+          icon={<Hand className="w-5 h-5" />}
+          label="Pan (H)"
+          active={activeTool === 'pan'}
+          onClick={() => setActiveTool('pan')}
         />
-        
+
         <div className="w-8 h-px bg-slate-700/60 my-2 rounded-full" />
-        
-        <ToolButton 
-          id="draw_wall" 
-          icon={<SquarePen className="w-5 h-5" />} 
-          label="Draw Wall (W)" 
-          active={activeTool === 'draw_wall'} 
-          onClick={() => setActiveTool('draw_wall')} 
+
+        <ToolButton
+          id="draw_wall"
+          icon={<SquarePen className="w-5 h-5" />}
+          label="Draw Wall (W)"
+          active={activeTool === 'draw_wall'}
+          onClick={() => setActiveTool('draw_wall')}
         />
-        
-        <ToolButton 
-          id="place_window" 
-          icon={<LayoutGrid className="w-5 h-5" />} 
-          label="Add Window" 
-          active={activeTool === 'place_window'} 
-          onClick={() => setActiveTool('place_window')} 
+
+        <ToolButton
+          id="place_window"
+          icon={<LayoutGrid className="w-5 h-5" />}
+          label="Add Window"
+          active={activeTool === 'place_window'}
+          onClick={() => setActiveTool('place_window')}
         />
-        
-        <ToolButton 
-          id="place_door" 
-          icon={<DoorOpen className="w-5 h-5" />} 
-          label="Add Door" 
-          active={activeTool === 'place_door'} 
-          onClick={() => setActiveTool('place_door')} 
+
+        <ToolButton
+          id="place_door"
+          icon={<DoorOpen className="w-5 h-5" />}
+          label="Add Door"
+          active={activeTool === 'place_door'}
+          onClick={() => setActiveTool('place_door')}
         />
-        
+
         <div className="w-8 h-px bg-slate-700/60 my-2 rounded-full" />
-        
-        <ToolButton 
-          id="place_hvac" 
-          icon={<Wind className="w-5 h-5" />} 
-          label="HVAC Unit" 
-          active={activeTool === 'place_hvac'} 
-          onClick={() => setActiveTool('place_hvac')} 
+
+        <ToolButton
+          id="place_hvac"
+          icon={<Wind className="w-5 h-5" />}
+          label="HVAC Unit"
+          active={activeTool === 'place_hvac'}
+          onClick={() => setActiveTool('place_hvac')}
           primary
         />
-        
+
+        <div className="w-8 h-px bg-slate-700/60 my-2 rounded-full" />
+
+        <ToolButton
+          id="add_dimension"
+          icon={<Ruler className="w-5 h-5" />}
+          label="Dimension"
+          active={activeTool === 'add_dimension'}
+          onClick={() => setActiveTool('add_dimension')}
+        />
+
+        <ToolButton
+          id="add_label"
+          icon={<Type className="w-5 h-5" />}
+          label="Label"
+          active={activeTool === 'add_label'}
+          onClick={() => setActiveTool('add_label')}
+        />
+
+        <ToolButton
+          id="room_detect"
+          icon={<ScanLine className="w-5 h-5" />}
+          label="Detect Rooms"
+          active={activeTool === 'room_detect'}
+          onClick={() => setActiveTool('room_detect')}
+        />
+
       </div>
     </div>
   );

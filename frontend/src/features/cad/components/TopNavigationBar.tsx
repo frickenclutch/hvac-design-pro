@@ -7,8 +7,11 @@ import { generatePdfPlot } from '../utils/pdfGenerator';
 
 export default function TopNavigationBar() {
   const { id } = useParams();
-  const { canvas } = useCadStore();
+  const { canvas, undo, redo, isDirty, isSaving, lastSavedAt, saveError } = useCadStore();
   const { user, organisation } = useAuthStore();
+
+  const saveStatusText = saveError ? 'Save error' : isSaving ? 'Saving...' : isDirty ? 'Unsaved' : lastSavedAt ? 'Saved' : 'Draft';
+  const saveStatusColor = saveError ? 'text-red-400 border-red-500/20 bg-red-500/10' : isSaving ? 'text-amber-400 border-amber-500/20 bg-amber-500/10' : isDirty ? 'text-slate-400 border-slate-500/20 bg-slate-500/10' : 'text-emerald-400 border-emerald-500/20 bg-emerald-500/10';
 
   const handleExport = () => {
     if (!canvas) {
@@ -41,7 +44,7 @@ export default function TopNavigationBar() {
           <div className="flex flex-col">
             <div className="flex items-center gap-3">
               <h2 className="text-lg font-bold text-slate-100 tracking-wide drop-shadow-md">Building Schema</h2>
-              <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] uppercase font-mono tracking-widest px-2 py-0.5 rounded shadow-[0_0_10px_rgba(16,185,129,0.1)]">Syncing</span>
+              <span className={`${saveStatusColor} text-[10px] uppercase font-mono tracking-widest px-2 py-0.5 rounded border`}>{saveStatusText}</span>
             </div>
             <span className="text-xs text-slate-500 font-mono">ID: {id || '1029-A'}</span>
           </div>
@@ -49,8 +52,8 @@ export default function TopNavigationBar() {
 
         {/* Center - Global Actions */}
         <div className="hidden md:flex items-center gap-2 glass-panel rounded-full px-4 py-2 border border-slate-700/50 shadow-[0_5px_20px_rgba(0,0,0,0.4)] backdrop-blur-xl">
-          <ActionButton icon={<Undo2 className="w-4 h-4" />} tooltip="Undo (Ctrl+Z)" />
-          <ActionButton icon={<Redo2 className="w-4 h-4" />} tooltip="Redo (Ctrl+Y)" />
+          <ActionButton icon={<Undo2 className="w-4 h-4" />} tooltip="Undo (Ctrl+Z)" onClick={undo} />
+          <ActionButton icon={<Redo2 className="w-4 h-4" />} tooltip="Redo (Ctrl+Y)" onClick={redo} />
           <div className="w-px h-4 bg-slate-700/60 mx-2" />
           <ActionButton icon={<Zap className="w-4 h-4" />} tooltip="Auto-Calculate Load" highlight />
         </div>
@@ -73,9 +76,9 @@ export default function TopNavigationBar() {
   );
 }
 
-function ActionButton({ icon, tooltip, highlight }: { icon: React.ReactNode; tooltip: string; highlight?: boolean }) {
+function ActionButton({ icon, tooltip, highlight, onClick }: { icon: React.ReactNode; tooltip: string; highlight?: boolean; onClick?: () => void }) {
   return (
-    <button className={`p-2 rounded-full transition-colors group relative ${highlight ? 'text-emerald-400 hover:bg-emerald-500/20' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'}`} aria-label={tooltip}>
+    <button onClick={onClick} className={`p-2 rounded-full transition-colors group relative ${highlight ? 'text-emerald-400 hover:bg-emerald-500/20' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'}`} aria-label={tooltip}>
       {icon}
       {/* Tooltip */}
       <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1 bg-slate-800 text-slate-200 text-[10px] font-medium rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none border border-slate-700">
