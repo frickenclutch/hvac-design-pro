@@ -106,8 +106,6 @@ export default function CadCanvas() {
 
     if (o.type === 'window') {
       const rect = new fabric.Rect({
-        left: cx - widthPx / 2,
-        top: cy - 4,
         width: widthPx,
         height: 8,
         fill: 'rgba(56, 189, 248, 0.3)',
@@ -662,6 +660,24 @@ export default function CadCanvas() {
       const ptr = canvas.getScenePoint(evt);
       const snapped = snapToGrid(ptr.x, ptr.y);
 
+      // ─ Right-click ends wall chain or cancels placement ─────────────
+      if (evt.button === 2) {
+        if (tool === 'draw_wall' && drawing.active) {
+          // End wall chain, return to select
+          if (drawing.ghostLine) canvas.remove(drawing.ghostLine);
+          drawing.ghostLine = null;
+          drawing.active = false;
+          state.setDrawingInfo(null);
+          state.setActiveTool('select');
+          canvas.requestRenderAll();
+        } else if (tool !== 'select' && tool !== 'pan') {
+          // Cancel any other placement tool
+          cancelDrawing();
+          state.setActiveTool('select');
+        }
+        return;
+      }
+
       // ─ Wall draw mode ───────────────────────────────────────────────
       if (tool === 'draw_wall' && evt.button === 0) {
         if (!drawing.active) {
@@ -720,7 +736,7 @@ export default function CadCanvas() {
         return;
       }
 
-      // ─ Window/Door placement ────────────────────────────────────────
+      // ─ Window/Door placement (place one, return to select) ─────────
       if ((tool === 'place_window' || tool === 'place_door') && evt.button === 0) {
         const hit = findNearestWall(snapped.x, snapped.y, 40);
         if (hit) {
@@ -742,10 +758,12 @@ export default function CadCanvas() {
           state.markDirty();
           syncFloorToCanvas(canvas);
         }
+        // Return to select after placing
+        state.setActiveTool('select');
         return;
       }
 
-      // ─ HVAC placement ──────────────────────────────────────────────
+      // ─ HVAC placement (place one, return to select) ────────────────
       if (tool === 'place_hvac' && evt.button === 0) {
         const unitId = `hvac-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         const unit: HvacUnit = {
@@ -761,10 +779,12 @@ export default function CadCanvas() {
         state.addHvacUnit(unit);
         state.markDirty();
         syncFloorToCanvas(canvas);
+        // Return to select after placing
+        state.setActiveTool('select');
         return;
       }
 
-      // ─ Label placement ─────────────────────────────────────────────
+      // ─ Label placement (place one, return to select) ───────────────
       if (tool === 'add_label' && evt.button === 0) {
         const annId = `ann-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         const annotation: Annotation = {
@@ -778,6 +798,8 @@ export default function CadCanvas() {
         state.addAnnotation(annotation);
         state.markDirty();
         syncFloorToCanvas(canvas);
+        // Return to select after placing
+        state.setActiveTool('select');
         return;
       }
 
@@ -829,14 +851,17 @@ export default function CadCanvas() {
 
           drawing.active = false;
           state.setDrawingInfo(null);
+          // Return to select after placing dimension
+          state.setActiveTool('select');
           canvas.requestRenderAll();
         }
         return;
       }
 
-      // ─ Room detection ──────────────────────────────────────────────
+      // ─ Room detection (run once, return to select) ─────────────────
       if (tool === 'room_detect' && evt.button === 0) {
         detectRooms();
+        state.setActiveTool('select');
         return;
       }
 
@@ -940,6 +965,38 @@ export default function CadCanvas() {
       }
     });
 
+    // ── Double-click ends wall chain ───────────────────────────────
+    canvas.on('mouse:dblclick', (opt) => {
+      const state = useCadStore.getState();
+      if (state.activeTool === 'draw_wall' && drawing.active) {
+        // Commit current ghost as final wall, then end chain
+        const evt = opt.e as MouseEvent;
+        const ptr = canvas.getScenePoint(evt);
+        const snapped = snapToGrid(ptr.x, ptr.y);
+        const lengthFt = computeLengthFt(drawing.startX, drawing.startY, snapped.x, snapped.y);
+
+        if (lengthFt >= 0.1) {
+          const wallId = `wall-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          state.addWall({
+            id: wallId,
+            x1: drawing.startX, y1: drawing.startY,
+            x2: snapped.x, y2: snapped.y,
+            thicknessIn: 3.5, rValue: 19,
+            material: 'insulated_stud' as WallMaterial,
+            fabricId: wallId,
+          });
+          state.markDirty();
+        }
+
+        if (drawing.ghostLine) canvas.remove(drawing.ghostLine);
+        drawing.ghostLine = null;
+        drawing.active = false;
+        state.setDrawingInfo(null);
+        state.setActiveTool('select');
+        syncFloorToCanvas(canvas);
+      }
+    });
+
     canvas.on('mouse:up', () => {
       if (isDragging) {
         canvas.setViewportTransform(canvas.viewportTransform!);
@@ -973,6 +1030,7 @@ export default function CadCanvas() {
 
       if (e.key === 'Escape') {
         cancelDrawing();
+        useCadStore.getState().setActiveTool('select');
         return;
       }
 

@@ -6,6 +6,8 @@ import WallLengthOverlay from '../features/cad/components/WallLengthOverlay';
 import FloorSelector from '../features/cad/components/FloorSelector';
 import LayerManager from '../features/cad/components/LayerManager';
 import { useAutoSave } from '../features/cad/hooks/useAutoSave';
+import HelpCenter from '../features/cad/components/HelpCenter';
+import HvacAssistant from '../features/cad/components/HvacAssistant';
 
 export default function CadWorkspace() {
   // Auto-save drawing to D1 / localStorage
@@ -34,6 +36,12 @@ export default function CadWorkspace() {
 
       {/* Live wall length / selection HUD overlay */}
       <WallLengthOverlay />
+
+      {/* HVAC Expert Assistant */}
+      <HvacAssistant />
+
+      {/* Help Center */}
+      <HelpCenter />
 
     </div>
   );
