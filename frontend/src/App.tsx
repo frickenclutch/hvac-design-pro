@@ -1,14 +1,16 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { Home, Compass, Settings, Users, LogOut, Thermometer, PenTool, Menu, X, Search } from 'lucide-react';
-import Dashboard from './pages/Dashboard';
-import CadWorkspace from './pages/CadWorkspace';
-import ManualJCalculator from './pages/ManualJCalculator';
-import SettingsPage from './pages/SettingsPage';
 import LandingPage from './pages/LandingPage';
 import OnboardingPage from './pages/OnboardingPage';
 import AuthPage from './pages/AuthPage';
 import TermsPage from './pages/TermsPage';
+
+// Lazy-load heavy pages (Three.js, jsPDF, Fabric.js stay out of initial bundle)
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const CadWorkspace = lazy(() => import('./pages/CadWorkspace'));
+const ManualJCalculator = lazy(() => import('./pages/ManualJCalculator'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 import { useAuthStore } from './features/auth/store/useAuthStore';
 import { usePreferencesStore } from './stores/usePreferencesStore';
 import SpotlightSearch, { SpotlightTrigger } from './features/spotlight/SpotlightSearch';
@@ -144,6 +146,7 @@ function AppLayout() {
 
       {/* Main Content Area */}
       <main id="main-content" role="main" className={`flex-1 relative overflow-y-auto ${isPublicScrollPage ? '' : 'md:overflow-hidden'} bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black`}>
+        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" /></div>}>
         <Routes>
           {/* Sign-in landing — skip button available */}
           <Route path="/" element={isAuthenticated ? <Navigate to="/dashboard" /> : <AuthPage />} />
@@ -162,6 +165,7 @@ function AppLayout() {
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
+        </Suspense>
       </main>
     </div>
   );

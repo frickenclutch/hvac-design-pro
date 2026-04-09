@@ -4,15 +4,18 @@ import {
   ChevronDown, ChevronUp, Home, Building2, Info,
   FileDown, Printer, Gauge, Shield, MapPin
 } from 'lucide-react';
-import jsPDF from 'jspdf';
+import type jsPDF from 'jspdf';
 import {
   type RoomInput, type DesignConditions, type WholeHouseResult,
   type GlassType, type DuctLocation, type WallGradeType, type Construction, type DailyRange,
   calculateWholeHouse, tonnageFromBtu, createDefaultRoom, createDefaultConditions, GLASS_PRESETS,
 } from '../engines/manualJ';
+import { lookupByZip } from '../engines/ashraeWeather';
+import { convertCadRoomsToManualJ } from '../engines/cadToManualJ';
+import { useCadStore } from '../features/cad/store/useCadStore';
 import RetailerFinderPanel from '../features/retailer/components/RetailerFinderPanel';
 import { useRetailerStore } from '../features/retailer/store/useRetailerStore';
-import Steve from '../components/Steve';
+import Mason from '../components/Mason';
 
 // ── Persistence helpers ───────────────────────────────────────────────────────
 const STORAGE_KEY = 'hvac_manualj_inputs';
@@ -41,6 +44,8 @@ export default function ManualJCalculator() {
   const [conditions, setConditions] = useState<DesignConditions>(saved?.conditions ?? createDefaultConditions());
   const resultsRef = useRef<HTMLDivElement>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
+  const [zipCode, setZipCode] = useState('');
+  const [zipLocation, setZipLocation] = useState<string | null>(null);
 
   // Auto-save all inputs to localStorage whenever they change
   const isFirstRender = useRef(true);
@@ -54,6 +59,18 @@ export default function ManualJCalculator() {
 
   const addRoom = () => {
     setRooms(prev => [...prev, createDefaultRoom(prev.length)]);
+    setWholeHouse(null);
+  };
+
+  const importFromCad = () => {
+    const cadState = useCadStore.getState();
+    const floor = cadState.floors.find(f => f.id === cadState.activeFloorId);
+    if (!floor || floor.rooms.length === 0) {
+      alert('No detected rooms found in the CAD workspace. Use the Detect Rooms (R) tool first.');
+      return;
+    }
+    const converted = convertCadRoomsToManualJ(floor, cadState.projectScale.pxPerFt);
+    setRooms(converted);
     setWholeHouse(null);
   };
 
@@ -176,10 +193,11 @@ export default function ManualJCalculator() {
   };
 
   // ── Export PDF ──────────────────────────────────────────────────────────
-  const handleExportPdf = () => {
+  const handleExportPdf = async () => {
     if (!wholeHouse) return;
     const wh = wholeHouse;
-    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
+    const { default: JsPDF } = await import('jspdf');
+    const doc = new JsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
     const pw = doc.internal.pageSize.getWidth();
     const margin = 50;
     let y = 50;
@@ -321,6 +339,46 @@ export default function ManualJCalculator() {
             Design Conditions
           </h3>
 
+          {/* ASHRAE Zip Code Lookup */}
+          <div className="mb-6 p-4 rounded-2xl bg-slate-800/30 border border-slate-700/40">
+            <div className="flex items-center gap-3 mb-3">
+              <MapPin className="w-4 h-4 text-emerald-400" />
+              <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">ASHRAE Weather Data Lookup</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                type="text"
+                value={zipCode}
+                onChange={e => setZipCode(e.target.value.replace(/\D/g, '').slice(0, 5))}
+                placeholder="Enter ZIP code..."
+                className="w-40 px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-sm placeholder-slate-500 focus:outline-none focus:border-emerald-500/60 transition-colors"
+                maxLength={5}
+              />
+              <button
+                onClick={() => {
+                  const result = lookupByZip(zipCode);
+                  if (result.found && result.conditions) {
+                    setConditions(c => ({ ...c, ...result.conditions }));
+                    setZipLocation(`${result.city}, ${result.state}`);
+                  } else {
+                    setZipLocation(null);
+                    alert(`No ASHRAE data found for ZIP ${zipCode}. Enter outdoor conditions manually.`);
+                  }
+                }}
+                disabled={zipCode.length < 3}
+                className="px-5 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-sm font-bold hover:bg-emerald-500/25 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                Auto-Fill
+              </button>
+              {zipLocation && (
+                <span className="text-sm text-emerald-400 font-medium flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5" />
+                  {zipLocation} — ASHRAE 99%/1% design temps applied
+                </span>
+              )}
+            </div>
+          </div>
+
           {/* Temperatures */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
             <NumericField label="Outdoor Heating (°F)" value={conditions.outdoorHeatingTemp}
@@ -409,10 +467,18 @@ export default function ManualJCalculator() {
               <Wind className="w-5 h-5 text-sky-400" />
               Room-by-Room Inputs
             </h3>
-            <button onClick={addRoom}
-              className="text-sm font-bold text-emerald-400 hover:text-emerald-300 transition-colors">
-              + Add Room
-            </button>
+            <div className="flex items-center gap-3">
+              <button onClick={importFromCad}
+                className="text-sm font-bold text-sky-400 hover:text-sky-300 transition-colors flex items-center gap-1.5"
+                title="Import detected rooms from CAD floor plan">
+                <ArrowRight className="w-3.5 h-3.5 rotate-180" />
+                Import from CAD
+              </button>
+              <button onClick={addRoom}
+                className="text-sm font-bold text-emerald-400 hover:text-emerald-300 transition-colors">
+                + Add Room
+              </button>
+            </div>
           </div>
 
           <div className="space-y-4">
@@ -536,8 +602,8 @@ export default function ManualJCalculator() {
         )}
       </div>
 
-      {/* Steve — AI HVAC Assistant */}
-      <Steve context="manualj" />
+      {/* Mason — AI HVAC Assistant */}
+      <Mason context="manualj" />
     </div>
   );
 }

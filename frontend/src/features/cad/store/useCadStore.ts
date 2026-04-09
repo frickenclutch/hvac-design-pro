@@ -83,6 +83,31 @@ export interface Annotation {
   text: string;
   rotation?: number;
   fabricId: string;
+  // Text styling (optional — label/note types)
+  fontFamily?: string;
+  fontSize?: number;
+  fontColor?: string;
+  fontWeight?: 'normal' | 'bold';
+  fontStyle?: 'normal' | 'italic';
+  textAlign?: 'left' | 'center' | 'right';
+  backgroundColor?: string;
+  borderColor?: string;
+  scaleX?: number;
+  scaleY?: number;
+}
+
+// ── Underlay Images ─────────────────────────────────────────────────────────────
+export interface UnderlayImage {
+  id: string;
+  name: string;       // original filename
+  dataUrl: string;     // base64 data URL
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  opacity: number;
+  locked: boolean;
 }
 
 // ── Floor ───────────────────────────────────────────────────────────────────────
@@ -98,6 +123,7 @@ export interface Floor {
   rooms: DetectedRoom[];
   hvacUnits: HvacUnit[];
   annotations: Annotation[];
+  underlays: UnderlayImage[];
 }
 
 // ── Layer ───────────────────────────────────────────────────────────────────────
@@ -152,12 +178,13 @@ const createDefaultFloor = (): Floor => ({
   rooms: [],
   hvacUnits: [],
   annotations: [],
+  underlays: [],
 });
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 let floorCounter = 1;
 
-const getActiveFloor = (state: CadState): Floor => {
+const _getActiveFloor = (state: CadState): Floor => {
   return (
     state.floors.find((f) => f.id === state.activeFloorId) ?? state.floors[0]
   );
@@ -198,6 +225,36 @@ interface CadState {
   gridSnapEnabled: boolean;
   setGridSnapEnabled: (enabled: boolean) => void;
 
+  // ── Appearance / Accessibility ─────────────────────────────────────────────
+  canvasBgColor: string;
+  setCanvasBgColor: (color: string) => void;
+  wallColor: string;
+  setWallColor: (color: string) => void;
+  openingColor: string;
+  setOpeningColor: (color: string) => void;
+  hvacAccentColor: string;
+  setHvacAccentColor: (color: string) => void;
+
+  showHelp: boolean;
+  setShowHelp: (show: boolean) => void;
+
+  // ── Thermal overlay ─────────────────────────────────────────────────────────
+  thermalOverlayEnabled: boolean;
+  setThermalOverlayEnabled: (enabled: boolean) => void;
+
+  // ── Panel visibility (all collapsible) ────────────────────────────────────
+  panelToolbox: boolean;
+  panelProperties: boolean;
+  panelFloors: boolean;
+  panelNavBar: boolean;
+  setPanelToolbox: (show: boolean) => void;
+  setPanelProperties: (show: boolean) => void;
+  setPanelFloors: (show: boolean) => void;
+  setPanelNavBar: (show: boolean) => void;
+  togglePanel: (panel: 'toolbox' | 'properties' | 'floors' | 'navbar') => void;
+  collapseAllPanels: () => void;
+  expandAllPanels: () => void;
+
   // ── Project scale ───────────────────────────────────────────────────────────
   projectScale: ProjectScale;
   setProjectScale: (scale: ProjectScale) => void;
@@ -223,8 +280,10 @@ interface CadState {
   selectedWallId: string | null;
   setSelectedWallId: (id: string | null) => void;
 
-  // ── Underlay (kept at root for backwards compat) ────────────────────────────
-  underlay?: string | null;
+  // ── Underlays (per-floor) ────────────────────────────────────────────────────
+  addUnderlay: (img: UnderlayImage) => void;
+  updateUnderlay: (id: string, patch: Partial<UnderlayImage>) => void;
+  removeUnderlay: (id: string) => void;
 
   // ── Openings ────────────────────────────────────────────────────────────────
   addOpening: (opening: Opening) => void;
@@ -241,6 +300,7 @@ interface CadState {
 
   // ── Annotations ─────────────────────────────────────────────────────────────
   addAnnotation: (ann: Annotation) => void;
+  updateAnnotation: (id: string, patch: Partial<Annotation>) => void;
   removeAnnotation: (id: string) => void;
 
   // ── Layers ──────────────────────────────────────────────────────────────────
@@ -295,12 +355,44 @@ export const useCadStore = create<CadState>((set, get) => {
     canvas: null,
     setCanvas: (canvas) => set({ canvas }),
 
+    // ── Thermal overlay ──────────────────────────────────────────────────────
+    thermalOverlayEnabled: false,
+    setThermalOverlayEnabled: (enabled) => set({ thermalOverlayEnabled: enabled }),
+
     // ── Canvas selection ──────────────────────────────────────────────────────
     selectedObject: null,
     setSelectedObject: (obj) => set({ selectedObject: obj }),
 
     gridSnapEnabled: true,
     setGridSnapEnabled: (enabled) => set({ gridSnapEnabled: enabled }),
+
+    // ── Appearance / Accessibility ───────────────────────────────────────────
+    canvasBgColor: '#0f172a',
+    setCanvasBgColor: (color) => set({ canvasBgColor: color }),
+    wallColor: '#34d399',
+    setWallColor: (color) => set({ wallColor: color }),
+    openingColor: '#38bdf8',
+    setOpeningColor: (color) => set({ openingColor: color }),
+    hvacAccentColor: '#22d3ee',
+    setHvacAccentColor: (color) => set({ hvacAccentColor: color }),
+
+    showHelp: false,
+    setShowHelp: (show) => set({ showHelp: show }),
+
+    panelToolbox: true,
+    panelProperties: true,
+    panelFloors: true,
+    panelNavBar: true,
+    setPanelToolbox: (show) => set({ panelToolbox: show }),
+    setPanelProperties: (show) => set({ panelProperties: show }),
+    setPanelFloors: (show) => set({ panelFloors: show }),
+    setPanelNavBar: (show) => set({ panelNavBar: show }),
+    togglePanel: (panel) => set((s) => {
+      const key = `panel${panel.charAt(0).toUpperCase() + panel.slice(1)}` as keyof typeof s;
+      return { [key]: !s[key] } as any;
+    }),
+    collapseAllPanels: () => set({ panelToolbox: false, panelProperties: false, panelFloors: false, panelNavBar: false }),
+    expandAllPanels: () => set({ panelToolbox: true, panelProperties: true, panelFloors: true, panelNavBar: true }),
 
     // ── Project scale ─────────────────────────────────────────────────────────
     projectScale: { pxPerFt: 40 },
@@ -330,6 +422,7 @@ export const useCadStore = create<CadState>((set, get) => {
         rooms: [],
         hvacUnits: [],
         annotations: [],
+        underlays: [],
       };
       set({
         floors: [...state.floors, newFloor],
@@ -396,8 +489,32 @@ export const useCadStore = create<CadState>((set, get) => {
     selectedWallId: null,
     setSelectedWallId: (id) => set({ selectedWallId: id }),
 
-    // ── Underlay ──────────────────────────────────────────────────────────────
-    underlay: null,
+    // ── Underlays ─────────────────────────────────────────────────────────────
+    addUnderlay: (img) =>
+      set((s) => ({
+        ...updateActiveFloor(s, (f) => ({
+          ...f,
+          underlays: [...(f.underlays ?? []), img],
+        })),
+      })),
+
+    updateUnderlay: (id, patch) =>
+      set((s) => ({
+        ...updateActiveFloor(s, (f) => ({
+          ...f,
+          underlays: (f.underlays ?? []).map((u) =>
+            u.id === id ? { ...u, ...patch } : u,
+          ),
+        })),
+      })),
+
+    removeUnderlay: (id) =>
+      set((s) => ({
+        ...updateActiveFloor(s, (f) => ({
+          ...f,
+          underlays: (f.underlays ?? []).filter((u) => u.id !== id),
+        })),
+      })),
 
     // ── Openings ──────────────────────────────────────────────────────────────
     addOpening: (opening) =>
@@ -465,6 +582,16 @@ export const useCadStore = create<CadState>((set, get) => {
         ...updateActiveFloor(s, (f) => ({
           ...f,
           annotations: [...f.annotations, ann],
+        })),
+      })),
+
+    updateAnnotation: (id, patch) =>
+      set((s) => ({
+        ...updateActiveFloor(s, (f) => ({
+          ...f,
+          annotations: f.annotations.map((a) =>
+            a.id === id ? { ...a, ...patch } : a,
+          ),
         })),
       })),
 
@@ -577,19 +704,32 @@ export const useCadStore = create<CadState>((set, get) => {
         gridSnapEnabled: s.gridSnapEnabled,
         zoom: s.zoom,
         panOffset: s.panOffset,
+        canvasBgColor: s.canvasBgColor,
+        wallColor: s.wallColor,
+        openingColor: s.openingColor,
+        hvacAccentColor: s.hvacAccentColor,
       };
     },
 
     loadDrawing: (data: any) => {
       if (!data) return;
+      // Ensure all floors have an underlays array (backwards compat)
+      const floors = (data.floors ?? [createDefaultFloor()]).map((f: any) => ({
+        ...f,
+        underlays: f.underlays ?? [],
+      }));
       set({
-        floors: data.floors ?? [createDefaultFloor()],
+        floors,
         activeFloorId: data.activeFloorId ?? data.floors?.[0]?.id ?? 'floor-1',
         layers: data.layers ?? [...DEFAULT_LAYERS],
         projectScale: data.projectScale ?? { pxPerFt: 40 },
         gridSnapEnabled: data.gridSnapEnabled ?? true,
         zoom: data.zoom ?? 1,
         panOffset: data.panOffset ?? { x: 0, y: 0 },
+        canvasBgColor: data.canvasBgColor ?? '#0f172a',
+        wallColor: data.wallColor ?? '#34d399',
+        openingColor: data.openingColor ?? '#38bdf8',
+        hvacAccentColor: data.hvacAccentColor ?? '#22d3ee',
         isDirty: false,
         undoStack: [],
         redoStack: [],

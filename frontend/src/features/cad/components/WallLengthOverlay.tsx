@@ -1,4 +1,5 @@
 import { useCadStore } from '../store/useCadStore';
+import { fmtLength, fmtSmallLength } from '../../../utils/units';
 
 /**
  * WallLengthOverlay
@@ -9,9 +10,6 @@ import { useCadStore } from '../store/useCadStore';
  *  – Otherwise: nothing
  *
  * This component reads only from Zustand — no props, no canvas refs needed.
- *
- * NOTE: The projectScale (40 px = 1 ft) will be surfaced in the Spotlight Search /
- * Settings system so any user role can discover and change it.
  */
 export default function WallLengthOverlay() {
   const { drawingInfo, selectedWallId, walls, projectScale } = useCadStore();
@@ -31,7 +29,7 @@ export default function WallLengthOverlay() {
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/90 border border-sky-500/40 shadow-[0_0_20px_rgba(56,189,248,0.25)] backdrop-blur-md">
           <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
           <span className="text-sky-300 text-xs font-bold font-mono tracking-wide">
-            {lengthFt.toFixed(1)} ft
+            {fmtLength(lengthFt)}
           </span>
         </div>
       </div>
@@ -55,7 +53,7 @@ export default function WallLengthOverlay() {
             </span>
             <Divider />
             <span className="text-emerald-300 text-xs font-bold font-mono">
-              {lengthFt.toFixed(1)} ft
+              {fmtLength(lengthFt)}
             </span>
             <Divider />
             <span className="text-slate-400 text-xs font-mono">
@@ -63,7 +61,7 @@ export default function WallLengthOverlay() {
             </span>
             <Divider />
             <span className="text-slate-400 text-xs font-mono">
-              {wall.thicknessIn}"
+              {fmtSmallLength(wall.thicknessIn, 0)}
             </span>
           </div>
         </div>

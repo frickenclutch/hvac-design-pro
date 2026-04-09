@@ -1,7 +1,8 @@
 import { useEffect, useRef, useCallback } from 'react';
 import * as fabric from 'fabric';
 import { useCadStore } from '../store/useCadStore';
-import type { WallMaterial, WallSegment, Opening, HvacUnit, Annotation } from '../store/useCadStore';
+import type { WallMaterial, WallSegment, Opening, HvacUnit, Annotation, UnderlayImage } from '../store/useCadStore';
+import { showSnapPulse, showPlacementConfirm, triggerHapticVibration } from '../utils/haptics';
 
 // ── Drawing state machine ──────────────────────────────────────────────────────
 interface DrawingState {
@@ -19,6 +20,7 @@ const PREFIX = {
   annotation: 'ann-',
   room: 'room-',
   ghost: '__ghost_',
+  underlay: 'underlay-',
 };
 
 // ── HVAC symbol dimensions ─────────────────────────────────────────────────────
@@ -40,12 +42,109 @@ export default function CadCanvas() {
 
   const { activeTool, setZoom, setPanOffset, setSelectedObject, setCanvas } = useCadStore();
 
+  // Label inline edit overlay state
+  const labelOverlayRef = useRef<HTMLDivElement | null>(null);
+
+  // Ref to hold syncFloorToCanvas so image handlers can call it without circular deps
+  const syncRef = useRef<((c: fabric.Canvas) => void) | null>(null);
+
+  // ── Process an image file into an underlay ─────────────────────────────────
+  const processImageFile = useCallback((file: File) => {
+    const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/svg+xml'];
+    if (file.type === 'application/pdf') {
+      alert('PDF import is not yet supported. Please convert your PDF to PNG or JPG first.');
+      return;
+    }
+    if (!validTypes.includes(file.type)) return;
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      if (!dataUrl) return;
+
+      const img = new Image();
+      img.onload = () => {
+        // Proportional sizing: fit to max 600px width or 400px height
+        let w = img.naturalWidth;
+        let h = img.naturalHeight;
+        const maxW = 600;
+        const maxH = 400;
+        if (w > maxW) { const r = maxW / w; w *= r; h *= r; }
+        if (h > maxH) { const r = maxH / h; w *= r; h *= r; }
+
+        // Center on visible canvas area
+        const canvas = fabricRef.current;
+        let cx = 300, cy = 300;
+        if (canvas) {
+          const vpt = canvas.viewportTransform;
+          const zoom = canvas.getZoom();
+          if (vpt) {
+            cx = ((canvas.width ?? 800) / 2 - vpt[4]) / zoom;
+            cy = ((canvas.height ?? 600) / 2 - vpt[5]) / zoom;
+          }
+        }
+
+        const underlayId = `underlay-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const underlayImg: UnderlayImage = {
+          id: underlayId,
+          name: file.name,
+          dataUrl,
+          x: cx - w / 2,
+          y: cy - h / 2,
+          width: w,
+          height: h,
+          rotation: 0,
+          opacity: 1,
+          locked: false,
+        };
+
+        const state = useCadStore.getState();
+        state.addUnderlay(underlayImg);
+        state.markDirty();
+        if (fabricRef.current && syncRef.current) syncRef.current(fabricRef.current);
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const files = e.dataTransfer.files;
+    for (let i = 0; i < files.length; i++) {
+      processImageFile(files[i]);
+    }
+  }, [processImageFile]);
+
   // ── Snap helper ────────────────────────────────────────────────────────────
+  const lastSnapRef = useRef<{ x: number; y: number }>({ x: -1, y: -1 });
   const snapToGrid = useCallback((worldX: number, worldY: number) => {
     const { gridSnapEnabled, projectScale } = useCadStore.getState();
     if (!gridSnapEnabled) return { x: worldX, y: worldY };
     const g = projectScale.pxPerFt;
-    return { x: Math.round(worldX / g) * g, y: Math.round(worldY / g) * g };
+    const snapped = { x: Math.round(worldX / g) * g, y: Math.round(worldY / g) * g };
+    // Fire haptic pulse when snap position changes
+    if (snapped.x !== lastSnapRef.current.x || snapped.y !== lastSnapRef.current.y) {
+      lastSnapRef.current = snapped;
+      const fc = fabricRef.current;
+      if (fc) {
+        const zoom = fc.getZoom();
+        const vpt = fc.viewportTransform!;
+        const screenX = snapped.x * zoom + vpt[4];
+        const screenY = snapped.y * zoom + vpt[5];
+        const container = fc.getSelectionElement()?.parentElement;
+        if (container) showSnapPulse(screenX, screenY, container);
+        triggerHapticVibration('snap');
+      }
+    }
+    return snapped;
   }, []);
 
   const computeLengthFt = useCallback((x1: number, y1: number, x2: number, y2: number): number => {
@@ -80,9 +179,20 @@ export default function CadCanvas() {
 
   // ── Create fabric objects ─────────────────────────────────────────────────
   const createWallLine = useCallback((w: WallSegment): fabric.Line => {
+    const state = useCadStore.getState();
+    let strokeColor = state.wallColor;
+
+    // Thermal overlay: color walls by R-value grade
+    if (state.thermalOverlayEnabled) {
+      if (w.rValue >= 21) strokeColor = '#22c55e';      // excellent
+      else if (w.rValue >= 13) strokeColor = '#3b82f6';  // good
+      else if (w.rValue >= 7) strokeColor = '#f59e0b';   // fair
+      else strokeColor = '#ef4444';                       // poor
+    }
+
     return new fabric.Line([w.x1, w.y1, w.x2, w.y2], {
-      stroke: '#34d399',
-      strokeWidth: 8,
+      stroke: strokeColor,
+      strokeWidth: state.thermalOverlayEnabled ? 10 : 8,
       strokeLineCap: 'round',
       selectable: true,
       evented: true,
@@ -108,8 +218,8 @@ export default function CadCanvas() {
       const rect = new fabric.Rect({
         width: widthPx,
         height: 8,
-        fill: 'rgba(56, 189, 248, 0.3)',
-        stroke: '#38bdf8',
+        fill: useCadStore.getState().openingColor + '4d',
+        stroke: useCadStore.getState().openingColor,
         strokeWidth: 2,
         angle,
         originX: 'center',
@@ -282,17 +392,33 @@ export default function CadCanvas() {
       });
     }
 
-    return new fabric.FabricText(ann.text, {
+    // Label / note / leader — apply custom text styling
+    const textObj = new fabric.FabricText(ann.text, {
       left: ann.x,
       top: ann.y,
-      fontSize: 14,
-      fontFamily: 'sans-serif',
-      fill: '#e2e8f0',
+      fontSize: ann.fontSize ?? 14,
+      fontFamily: ann.fontFamily ?? 'sans-serif',
+      fill: ann.fontColor ?? '#e2e8f0',
+      fontWeight: ann.fontWeight ?? 'normal',
+      fontStyle: ann.fontStyle ?? 'normal',
+      textAlign: ann.textAlign ?? 'left',
       angle: ann.rotation ?? 0,
+      scaleX: ann.scaleX ?? 1,
+      scaleY: ann.scaleY ?? 1,
+      backgroundColor: ann.backgroundColor ?? '',
       selectable: true,
       evented: true,
       name: `${PREFIX.annotation}${ann.id}`,
     });
+
+    if (ann.borderColor) {
+      textObj.set({
+        stroke: ann.borderColor,
+        strokeWidth: 1,
+      });
+    }
+
+    return textObj;
   }, []);
 
   // ── Render all floor objects onto canvas ───────────────────────────────────
@@ -307,7 +433,7 @@ export default function CadCanvas() {
       if (!n) return false;
       return n.startsWith(PREFIX.wall) || n.startsWith(PREFIX.opening) ||
              n.startsWith(PREFIX.hvac) || n.startsWith(PREFIX.annotation) ||
-             n.startsWith(PREFIX.room);
+             n.startsWith(PREFIX.room) || n.startsWith(PREFIX.underlay);
     });
     toRemove.forEach(obj => canvas.remove(obj));
 
@@ -315,6 +441,31 @@ export default function CadCanvas() {
     const openingsLayer = state.layers.find(l => l.id === 'openings');
     const hvacLayer = state.layers.find(l => l.id === 'hvac');
     const annotationsLayer = state.layers.find(l => l.id === 'annotations');
+    const underlayLayer = state.layers.find(l => l.id === 'underlay');
+
+    // Underlays (behind everything else)
+    if (underlayLayer?.visible && floor.underlays) {
+      for (const u of floor.underlays) {
+        const imgEl = new Image();
+        imgEl.src = u.dataUrl;
+        const fImg = new fabric.FabricImage(imgEl, {
+          left: u.x,
+          top: u.y,
+          scaleX: u.width / (imgEl.naturalWidth || u.width || 1),
+          scaleY: u.height / (imgEl.naturalHeight || u.height || 1),
+          angle: u.rotation,
+          opacity: u.opacity * (underlayLayer.opacity ?? 1),
+          selectable: !underlayLayer.locked && !u.locked,
+          evented: !underlayLayer.locked && !u.locked,
+          name: `${PREFIX.underlay}${u.id}`,
+          hasControls: !underlayLayer.locked && !u.locked,
+          hasBorders: !underlayLayer.locked && !u.locked,
+          lockRotation: underlayLayer.locked || u.locked,
+        });
+        canvas.add(fImg);
+        canvas.sendObjectToBack(fImg);
+      }
+    }
 
     // Room fills (behind everything)
     for (const room of floor.rooms) {
@@ -401,6 +552,9 @@ export default function CadCanvas() {
 
     canvas.requestRenderAll();
   }, [createWallLine, createOpeningShape, createHvacShape, createAnnotationShape]);
+
+  // Keep ref in sync for image import handlers
+  syncRef.current = syncFloorToCanvas;
 
   // ── Room detection algorithm ──────────────────────────────────────────────
   const detectRooms = useCallback(() => {
@@ -546,7 +700,7 @@ export default function CadCanvas() {
     const canvas = new fabric.Canvas(canvasRef.current, {
       width: window.innerWidth,
       height: window.innerHeight,
-      backgroundColor: '#0f172a',
+      backgroundColor: useCadStore.getState().canvasBgColor,
       selection: true,
       preserveObjectStacking: true,
       fireRightClick: true,
@@ -722,6 +876,17 @@ export default function CadCanvas() {
             // Re-sync canvas
             syncFloorToCanvas(canvas);
 
+            // Haptic feedback for wall placement
+            {
+              const zoom = canvas.getZoom();
+              const vpt = canvas.viewportTransform!;
+              const sx = endX * zoom + vpt[4];
+              const sy = endY * zoom + vpt[5];
+              const container = canvas.getSelectionElement()?.parentElement;
+              if (container) showPlacementConfirm(sx, sy, container);
+              triggerHapticVibration('place');
+            }
+
             // Chain mode
             drawing.startX = endX;
             drawing.startY = endY;
@@ -757,6 +922,15 @@ export default function CadCanvas() {
           state.addOpening(opening);
           state.markDirty();
           syncFloorToCanvas(canvas);
+
+          // Haptic feedback for opening placement
+          const zoom = canvas.getZoom();
+          const vpt = canvas.viewportTransform!;
+          const sx = snapped.x * zoom + vpt[4];
+          const sy = snapped.y * zoom + vpt[5];
+          const container = canvas.getSelectionElement()?.parentElement;
+          if (container) showPlacementConfirm(sx, sy, container);
+          triggerHapticVibration('place');
         }
         // Return to select after placing
         state.setActiveTool('select');
@@ -779,27 +953,76 @@ export default function CadCanvas() {
         state.addHvacUnit(unit);
         state.markDirty();
         syncFloorToCanvas(canvas);
+
+        // Haptic feedback for HVAC placement
+        {
+          const zoom = canvas.getZoom();
+          const vpt = canvas.viewportTransform!;
+          const sx = snapped.x * zoom + vpt[4];
+          const sy = snapped.y * zoom + vpt[5];
+          const container = canvas.getSelectionElement()?.parentElement;
+          if (container) showPlacementConfirm(sx, sy, container);
+          triggerHapticVibration('place');
+        }
+
         // Return to select after placing
         state.setActiveTool('select');
         return;
       }
 
-      // ─ Label placement (place one, return to select) ───────────────
+      // ─ Label placement with inline text input ────────────────────
       if (tool === 'add_label' && evt.button === 0) {
-        const annId = `ann-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        const annotation: Annotation = {
-          id: annId,
-          type: 'label',
-          x: snapped.x,
-          y: snapped.y,
-          text: 'Label',
-          fabricId: `${PREFIX.annotation}${annId}`,
+        // Compute screen coordinates for the overlay
+        const zoom = canvas.getZoom();
+        const vpt = canvas.viewportTransform!;
+        const screenX = snapped.x * zoom + vpt[4];
+        const screenY = snapped.y * zoom + vpt[5];
+        const worldX = snapped.x;
+        const worldY = snapped.y;
+
+        // Remove any existing label overlay
+        if (labelOverlayRef.current) {
+          labelOverlayRef.current.remove();
+          labelOverlayRef.current = null;
+        }
+
+        // Create inline text input overlay
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `position:fixed;left:${screenX}px;top:${screenY}px;z-index:9999;`;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'Label';
+        input.style.cssText = `background:rgba(15,23,42,0.95);color:#e2e8f0;border:1px solid rgba(52,211,153,0.5);border-radius:6px;padding:4px 8px;font-size:14px;font-family:sans-serif;outline:none;min-width:120px;box-shadow:0 0 15px rgba(16,185,129,0.2);`;
+        overlay.appendChild(input);
+        document.body.appendChild(overlay);
+        labelOverlayRef.current = overlay;
+        input.focus();
+
+        const commitLabel = (text: string) => {
+          if (overlay.parentNode) overlay.remove();
+          labelOverlayRef.current = null;
+          const finalText = text.trim() || 'Label';
+          const annId = `ann-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          const annotation: Annotation = {
+            id: annId,
+            type: 'label',
+            x: worldX,
+            y: worldY,
+            text: finalText,
+            fabricId: `${PREFIX.annotation}${annId}`,
+          };
+          const st = useCadStore.getState();
+          st.addAnnotation(annotation);
+          st.markDirty();
+          syncFloorToCanvas(canvas);
+          st.setActiveTool('select');
         };
-        state.addAnnotation(annotation);
-        state.markDirty();
-        syncFloorToCanvas(canvas);
-        // Return to select after placing
-        state.setActiveTool('select');
+
+        input.addEventListener('keydown', (ke) => {
+          if (ke.key === 'Enter') { ke.preventDefault(); commitLabel(input.value); }
+          if (ke.key === 'Escape') { overlay.remove(); labelOverlayRef.current = null; useCadStore.getState().setActiveTool('select'); }
+        });
+        input.addEventListener('blur', () => { if (overlay.parentNode) commitLabel(input.value); });
         return;
       }
 
@@ -1023,6 +1246,33 @@ export default function CadCanvas() {
       useCadStore.getState().setSelectedWallId(null);
     });
 
+    // ── Underlay object:modified — sync back to store ────────────────────
+    canvas.on('object:modified', (e) => {
+      const obj = e.target as any;
+      if (!obj?.name?.startsWith(PREFIX.underlay)) return;
+      const id = (obj.name as string).replace(PREFIX.underlay, '');
+      const state = useCadStore.getState();
+      const floor = state.floors.find(f => f.id === state.activeFloorId);
+      const existing = floor?.underlays?.find(u => u.id === id);
+      if (!existing) return;
+
+      const scaleX = obj.scaleX ?? 1;
+      const scaleY = obj.scaleY ?? 1;
+      const newWidth = (existing.width) * scaleX / (existing.width / (obj.width ?? existing.width));
+      // Simpler: use the actual rendered dimensions
+      const renderedW = (obj.width ?? existing.width) * scaleX;
+      const renderedH = (obj.height ?? existing.height) * scaleY;
+
+      state.updateUnderlay(id, {
+        x: obj.left ?? existing.x,
+        y: obj.top ?? existing.y,
+        width: renderedW,
+        height: renderedH,
+        rotation: obj.angle ?? existing.rotation,
+      });
+      state.markDirty();
+    });
+
     // ── Keyboard shortcuts ───────────────────────────────────────────────
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't handle shortcuts when typing in inputs
@@ -1060,14 +1310,50 @@ export default function CadCanvas() {
         }
       }
 
-      // Tool shortcuts
+      // Tool shortcuts (single keys, no modifiers)
       if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (e.key === 'v' || e.key === 'V') useCadStore.getState().setActiveTool('select');
-        if (e.key === 'h' || e.key === 'H') useCadStore.getState().setActiveTool('pan');
-        if (e.key === 'w' || e.key === 'W') useCadStore.getState().setActiveTool('draw_wall');
-        if (e.key === 'd' || e.key === 'D') useCadStore.getState().setActiveTool('add_dimension');
-        if (e.key === 'l' || e.key === 'L') useCadStore.getState().setActiveTool('add_label');
-        if (e.key === 'r' || e.key === 'R') useCadStore.getState().setActiveTool('room_detect');
+        const state = useCadStore.getState();
+        const key = e.key.toLowerCase();
+
+        // Tool selection
+        if (key === 'v') state.setActiveTool('select');
+        else if (key === 'h') state.setActiveTool('pan');
+        else if (key === 'w') state.setActiveTool('draw_wall');
+        else if (key === 'd') state.setActiveTool('add_dimension');
+        else if (key === 'l') state.setActiveTool('add_label');
+        else if (key === 'r') state.setActiveTool('room_detect');
+        // Placement tools
+        else if (key === 'o') state.setActiveTool('place_door');
+        else if (key === 'i') state.setActiveTool('place_window');
+        else if (key === 'u') state.setActiveTool('place_hvac');
+        // Panel toggles
+        else if (key === 't') state.togglePanel('toolbox');
+        else if (key === 'p') state.togglePanel('properties');
+        else if (key === 'f') state.togglePanel('floors');
+        else if (key === 'n') state.togglePanel('navbar');
+        // Grid snap toggle
+        else if (key === 'g') state.setGridSnapEnabled(!state.gridSnapEnabled);
+        // Focus mode — collapse all panels
+        else if (key === '`') {
+          const allCollapsed = !state.panelToolbox && !state.panelProperties && !state.panelFloors && !state.panelNavBar;
+          if (allCollapsed) state.expandAllPanels();
+          else state.collapseAllPanels();
+        }
+      }
+
+      // Ctrl+S / Cmd+S — Save
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        // Trigger save via click on save button (reuse TopNavigationBar logic)
+        const saveBtn = document.querySelector('[aria-label="Save Project"]') as HTMLButtonElement;
+        if (saveBtn) saveBtn.click();
+      }
+
+      // Ctrl+E / Cmd+E — Export PDF
+      if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
+        e.preventDefault();
+        const exportBtn = document.querySelector('[aria-label="Export PDF"]') as HTMLButtonElement;
+        if (exportBtn) exportBtn.click();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -1087,7 +1373,8 @@ export default function CadCanvas() {
       if (
         state.activeFloorId !== prevState.activeFloorId ||
         state.floors !== prevState.floors ||
-        state.layers !== prevState.layers
+        state.layers !== prevState.layers ||
+        state.thermalOverlayEnabled !== prevState.thermalOverlayEnabled
       ) {
         syncFloorToCanvas(canvas);
       }
@@ -1145,7 +1432,11 @@ export default function CadCanvas() {
   }, [activeTool]);
 
   return (
-    <div className="absolute inset-0 z-0 bg-slate-900 overflow-hidden">
+    <div
+      className="absolute inset-0 z-0 bg-slate-900 overflow-hidden"
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
       <canvas ref={canvasRef} />
     </div>
   );

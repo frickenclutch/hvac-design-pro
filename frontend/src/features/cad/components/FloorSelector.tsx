@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Plus, Eye, EyeOff, Lock, Unlock, Trash2, Layers } from 'lucide-react';
+import { Plus, Eye, EyeOff, Lock, Unlock, Trash2, Layers, ChevronUp, ChevronDown } from 'lucide-react';
 import { useCadStore } from '../store/useCadStore';
+import { fmtLength } from '../../../utils/units';
 
 export default function FloorSelector() {
-  const { floors, activeFloorId, setActiveFloor, addFloor, updateFloor, removeFloor } = useCadStore();
+  const { floors, activeFloorId, setActiveFloor, addFloor, updateFloor, removeFloor, panelFloors, setPanelFloors } = useCadStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -33,15 +34,35 @@ export default function FloorSelector() {
     if (e.key === 'Escape') setEditingId(null);
   };
 
+  if (!panelFloors) {
+    return (
+      <div className="absolute top-16 left-1/2 -translate-x-1/2 z-10 pointer-events-auto">
+        <button
+          onClick={() => setPanelFloors(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/70 border border-slate-700/50 shadow-[0_5px_20px_rgba(0,0,0,0.6)] backdrop-blur-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
+          title="Show Floor Selector (F)"
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <ChevronDown className="w-3 h-3" />
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="absolute top-16 left-1/2 -translate-x-1/2 z-10 pointer-events-auto">
       <div className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-slate-900/70 border border-slate-700/50 shadow-[0_5px_30px_rgba(0,0,0,0.6)] backdrop-blur-xl">
 
-        {/* Layers icon */}
-        <div className="flex items-center gap-1.5 px-2 py-1 text-slate-500">
+        {/* Layers icon + collapse */}
+        <button
+          onClick={() => setPanelFloors(false)}
+          className="flex items-center gap-1.5 px-2 py-1 text-slate-500 hover:text-slate-300 transition-colors rounded-lg hover:bg-slate-800/50"
+          title="Hide Floor Selector (F)"
+        >
           <Layers className="w-3.5 h-3.5" />
           <span className="text-[10px] font-mono uppercase tracking-widest">Floors</span>
-        </div>
+          <ChevronUp className="w-3 h-3" />
+        </button>
 
         <div className="w-px h-5 bg-slate-700/60 mx-1" />
 
@@ -87,9 +108,9 @@ export default function FloorSelector() {
                 )}
 
                 {/* Floor height */}
-                {floor.height != null && (
+                {floor.heightFt != null && (
                   <span className={`text-[10px] font-mono ${isActive ? 'text-emerald-400/60' : 'text-slate-500'}`}>
-                    {floor.height} ft
+                    {fmtLength(floor.heightFt, 0)}
                   </span>
                 )}
 
@@ -101,16 +122,16 @@ export default function FloorSelector() {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      updateFloor(floor.id, { visible: !floor.visible });
+                      updateFloor(floor.id, { isVisible: !floor.isVisible });
                     }}
                     className={`p-0.5 rounded transition-colors ${
-                      floor.visible === false
+                      floor.isVisible === false
                         ? 'text-amber-400/70 hover:text-amber-300'
                         : 'text-slate-500 hover:text-slate-300'
                     }`}
-                    aria-label={floor.visible === false ? 'Show floor' : 'Hide floor'}
+                    aria-label={floor.isVisible === false ? 'Show floor' : 'Hide floor'}
                   >
-                    {floor.visible === false ? (
+                    {floor.isVisible === false ? (
                       <EyeOff className="w-3 h-3" />
                     ) : (
                       <Eye className="w-3 h-3" />
@@ -121,16 +142,16 @@ export default function FloorSelector() {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      updateFloor(floor.id, { locked: !floor.locked });
+                      updateFloor(floor.id, { isLocked: !floor.isLocked });
                     }}
                     className={`p-0.5 rounded transition-colors ${
-                      floor.locked
+                      floor.isLocked
                         ? 'text-rose-400/70 hover:text-rose-300'
                         : 'text-slate-500 hover:text-slate-300'
                     }`}
-                    aria-label={floor.locked ? 'Unlock floor' : 'Lock floor'}
+                    aria-label={floor.isLocked ? 'Unlock floor' : 'Lock floor'}
                   >
-                    {floor.locked ? (
+                    {floor.isLocked ? (
                       <Lock className="w-3 h-3" />
                     ) : (
                       <Unlock className="w-3 h-3" />

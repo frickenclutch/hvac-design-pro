@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import {
-  HelpCircle, X, MousePointer2, Hand, SquarePen, LayoutGrid, DoorOpen,
-  Wind, Ruler, Type, ScanLine, Layers, Building2, Keyboard, ChevronRight,
-  Undo2, Redo2, Trash2, Save,
+  HelpCircle, X, SquarePen,
+  Layers, Building2, Keyboard, ChevronRight,
+  Save, Box,
 } from 'lucide-react';
 
 interface HelpSection {
@@ -76,6 +76,45 @@ const sections: HelpSection[] = [
     ],
   },
   {
+    id: '3d-view',
+    title: '3D View Mode',
+    icon: <Box className="w-4 h-4" />,
+    items: [
+      {
+        title: 'Opening 3D View',
+        desc: 'Click the "3D View" button in the top navigation bar to enter 3D mode. Your entire floor plan — walls, doors, windows, and HVAC units — renders as interactive 3D geometry.',
+      },
+      {
+        title: 'Orbit (rotate)',
+        desc: 'Click and drag (left mouse button) anywhere on the scene to orbit the camera around your building. The view rotates around the center of your model.',
+      },
+      {
+        title: 'Pan (move)',
+        desc: 'Right-click and drag to pan the camera sideways and vertically. This shifts your viewpoint without changing the angle.',
+      },
+      {
+        title: 'Zoom',
+        desc: 'Scroll the mouse wheel to zoom in and out. The zoom is smooth and dampened for a natural feel.',
+      },
+      {
+        title: 'Hover inspection',
+        desc: 'Move your mouse over any wall, door, window, or HVAC unit to see a tooltip with its properties — material, dimensions, R-value, CFM, and more.',
+      },
+      {
+        title: 'Floor visibility',
+        desc: 'Use the floor selector in the top-left corner to show or hide individual floors. Click "All Floors" to see the full multi-story stack.',
+      },
+      {
+        title: 'Wireframe & Shadows',
+        desc: 'Toggle wireframe mode (grid icon) to see through walls. Toggle shadows (sun icon) for lighting effects. Both controls are in the top-right corner.',
+      },
+      {
+        title: 'Exiting 3D View',
+        desc: 'Click the X button in the top-right corner or press Escape to return to the 2D canvas editor.',
+      },
+    ],
+  },
+  {
     id: 'floors',
     title: 'Multi-Floor System',
     icon: <Building2 className="w-4 h-4" />,
@@ -127,7 +166,8 @@ const sections: HelpSection[] = [
       { title: 'Ctrl + Z', desc: 'Undo last action' },
       { title: 'Ctrl + Y', desc: 'Redo last action' },
       { title: 'Delete', desc: 'Remove selected wall' },
-      { title: 'ESC', desc: 'Cancel current tool / return to Select' },
+      { title: 'Ctrl + K', desc: 'Search all assets' },
+      { title: 'ESC', desc: 'Cancel tool / exit 3D View / close dialogs' },
       { title: 'Right-click', desc: 'End wall chain / cancel placement' },
       { title: 'Double-click', desc: 'Place final wall segment and finish chain' },
       { title: 'Scroll wheel', desc: 'Zoom in / out' },
@@ -163,28 +203,14 @@ const sections: HelpSection[] = [
   },
 ];
 
-export default function HelpCenter() {
-  const [isOpen, setIsOpen] = useState(false);
+export default function HelpCenter({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const [expandedSection, setExpandedSection] = useState<string | null>('getting-started');
 
-  if (!isOpen) {
-    return (
-      <button
-        onClick={() => setIsOpen(true)}
-        className="absolute bottom-6 right-6 z-20 p-3 rounded-full glass-panel border border-slate-700/50 backdrop-blur-xl bg-slate-900/70 text-slate-400 hover:text-emerald-400 hover:border-emerald-500/30 transition-all shadow-[0_0_30px_rgba(0,0,0,0.5)] group"
-        aria-label="Help Center"
-      >
-        <HelpCircle className="w-5 h-5" />
-        <div className="absolute right-full top-1/2 -translate-y-1/2 mr-3 px-3 py-1.5 bg-slate-800/90 border border-slate-700 text-slate-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none backdrop-blur-md shadow-xl">
-          Help Center
-          <div className="absolute top-1/2 -right-1 -translate-y-1/2 w-2 h-2 bg-slate-800/90 border-r border-t border-slate-700 rotate-45" />
-        </div>
-      </button>
-    );
-  }
+  if (!isOpen) return null;
 
   return (
-    <div className="absolute bottom-6 right-6 z-20 w-[380px] max-h-[70vh] glass-panel rounded-2xl flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.6)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/80 overflow-hidden animate-in zoom-in-95 fade-in duration-200">
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm pointer-events-auto" onClick={onClose}>
+    <div className="w-[420px] max-h-[80vh] glass-panel rounded-2xl flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.6)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/80 overflow-hidden animate-in zoom-in-95 fade-in duration-200" onClick={e => e.stopPropagation()}>
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-900/50 flex-shrink-0">
         <div className="flex items-center gap-2">
@@ -192,7 +218,7 @@ export default function HelpCenter() {
           <h3 className="text-sm font-bold text-slate-200 uppercase tracking-widest">Help Center</h3>
         </div>
         <button
-          onClick={() => setIsOpen(false)}
+          onClick={onClose}
           className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors"
         >
           <X className="w-4 h-4" />
@@ -250,6 +276,7 @@ export default function HelpCenter() {
           HVAC DesignPro CAD Workspace — Press <kbd className="text-emerald-500/70 font-mono">ESC</kbd> to return to Select at any time
         </p>
       </div>
+    </div>
     </div>
   );
 }

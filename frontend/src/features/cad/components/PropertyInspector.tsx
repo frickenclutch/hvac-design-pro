@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react';
 import { useCadStore } from '../store/useCadStore';
-import type { WallMaterial, Opening, HvacUnit, DetectedRoom } from '../store/useCadStore';
-import { Settings2, Layers, Cpu, Ruler, Triangle, Wind, DoorOpen, LayoutGrid, ScanLine } from 'lucide-react';
+import type { WallMaterial, Opening, HvacUnit, DetectedRoom, UnderlayImage, Annotation } from '../store/useCadStore';
+import { fmtLength, fmtArea, fmtTemp, smallLengthUnit } from '../../../utils/units';
+import { Settings2, Layers, Ruler, Triangle, Wind, DoorOpen, LayoutGrid, ScanLine, ImageIcon, Lock, Unlock, Trash2, Type, RotateCcw, Bold, Italic, AlignLeft, AlignCenter, AlignRight, ChevronLeft, ChevronRight } from 'lucide-react';
 
 const MATERIAL_LABELS: Record<WallMaterial, string> = {
   insulated_stud: 'Insulated Wood Stud',
@@ -22,7 +23,7 @@ const HVAC_TYPE_LABELS: Record<string, string> = {
 const uFactor = (r: number) => (r > 0 ? (1 / r).toFixed(4) : '—');
 
 export default function PropertyInspector() {
-  const { selectedObject, selectedWallId, walls, updateWall, updateOpening, updateHvacUnit, floors, activeFloorId } = useCadStore();
+  const { selectedObject, selectedWallId, walls, updateWall, updateOpening, updateHvacUnit, updateUnderlay, removeUnderlay, updateAnnotation, floors, activeFloorId, panelProperties, setPanelProperties } = useCadStore();
 
   const floor = floors.find(f => f.id === activeFloorId);
 
@@ -46,7 +47,37 @@ export default function PropertyInspector() {
     return floor.hvacUnits.find(u => u.id === id) ?? null;
   }, [selectedObject, floor]);
 
-  const headerText = selectedWall ? 'Wall Selected' : selectedOpening ? 'Opening Selected' : selectedHvac ? 'HVAC Unit Selected' : selectedObject ? 'Object Selected' : 'Canvas Settings';
+  const selectedUnderlay = useMemo(() => {
+    if (!selectedObject || !floor) return null;
+    const name = (selectedObject as any).name as string | undefined;
+    if (!name?.startsWith('underlay-')) return null;
+    const id = name.replace('underlay-', '');
+    return floor.underlays?.find(u => u.id === id) ?? null;
+  }, [selectedObject, floor]);
+
+  const selectedAnnotation = useMemo(() => {
+    if (!selectedObject || !floor) return null;
+    const name = (selectedObject as any).name as string | undefined;
+    if (!name?.startsWith('ann-')) return null;
+    const id = name.replace('ann-', '');
+    return floor.annotations.find(a => a.id === id) ?? null;
+  }, [selectedObject, floor]);
+
+  const headerText = selectedWall ? 'Wall Selected' : selectedOpening ? 'Opening Selected' : selectedHvac ? 'HVAC Unit Selected' : selectedUnderlay ? 'Underlay Selected' : selectedAnnotation ? 'Label Selected' : selectedObject ? 'Object Selected' : 'Canvas Settings';
+
+  if (!panelProperties) {
+    return (
+      <div className="absolute right-3 top-24 z-10">
+        <button
+          onClick={() => setPanelProperties(true)}
+          className="p-2 glass-panel rounded-xl border border-slate-700/50 backdrop-blur-xl bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800 transition-all shadow-[0_0_20px_rgba(0,0,0,0.6)]"
+          title="Show Properties (P)"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="absolute right-6 top-24 bottom-6 w-80 z-10 pointer-events-none">
@@ -54,9 +85,18 @@ export default function PropertyInspector() {
 
         {/* Header */}
         <div className="p-5 border-b border-slate-800 bg-slate-900/50">
-          <div className="flex items-center gap-2 mb-1">
-            <Settings2 className="w-4 h-4 text-emerald-400" />
-            <h3 className="text-sm font-bold text-slate-200 uppercase tracking-widest">Properties</h3>
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-2">
+              <Settings2 className="w-4 h-4 text-emerald-400" />
+              <h3 className="text-sm font-bold text-slate-200 uppercase tracking-widest">Properties</h3>
+            </div>
+            <button
+              onClick={() => setPanelProperties(false)}
+              className="p-1 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800/80 transition-colors"
+              title="Hide Properties (P)"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
           </div>
           <p className="text-xs text-slate-500 font-mono">{headerText}</p>
         </div>
@@ -77,6 +117,19 @@ export default function PropertyInspector() {
           ) : selectedHvac ? (
             <HvacPanel unit={selectedHvac} onUpdate={(patch) => updateHvacUnit(selectedHvac.id, patch)} />
 
+          ) : selectedUnderlay ? (
+            <UnderlayPanel
+              underlay={selectedUnderlay}
+              onUpdate={(patch) => updateUnderlay(selectedUnderlay.id, patch)}
+              onDelete={() => {
+                removeUnderlay(selectedUnderlay.id);
+                useCadStore.getState().setSelectedObject(null);
+              }}
+            />
+
+          ) : selectedAnnotation && selectedAnnotation.type === 'label' ? (
+            <AnnotationPanel annotation={selectedAnnotation} onUpdate={(patch) => { updateAnnotation(selectedAnnotation.id, patch); useCadStore.getState().markDirty(); }} />
+
           ) : floor && floor.rooms.length > 0 && !selectedObject ? (
             <RoomSummaryPanel rooms={floor.rooms} />
 
@@ -87,11 +140,12 @@ export default function PropertyInspector() {
                 <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
                   <Layers className="w-3 h-3" /> Project Defaults
                 </h4>
-                <PropertyField label="Default Ceiling Height" value="9 ft" />
+                <PropertyField label="Default Ceiling Height" value={fmtLength(9, 0)} />
                 <PropertyField label="Zone Type" value="Conditioned Space" />
-                <PropertyField label="Design Temp (Cooling)" value="75 °F" />
-                <PropertyField label="Design Temp (Heating)" value="70 °F" />
+                <PropertyField label="Design Temp (Cooling)" value={fmtTemp(75)} />
+                <PropertyField label="Design Temp (Heating)" value={fmtTemp(70)} />
               </div>
+              <AppearancePanel />
             </div>
           ) : (
             /* ── GENERIC OBJECT SELECTED ── */
@@ -139,10 +193,10 @@ function WallPanel({ wall, onUpdate }: WallPanelProps) {
         <h4 className="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-4 flex items-center gap-2">
           <Ruler className="w-3 h-3" /> Geometry
         </h4>
-        <PropertyField label="Length" value={`${lengthFt} ft`} isReadOnly />
+        <PropertyField label="Length" value={fmtLength(parseFloat(lengthFt))} isReadOnly />
         <div className="mb-4">
           <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">
-            Thickness (in)
+            Thickness ({smallLengthUnit()})
           </label>
           <input
             type="number"
@@ -207,6 +261,21 @@ function WallPanel({ wall, onUpdate }: WallPanelProps) {
           value={uFactor(wall.rValue)}
           isReadOnly
         />
+
+        {/* Thermal grade indicator */}
+        <div className="mt-3 p-2.5 rounded-lg border" style={{
+          borderColor: wall.rValue >= 21 ? '#22c55e40' : wall.rValue >= 13 ? '#3b82f640' : wall.rValue >= 7 ? '#f59e0b40' : '#ef444440',
+          backgroundColor: wall.rValue >= 21 ? '#22c55e08' : wall.rValue >= 13 ? '#3b82f608' : wall.rValue >= 7 ? '#f59e0b08' : '#ef444408',
+        }}>
+          <div className="flex items-center justify-between">
+            <span className="text-[9px] text-slate-500 uppercase tracking-wider font-bold">Thermal Grade</span>
+            <span className="text-[10px] font-bold" style={{
+              color: wall.rValue >= 21 ? '#22c55e' : wall.rValue >= 13 ? '#3b82f6' : wall.rValue >= 7 ? '#f59e0b' : '#ef4444',
+            }}>
+              {wall.rValue >= 21 ? 'Excellent' : wall.rValue >= 13 ? 'Good' : wall.rValue >= 7 ? 'Fair' : 'Poor'}
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* Identification */}
@@ -221,11 +290,27 @@ function WallPanel({ wall, onUpdate }: WallPanelProps) {
   );
 }
 
+// ── Door size presets ────────────────────────────────────────────────────────
+const DOOR_SIZE_PRESETS = [
+  { label: '24" x 80"', w: 24, h: 80, desc: 'Closet' },
+  { label: '30" x 80"', w: 30, h: 80, desc: 'Std Interior' },
+  { label: '32" x 80"', w: 32, h: 80, desc: 'Standard' },
+  { label: '36" x 80"', w: 36, h: 80, desc: 'Wide/ADA' },
+  { label: '48" x 80"', w: 48, h: 80, desc: 'Double' },
+  { label: '72" x 80"', w: 72, h: 80, desc: 'Sliding Patio' },
+];
+
 // ── Opening panel ────────────────────────────────────────────────────────────
 function OpeningPanel({ opening, onUpdate }: { opening: Opening; onUpdate: (patch: Partial<Opening>) => void }) {
   const isWindow = opening.type === 'window';
+  const isDoor = opening.type === 'door' || opening.type === 'sliding_door';
   const [localWidth, setLocalWidth] = useState(opening.widthIn.toString());
   const [localHeight, setLocalHeight] = useState(opening.heightIn.toString());
+
+  const applyAndSync = (patch: Partial<Opening>) => {
+    onUpdate(patch);
+    useCadStore.getState().markDirty();
+  };
 
   return (
     <div className="space-y-6 animate-in slide-in-from-right-4 duration-300 fade-in">
@@ -236,19 +321,102 @@ function OpeningPanel({ opening, onUpdate }: { opening: Opening; onUpdate: (patc
         </h4>
         <PropertyField label="Type" value={opening.type.replace('_', ' ')} isReadOnly />
         <div className="mb-4">
-          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Width (in)</label>
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Width ({smallLengthUnit()})</label>
           <input type="number" value={localWidth} onChange={e => setLocalWidth(e.target.value)}
-            onBlur={() => { const v = parseFloat(localWidth); if (!isNaN(v) && v > 0) onUpdate({ widthIn: v }); }}
+            onBlur={() => { const v = parseFloat(localWidth); if (!isNaN(v) && v > 0) applyAndSync({ widthIn: v }); }}
             className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 focus:border-emerald-500/50 rounded-lg px-3 py-2.5 text-sm focus:outline-none transition-colors shadow-inner" />
         </div>
         <div className="mb-4">
-          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Height (in)</label>
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Height ({smallLengthUnit()})</label>
           <input type="number" value={localHeight} onChange={e => setLocalHeight(e.target.value)}
-            onBlur={() => { const v = parseFloat(localHeight); if (!isNaN(v) && v > 0) onUpdate({ heightIn: v }); }}
+            onBlur={() => { const v = parseFloat(localHeight); if (!isNaN(v) && v > 0) applyAndSync({ heightIn: v }); }}
             className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 focus:border-emerald-500/50 rounded-lg px-3 py-2.5 text-sm focus:outline-none transition-colors shadow-inner" />
         </div>
         <PropertyField label="Position" value={`${(opening.positionAlongWall * 100).toFixed(0)}% along wall`} isReadOnly />
       </div>
+
+      {/* Swing Direction Toggle (door types only) */}
+      {isDoor && (
+        <div className="pt-4 border-t border-slate-800">
+          <h4 className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+            <RotateCcw className="w-3 h-3" /> Swing Direction
+          </h4>
+          <div className="flex gap-1 mb-4">
+            {(['left', 'right', 'double'] as const).map((dir) => {
+              const isActive = opening.swingDirection === dir;
+              return (
+                <button
+                  key={dir}
+                  onClick={() => applyAndSync({ swingDirection: dir })}
+                  className={`flex-1 flex flex-col items-center gap-1 px-2 py-2.5 rounded-lg border text-xs font-semibold transition-all ${
+                    isActive
+                      ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.15)]'
+                      : 'border-slate-700 bg-slate-950/60 text-slate-500 hover:text-slate-300 hover:border-slate-600'
+                  }`}
+                >
+                  {/* SVG swing arc icons */}
+                  <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    {dir === 'left' && (
+                      <>
+                        <line x1="4" y1="4" x2="4" y2="20" />
+                        <path d="M4 20 Q4 4 20 20" strokeDasharray="3 2" />
+                      </>
+                    )}
+                    {dir === 'right' && (
+                      <>
+                        <line x1="20" y1="4" x2="20" y2="20" />
+                        <path d="M20 20 Q20 4 4 20" strokeDasharray="3 2" />
+                      </>
+                    )}
+                    {dir === 'double' && (
+                      <>
+                        <line x1="4" y1="4" x2="4" y2="20" />
+                        <line x1="20" y1="4" x2="20" y2="20" />
+                        <path d="M4 20 Q4 10 12 20" strokeDasharray="3 2" />
+                        <path d="M20 20 Q20 10 12 20" strokeDasharray="3 2" />
+                      </>
+                    )}
+                  </svg>
+                  <span className="capitalize">{dir}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Quick Scale Presets (door types only) */}
+      {isDoor && (
+        <div className="pt-4 border-t border-slate-800">
+          <h4 className="text-xs font-semibold text-sky-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+            <Ruler className="w-3 h-3" /> Quick Size Presets
+          </h4>
+          <div className="flex flex-wrap gap-1.5">
+            {DOOR_SIZE_PRESETS.map((preset) => {
+              const isActive = opening.widthIn === preset.w && opening.heightIn === preset.h;
+              return (
+                <button
+                  key={preset.label}
+                  onClick={() => {
+                    setLocalWidth(preset.w.toString());
+                    setLocalHeight(preset.h.toString());
+                    applyAndSync({ widthIn: preset.w, heightIn: preset.h });
+                  }}
+                  className={`px-2.5 py-1.5 rounded-lg border text-[10px] font-semibold transition-all ${
+                    isActive
+                      ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-400'
+                      : 'border-slate-700 bg-slate-950/60 text-slate-500 hover:text-slate-300 hover:border-slate-600'
+                  }`}
+                  title={preset.desc}
+                >
+                  {preset.label}
+                  <span className="block text-[8px] text-slate-600 font-normal">{preset.desc}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {isWindow && (
         <div className="pt-4 border-t border-slate-800">
@@ -260,14 +428,8 @@ function OpeningPanel({ opening, onUpdate }: { opening: Opening; onUpdate: (patc
         </div>
       )}
 
-      {!isWindow && opening.swingDirection && (
-        <div className="pt-4 border-t border-slate-800">
-          <PropertyField label="Swing" value={opening.swingDirection} isReadOnly />
-        </div>
-      )}
-
       <div className="pt-4 border-t border-slate-800">
-        <PropertyField label="ID" value={opening.id.slice(0, 20) + '…'} isReadOnly />
+        <PropertyField label="ID" value={opening.id.slice(0, 20) + '...'} isReadOnly />
       </div>
     </div>
   );
@@ -316,18 +478,358 @@ function RoomSummaryPanel({ rooms }: { rooms: DetectedRoom[] }) {
         <h4 className="text-xs font-semibold text-cyan-400 uppercase tracking-wider mb-4 flex items-center gap-2">
           <ScanLine className="w-3 h-3" /> Detected Rooms ({rooms.length})
         </h4>
-        <PropertyField label="Total Area" value={`${totalArea.toFixed(0)} sq ft`} isReadOnly />
+        <PropertyField label="Total Area" value={fmtArea(totalArea)} isReadOnly />
         <div className="space-y-2 mt-4">
           {rooms.map(room => (
             <div key={room.id} className="flex items-center justify-between bg-slate-950/50 rounded-lg px-3 py-2 border border-slate-800">
               <div>
                 <span className="text-sm text-slate-200 font-medium">{room.name}</span>
-                <span className="text-xs text-slate-500 ml-2">{room.areaSqFt.toFixed(0)} sq ft</span>
+                <span className="text-xs text-slate-500 ml-2">{fmtArea(room.areaSqFt)}</span>
               </div>
               <div className="w-3 h-3 rounded-full" style={{ backgroundColor: room.color.replace('40', 'ff') }} />
             </div>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Underlay panel ──────────────────────────────────────────────────────────
+function UnderlayPanel({ underlay, onUpdate, onDelete }: {
+  underlay: UnderlayImage;
+  onUpdate: (patch: Partial<UnderlayImage>) => void;
+  onDelete: () => void;
+}) {
+  const [localWidth, setLocalWidth] = useState(underlay.width.toFixed(0));
+  const [localHeight, setLocalHeight] = useState(underlay.height.toFixed(0));
+  const [localRotation, setLocalRotation] = useState(underlay.rotation.toString());
+  const [aspectLocked, setAspectLocked] = useState(true);
+  const aspectRatio = underlay.width / underlay.height;
+
+  return (
+    <div className="space-y-6 animate-in slide-in-from-right-4 duration-300 fade-in">
+      <div>
+        <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+          <ImageIcon className="w-3 h-3" /> Underlay Image
+        </h4>
+        <PropertyField label="Filename" value={underlay.name} isReadOnly />
+
+        {/* Width / Height with aspect lock */}
+        <div className="flex items-end gap-2 mb-4">
+          <div className="flex-1">
+            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Width (px)</label>
+            <input
+              type="number"
+              value={localWidth}
+              onChange={e => {
+                setLocalWidth(e.target.value);
+                if (aspectLocked) {
+                  const w = parseFloat(e.target.value);
+                  if (!isNaN(w) && w > 0) {
+                    setLocalHeight((w / aspectRatio).toFixed(0));
+                  }
+                }
+              }}
+              onBlur={() => {
+                const w = parseFloat(localWidth);
+                if (!isNaN(w) && w > 0) {
+                  const patch: Partial<UnderlayImage> = { width: w };
+                  if (aspectLocked) patch.height = w / aspectRatio;
+                  onUpdate(patch);
+                }
+              }}
+              className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 focus:border-emerald-500/50 rounded-lg px-3 py-2.5 text-sm focus:outline-none transition-colors shadow-inner"
+            />
+          </div>
+          <button
+            onClick={() => setAspectLocked(!aspectLocked)}
+            className={`p-2.5 rounded-lg border transition-colors mb-0 ${aspectLocked ? 'border-emerald-500/50 text-emerald-400 bg-emerald-500/10' : 'border-slate-700 text-slate-500 bg-slate-950/80'}`}
+            title={aspectLocked ? 'Aspect ratio locked' : 'Aspect ratio unlocked'}
+          >
+            {aspectLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+          </button>
+          <div className="flex-1">
+            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Height (px)</label>
+            <input
+              type="number"
+              value={localHeight}
+              onChange={e => {
+                setLocalHeight(e.target.value);
+                if (aspectLocked) {
+                  const h = parseFloat(e.target.value);
+                  if (!isNaN(h) && h > 0) {
+                    setLocalWidth((h * aspectRatio).toFixed(0));
+                  }
+                }
+              }}
+              onBlur={() => {
+                const h = parseFloat(localHeight);
+                if (!isNaN(h) && h > 0) {
+                  const patch: Partial<UnderlayImage> = { height: h };
+                  if (aspectLocked) patch.width = h * aspectRatio;
+                  onUpdate(patch);
+                }
+              }}
+              className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 focus:border-emerald-500/50 rounded-lg px-3 py-2.5 text-sm focus:outline-none transition-colors shadow-inner"
+            />
+          </div>
+        </div>
+
+        {/* Rotation */}
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Rotation (deg)</label>
+          <input
+            type="number"
+            value={localRotation}
+            onChange={e => setLocalRotation(e.target.value)}
+            onBlur={() => {
+              const v = parseFloat(localRotation);
+              if (!isNaN(v)) onUpdate({ rotation: v % 360 });
+            }}
+            step="1"
+            className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 focus:border-emerald-500/50 rounded-lg px-3 py-2.5 text-sm focus:outline-none transition-colors shadow-inner"
+          />
+        </div>
+
+        {/* Opacity */}
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">
+            Opacity ({Math.round(underlay.opacity * 100)}%)
+          </label>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            value={underlay.opacity}
+            onChange={e => onUpdate({ opacity: parseFloat(e.target.value) })}
+            className="w-full accent-emerald-500"
+          />
+        </div>
+      </div>
+
+      {/* Delete */}
+      <div className="pt-4 border-t border-slate-800">
+        <button
+          onClick={onDelete}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 hover:text-red-300 transition-colors text-sm font-medium"
+        >
+          <Trash2 className="w-4 h-4" />
+          Delete Underlay
+        </button>
+      </div>
+
+      <div className="pt-4 border-t border-slate-800">
+        <PropertyField label="ID" value={underlay.id.slice(0, 20) + '...'} isReadOnly />
+      </div>
+    </div>
+  );
+}
+
+// ── Annotation / Label panel ────────────────────────────────────────────────
+const FONT_FAMILIES = ['Arial', 'Helvetica', 'Times New Roman', 'Courier New', 'Georgia', 'Verdana', 'monospace'];
+const COLOR_SWATCHES = [
+  { label: 'White', value: '#e2e8f0' },
+  { label: 'Emerald', value: '#34d399' },
+  { label: 'Amber', value: '#fbbf24' },
+  { label: 'Sky', value: '#38bdf8' },
+  { label: 'Red', value: '#f87171' },
+  { label: 'Slate', value: '#94a3b8' },
+];
+
+function AnnotationPanel({ annotation, onUpdate }: { annotation: Annotation; onUpdate: (patch: Partial<Annotation>) => void }) {
+  const [localText, setLocalText] = useState(annotation.text);
+  const [localFontSize, setLocalFontSize] = useState((annotation.fontSize ?? 14).toString());
+  const [localRotation, setLocalRotation] = useState((annotation.rotation ?? 0).toString());
+  const [localScaleX, setLocalScaleX] = useState((annotation.scaleX ?? 1).toString());
+  const [localScaleY, setLocalScaleY] = useState((annotation.scaleY ?? 1).toString());
+
+  return (
+    <div className="space-y-6 animate-in slide-in-from-right-4 duration-300 fade-in">
+      {/* Text */}
+      <div>
+        <h4 className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+          <Type className="w-3 h-3" /> Label Properties
+        </h4>
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Text</label>
+          <textarea
+            value={localText}
+            onChange={e => setLocalText(e.target.value)}
+            onBlur={() => onUpdate({ text: localText })}
+            rows={2}
+            className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 focus:border-emerald-500/50 rounded-lg px-3 py-2.5 text-sm focus:outline-none transition-colors shadow-inner resize-none"
+          />
+        </div>
+
+        {/* Font Family */}
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Font Family</label>
+          <select
+            value={annotation.fontFamily ?? 'sans-serif'}
+            onChange={e => onUpdate({ fontFamily: e.target.value })}
+            className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 focus:border-emerald-500/50 rounded-lg px-3 py-2.5 text-sm focus:outline-none transition-colors shadow-inner appearance-none cursor-pointer"
+          >
+            <option value="sans-serif" className="bg-slate-900">Sans-serif (default)</option>
+            {FONT_FAMILIES.map(f => (
+              <option key={f} value={f} className="bg-slate-900">{f}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Font Size */}
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Font Size (px)</label>
+          <input
+            type="number"
+            value={localFontSize}
+            onChange={e => setLocalFontSize(e.target.value)}
+            onBlur={() => { const v = parseInt(localFontSize); if (!isNaN(v) && v >= 8 && v <= 72) onUpdate({ fontSize: v }); }}
+            min="8" max="72" step="1"
+            className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 focus:border-emerald-500/50 rounded-lg px-3 py-2.5 text-sm focus:outline-none transition-colors shadow-inner"
+          />
+        </div>
+
+        {/* Color Swatches */}
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Color</label>
+          <div className="flex gap-1.5 mb-2">
+            {COLOR_SWATCHES.map(swatch => {
+              const isActive = (annotation.fontColor ?? '#e2e8f0') === swatch.value;
+              return (
+                <button
+                  key={swatch.value}
+                  onClick={() => onUpdate({ fontColor: swatch.value })}
+                  className={`w-7 h-7 rounded-lg border-2 transition-all ${isActive ? 'border-white scale-110' : 'border-slate-700 hover:border-slate-500'}`}
+                  style={{ backgroundColor: swatch.value }}
+                  title={swatch.label}
+                />
+              );
+            })}
+          </div>
+          <input
+            type="color"
+            value={annotation.fontColor ?? '#e2e8f0'}
+            onChange={e => onUpdate({ fontColor: e.target.value })}
+            className="w-full h-8 rounded-lg bg-slate-950/80 border border-slate-700 cursor-pointer"
+          />
+        </div>
+
+        {/* Bold / Italic */}
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Style</label>
+          <div className="flex gap-1">
+            <button
+              onClick={() => onUpdate({ fontWeight: annotation.fontWeight === 'bold' ? 'normal' : 'bold' })}
+              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
+                annotation.fontWeight === 'bold'
+                  ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-400'
+                  : 'border-slate-700 bg-slate-950/60 text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <Bold className="w-3.5 h-3.5" /> Bold
+            </button>
+            <button
+              onClick={() => onUpdate({ fontStyle: annotation.fontStyle === 'italic' ? 'normal' : 'italic' })}
+              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
+                annotation.fontStyle === 'italic'
+                  ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-400'
+                  : 'border-slate-700 bg-slate-950/60 text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <Italic className="w-3.5 h-3.5" /> Italic
+            </button>
+          </div>
+        </div>
+
+        {/* Text Align */}
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Text Align</label>
+          <div className="flex gap-1">
+            {([
+              { val: 'left' as const, Icon: AlignLeft },
+              { val: 'center' as const, Icon: AlignCenter },
+              { val: 'right' as const, Icon: AlignRight },
+            ]).map(({ val, Icon }) => {
+              const isActive = (annotation.textAlign ?? 'left') === val;
+              return (
+                <button
+                  key={val}
+                  onClick={() => onUpdate({ textAlign: val })}
+                  className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
+                    isActive
+                      ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-400'
+                      : 'border-slate-700 bg-slate-950/60 text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Background Color */}
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Background Color</label>
+          <div className="flex gap-1.5 items-center">
+            <button
+              onClick={() => onUpdate({ backgroundColor: undefined })}
+              className={`px-3 py-1.5 rounded-lg border text-[10px] font-semibold transition-all ${
+                !annotation.backgroundColor
+                  ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-400'
+                  : 'border-slate-700 bg-slate-950/60 text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              None
+            </button>
+            <input
+              type="color"
+              value={annotation.backgroundColor ?? '#1e293b'}
+              onChange={e => onUpdate({ backgroundColor: e.target.value })}
+              className="w-8 h-8 rounded-lg bg-slate-950/80 border border-slate-700 cursor-pointer"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Scale & Rotation */}
+      <div className="pt-4 border-t border-slate-800">
+        <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+          <Ruler className="w-3 h-3" /> Transform
+        </h4>
+        <div className="flex gap-2 mb-4">
+          <div className="flex-1">
+            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Scale X</label>
+            <input type="number" value={localScaleX} step="0.1" min="0.1" max="10"
+              onChange={e => setLocalScaleX(e.target.value)}
+              onBlur={() => { const v = parseFloat(localScaleX); if (!isNaN(v) && v > 0) onUpdate({ scaleX: v }); }}
+              className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 focus:border-emerald-500/50 rounded-lg px-3 py-2.5 text-sm focus:outline-none transition-colors shadow-inner"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Scale Y</label>
+            <input type="number" value={localScaleY} step="0.1" min="0.1" max="10"
+              onChange={e => setLocalScaleY(e.target.value)}
+              onBlur={() => { const v = parseFloat(localScaleY); if (!isNaN(v) && v > 0) onUpdate({ scaleY: v }); }}
+              className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 focus:border-emerald-500/50 rounded-lg px-3 py-2.5 text-sm focus:outline-none transition-colors shadow-inner"
+            />
+          </div>
+        </div>
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Rotation (deg)</label>
+          <input type="number" value={localRotation}
+            onChange={e => setLocalRotation(e.target.value)}
+            onBlur={() => { const v = parseFloat(localRotation); if (!isNaN(v)) onUpdate({ rotation: v % 360 }); }}
+            step="1"
+            className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 focus:border-emerald-500/50 rounded-lg px-3 py-2.5 text-sm focus:outline-none transition-colors shadow-inner"
+          />
+        </div>
+      </div>
+
+      <div className="pt-4 border-t border-slate-800">
+        <PropertyField label="ID" value={annotation.id.slice(0, 20) + '...'} isReadOnly />
       </div>
     </div>
   );
@@ -358,6 +860,129 @@ function PropertyField({
             : 'border-slate-700 text-slate-200 focus:border-emerald-500/50'
         } rounded-lg px-3 py-2.5 text-sm focus:outline-none transition-colors shadow-inner`}
       />
+    </div>
+  );
+}
+
+// ── Appearance / Accessibility Panel ──────────────────────────────────────────
+
+const BG_PRESETS = [
+  { label: 'Dark Slate', value: '#0f172a' },
+  { label: 'True Black', value: '#000000' },
+  { label: 'Dark Gray', value: '#1a1a1a' },
+  { label: 'Navy', value: '#0a1628' },
+  { label: 'Warm Dark', value: '#1c1917' },
+  { label: 'White', value: '#f8fafc' },
+  { label: 'Light Gray', value: '#e2e8f0' },
+  { label: 'Blueprint', value: '#0c1a3a' },
+];
+
+const WALL_COLOR_PRESETS = [
+  { label: 'Emerald', value: '#34d399' },
+  { label: 'White', value: '#f1f5f9' },
+  { label: 'Stainless Steel', value: '#b0b8c4' },
+  { label: 'Copper', value: '#b87333' },
+  { label: 'Bronze', value: '#cd7f32' },
+  { label: 'Titanium', value: '#878681' },
+  { label: 'Bomb Pop Red', value: '#e63946' },
+  { label: 'Bomb Pop Blue', value: '#1d3557' },
+];
+
+function AppearancePanel() {
+  const canvasBgColor = useCadStore(s => s.canvasBgColor);
+  const wallColor = useCadStore(s => s.wallColor);
+  const openingColor = useCadStore(s => s.openingColor);
+  const { setCanvasBgColor, setWallColor, setOpeningColor, markDirty } = useCadStore();
+
+  const applyBg = (color: string) => {
+    setCanvasBgColor(color);
+    const canvas = useCadStore.getState().canvas;
+    if (canvas) {
+      canvas.backgroundColor = color;
+      canvas.requestRenderAll();
+    }
+    markDirty();
+  };
+
+  const applyWallColor = (color: string) => {
+    setWallColor(color);
+    markDirty();
+  };
+
+  const applyOpeningColor = (color: string) => {
+    setOpeningColor(color);
+    markDirty();
+  };
+
+  return (
+    <div className="border-t border-slate-800/50 pt-4">
+      <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+        <Settings2 className="w-3 h-3" /> Appearance
+      </h4>
+
+      {/* Canvas Background */}
+      <div className="mb-4">
+        <label className="text-[10px] text-slate-500 uppercase tracking-wider font-bold block mb-2">Canvas Background</label>
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {BG_PRESETS.map(p => (
+            <button
+              key={p.value}
+              onClick={() => applyBg(p.value)}
+              className={`w-7 h-7 rounded-lg border-2 transition-all ${canvasBgColor === p.value ? 'border-emerald-400 scale-110' : 'border-slate-700 hover:border-slate-500'}`}
+              style={{ backgroundColor: p.value }}
+              title={p.label}
+            />
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <input type="color" value={canvasBgColor} onChange={e => applyBg(e.target.value)}
+            className="w-8 h-8 rounded cursor-pointer bg-transparent border-0" />
+          <span className="text-xs text-slate-500 font-mono">{canvasBgColor}</span>
+        </div>
+      </div>
+
+      {/* Wall Color */}
+      <div className="mb-4">
+        <label className="text-[10px] text-slate-500 uppercase tracking-wider font-bold block mb-2">Wall Color</label>
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {WALL_COLOR_PRESETS.map(p => (
+            <button
+              key={p.value}
+              onClick={() => applyWallColor(p.value)}
+              className={`w-7 h-7 rounded-lg border-2 transition-all ${wallColor === p.value ? 'border-emerald-400 scale-110' : 'border-slate-700 hover:border-slate-500'}`}
+              style={{ backgroundColor: p.value }}
+              title={p.label}
+            />
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <input type="color" value={wallColor} onChange={e => applyWallColor(e.target.value)}
+            className="w-8 h-8 rounded cursor-pointer bg-transparent border-0" />
+          <span className="text-xs text-slate-500 font-mono">{wallColor}</span>
+        </div>
+      </div>
+
+      {/* Opening Color */}
+      <div className="mb-4">
+        <label className="text-[10px] text-slate-500 uppercase tracking-wider font-bold block mb-2">Window / Door Color</label>
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {WALL_COLOR_PRESETS.map(p => (
+            <button
+              key={p.value}
+              onClick={() => applyOpeningColor(p.value)}
+              className={`w-7 h-7 rounded-lg border-2 transition-all ${openingColor === p.value ? 'border-emerald-400 scale-110' : 'border-slate-700 hover:border-slate-500'}`}
+              style={{ backgroundColor: p.value }}
+              title={p.label}
+            />
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <input type="color" value={openingColor} onChange={e => applyOpeningColor(e.target.value)}
+            className="w-8 h-8 rounded cursor-pointer bg-transparent border-0" />
+          <span className="text-xs text-slate-500 font-mono">{openingColor}</span>
+        </div>
+      </div>
+
     </div>
   );
 }

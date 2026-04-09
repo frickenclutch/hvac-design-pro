@@ -1,4 +1,4 @@
-import { usePreferencesStore, type ThemeMode, type UIDensity, type UnitSystem, type AccentColor } from '../stores/usePreferencesStore';
+import { usePreferencesStore, type ThemeMode, type UIDensity, type UnitSystem } from '../stores/usePreferencesStore';
 import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility } from 'lucide-react';
 import A11yPanel from '../components/accessibility/A11yPanel';
 
@@ -31,25 +31,6 @@ export default function SettingsPage() {
                 value={prefs.theme}
                 onChange={(v) => prefs.update({ theme: v as ThemeMode })}
               />
-            </OptionGroup>
-
-            <OptionGroup label="Accent Color">
-              <div className="flex gap-3">
-                {(['emerald', 'sky', 'violet', 'amber', 'rose'] as AccentColor[]).map((c) => {
-                  const colors: Record<string, string> = {
-                    emerald: 'bg-emerald-500', sky: 'bg-sky-500', violet: 'bg-violet-500',
-                    amber: 'bg-amber-500', rose: 'bg-rose-500',
-                  };
-                  return (
-                    <button
-                      key={c}
-                      onClick={() => prefs.update({ accent: c })}
-                      className={`w-10 h-10 rounded-xl ${colors[c]} transition-all ${prefs.accent === c ? 'ring-2 ring-white ring-offset-2 ring-offset-slate-900 scale-110' : 'opacity-60 hover:opacity-100'}`}
-                      aria-label={c}
-                    />
-                  );
-                })}
-              </div>
             </OptionGroup>
 
             <OptionGroup label="UI Density">

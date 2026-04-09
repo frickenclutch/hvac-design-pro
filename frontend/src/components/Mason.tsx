@@ -1,17 +1,17 @@
 import { useState, useRef, useEffect } from 'react';
 import { X, Send, Zap, Thermometer, Wind, Calculator, Phone } from 'lucide-react';
 
-// ── Steve — your AI HVAC engineering assistant ─────────────────────────────────
-// Named after the countless engineers who've built the world's buildings.
+// ── Mason — your AI HVAC engineering assistant ───────────────────────────────
+// Named after the masons who've built the world's buildings, brick by brick.
 // Unified across CAD workspace and Manual J Calculator.
 
 // ── Context mode determines which knowledge is prioritized ─────────────────────
-export type SteveContext = 'cad' | 'manualj';
+export type MasonContext = 'cad' | 'manualj';
 
 // ── Knowledge base ─────────────────────────────────────────────────────────────
 interface KBEntry {
   keywords: string[];
-  contexts: SteveContext[];
+  contexts: MasonContext[];
   answer: string;
 }
 
@@ -591,7 +591,7 @@ Click **Export PDF** in the top toolbar to generate a multi-page engineering doc
   },
 ];
 
-function findAnswer(query: string, context: SteveContext): string {
+function findAnswer(query: string, context: MasonContext): string {
   const q = query.toLowerCase();
   let bestMatch: KBEntry | null = null;
   let bestScore = 0;
@@ -673,12 +673,12 @@ const quickCalcs: QuickCalc[] = [
 
 // ── Chat message ────────────────────────────────────────────────────────────
 interface ChatMessage {
-  role: 'user' | 'steve';
+  role: 'user' | 'mason';
   content: string;
 }
 
 // ── Quick topics by context ─────────────────────────────────────────────────
-const QUICK_TOPICS: Record<SteveContext, string[]> = {
+const QUICK_TOPICS: Record<MasonContext, string[]> = {
   manualj: [
     'How to measure rooms',
     'Window measurements',
@@ -710,13 +710,13 @@ const QUICK_TOPICS: Record<SteveContext, string[]> = {
 };
 
 // ── Props ───────────────────────────────────────────────────────────────────
-interface SteveProps {
-  context: SteveContext;
+interface MasonProps {
+  context: MasonContext;
   /** Position offset for different pages */
   position?: 'bottom-right' | 'bottom-left';
 }
 
-export default function Steve({ context, position = 'bottom-right' }: SteveProps) {
+export default function Mason({ context, position = 'bottom-right' }: MasonProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -736,8 +736,8 @@ export default function Steve({ context, position = 'bottom-right' }: SteveProps
 
     const userMsg: ChatMessage = { role: 'user', content: query };
     const answer = findAnswer(query, context);
-    const steveMsg: ChatMessage = { role: 'steve', content: answer };
-    setMessages(prev => [...prev, userMsg, steveMsg]);
+    const masonMsg: ChatMessage = { role: 'mason', content: answer };
+    setMessages(prev => [...prev, userMsg, masonMsg]);
     setInput('');
   };
 
@@ -746,7 +746,7 @@ export default function Steve({ context, position = 'bottom-right' }: SteveProps
     setMessages(prev => [
       ...prev,
       { role: 'user', content: `Calculate: ${calc.label}` },
-      { role: 'steve', content: result },
+      { role: 'mason', content: result },
     ]);
     setActiveCalc(null);
   };
@@ -762,14 +762,14 @@ export default function Steve({ context, position = 'bottom-right' }: SteveProps
       <button
         onClick={() => setIsOpen(true)}
         className={`fixed bottom-6 ${posClass} z-[60] p-3.5 rounded-2xl glass-panel border border-amber-500/20 backdrop-blur-xl bg-slate-900/80 text-amber-400 hover:text-amber-300 hover:border-amber-500/40 hover:bg-slate-800/80 transition-all shadow-[0_0_30px_rgba(0,0,0,0.5),0_0_15px_rgba(245,158,11,0.1)] group`}
-        aria-label="Ask Steve — HVAC AI Assistant"
+        aria-label="Ask Mason — HVAC AI Assistant"
       >
         <div className="relative">
           <Zap className="w-5 h-5" />
           <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
         </div>
         <div className={`absolute ${tooltipSide} top-1/2 -translate-y-1/2 px-3 py-2 bg-slate-800/95 border border-slate-700 text-slate-200 text-xs font-medium rounded-xl opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none backdrop-blur-md shadow-xl`}>
-          <span className="font-bold text-amber-400">Steve</span> — AI HVAC Assistant
+          <span className="font-bold text-amber-400">Mason</span> — AI HVAC Assistant
           <div className={tooltipPointerSide} />
         </div>
       </button>
@@ -785,7 +785,7 @@ export default function Steve({ context, position = 'bottom-right' }: SteveProps
             <Zap className="w-4 h-4 text-amber-400" />
           </div>
           <div>
-            <h3 className="text-sm font-bold text-slate-100 tracking-tight">Steve</h3>
+            <h3 className="text-sm font-bold text-slate-100 tracking-tight">Mason</h3>
             <p className="text-[10px] text-slate-500 font-medium">
               {context === 'manualj' ? 'Manual J Assistant' : 'CAD & HVAC Assistant'}
             </p>
@@ -816,16 +816,16 @@ export default function Steve({ context, position = 'bottom-right' }: SteveProps
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar min-h-[200px]">
         {messages.length === 0 && (
           <div className="space-y-4">
-            {/* Steve intro */}
+            {/* Mason intro */}
             <div className="flex gap-2.5">
               <div className="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
                 <Zap className="w-3.5 h-3.5 text-amber-400" />
               </div>
               <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl rounded-tl-sm px-3 py-2.5 text-xs text-slate-300 leading-relaxed">
                 {context === 'manualj' ? (
-                  <>Hey, I'm <strong className="text-amber-400">Steve</strong>. I'll help you fill out this Manual J calculator — room measurements, design temps, insulation values, all of it. Ask me anything or tap a topic below.</>
+                  <>Hey, I'm <strong className="text-amber-400">Mason</strong>. I'll help you fill out this Manual J calculator — room measurements, design temps, insulation values, all of it. Ask me anything or tap a topic below.</>
                 ) : (
-                  <>Hey, I'm <strong className="text-amber-400">Steve</strong> — your HVAC engineering assistant. I know every tool, shortcut, and feature in this platform inside and out. Ask me anything — drawing walls, 3D view, keyboard shortcuts, load calcs, duct sizing, you name it. Tap a topic below or just ask.</>
+                  <>Hey, I'm <strong className="text-amber-400">Mason</strong> — your HVAC engineering assistant. I know every tool, shortcut, and feature in this platform inside and out. Ask me anything — drawing walls, 3D view, keyboard shortcuts, load calcs, duct sizing, you name it. Tap a topic below or just ask.</>
                 )}
               </div>
             </div>
@@ -899,7 +899,7 @@ export default function Steve({ context, position = 'bottom-right' }: SteveProps
 
         {messages.map((msg, i) => (
           <div key={i} className={`flex gap-2.5 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-            {msg.role === 'steve' && (
+            {msg.role === 'mason' && (
               <div className="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
                 <Zap className="w-3.5 h-3.5 text-amber-400" />
               </div>
@@ -953,7 +953,7 @@ export default function Steve({ context, position = 'bottom-right' }: SteveProps
             type="text"
             value={input}
             onChange={e => setInput(e.target.value)}
-            placeholder={context === 'manualj' ? "Ask Steve about measurements, R-values, temps..." : "Ask Steve about HVAC, walls, duct sizing..."}
+            placeholder={context === 'manualj' ? "Ask Mason about measurements, R-values, temps..." : "Ask Mason about HVAC, walls, duct sizing..."}
             className="flex-1 bg-slate-950/80 border border-slate-700 text-slate-200 rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-amber-500/50 transition-colors placeholder:text-slate-600"
           />
           <button

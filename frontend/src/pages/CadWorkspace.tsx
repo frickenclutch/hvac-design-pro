@@ -5,9 +5,10 @@ import TopNavigationBar from '../features/cad/components/TopNavigationBar';
 import WallLengthOverlay from '../features/cad/components/WallLengthOverlay';
 import FloorSelector from '../features/cad/components/FloorSelector';
 import LayerManager from '../features/cad/components/LayerManager';
+import ThermalLegend from '../features/cad/components/ThermalLegend';
 import { useAutoSave } from '../features/cad/hooks/useAutoSave';
-import HelpCenter from '../features/cad/components/HelpCenter';
-import Steve from '../components/Steve';
+import Mason from '../components/Mason';
+import ErrorBoundary from '../components/ErrorBoundary';
 
 export default function CadWorkspace() {
   // Auto-save drawing to D1 / localStorage
@@ -17,10 +18,14 @@ export default function CadWorkspace() {
     <div className="fixed inset-0 z-50 bg-slate-950 font-sans text-slate-100 overflow-hidden">
 
       {/* Edge-to-edge canvas (bottom layer) */}
-      <CadCanvas />
+      <ErrorBoundary label="CAD Canvas">
+        <CadCanvas />
+      </ErrorBoundary>
 
-      {/* Global header overlaid on canvas */}
-      <TopNavigationBar />
+      {/* Global header overlaid on canvas (contains 3D Viewer + PDF export) */}
+      <ErrorBoundary label="Navigation">
+        <TopNavigationBar />
+      </ErrorBoundary>
 
       {/* Multi-floor selector (below header) */}
       <FloorSelector />
@@ -37,11 +42,11 @@ export default function CadWorkspace() {
       {/* Live wall length / selection HUD overlay */}
       <WallLengthOverlay />
 
-      {/* Steve — AI HVAC Assistant */}
-      <Steve context="cad" />
+      {/* Thermal overlay legend (visible when thermal mode active) */}
+      <ThermalLegend />
 
-      {/* Help Center */}
-      <HelpCenter />
+      {/* Mason — AI HVAC Assistant (complete help & docs built in) */}
+      <Mason context="cad" position="bottom-left" />
 
     </div>
   );

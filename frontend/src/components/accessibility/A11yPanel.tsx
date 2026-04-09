@@ -1,5 +1,5 @@
 import { useA11y } from './A11yProvider';
-import { Eye, Zap, Type, Focus } from 'lucide-react';
+import { Eye, Zap, Type, Focus, Brain, Cpu, Hand } from 'lucide-react';
 
 interface A11yPanelProps {
   compact?: boolean;
@@ -109,6 +109,74 @@ export default function A11yPanel({ compact = false }: A11yPanelProps) {
           ))}
         </div>
       </div>
+
+      {/* ── Augmented Input Section ──────────────────────────────────── */}
+      {!compact && (
+        <div className="mt-6 pt-5 border-t border-slate-800/40">
+          <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2 mb-4">
+            <Brain className="w-4 h-4 text-violet-400" />
+            Augmented &amp; Adaptive Input
+          </h3>
+          <p className="text-xs text-slate-500 mb-4">Support for neural interfaces, robotic prosthetics, and other augmented input devices.</p>
+        </div>
+      )}
+
+      {/* Neural Interface (BCI) Mode */}
+      <label className="flex items-center justify-between gap-3 cursor-pointer group" htmlFor="a11y-bci">
+        <div className="flex items-center gap-2.5">
+          <Brain className="w-4 h-4 text-slate-400 group-hover:text-violet-400 transition-colors" />
+          <div>
+            <span className="text-sm text-slate-200 font-medium">Neural interface mode</span>
+            {!compact && <p className="text-xs text-slate-500">Optimized for BCI / Neuralink — larger targets, dwell-based selection, reduced precision requirements</p>}
+          </div>
+        </div>
+        <button
+          id="a11y-bci"
+          role="switch"
+          aria-checked={false}
+          className={`${toggleClass} bg-slate-700`}
+        >
+          <span className={`${dotClass}`} />
+        </button>
+      </label>
+
+      {/* Robotic / Prosthetic Input */}
+      <label className="flex items-center justify-between gap-3 cursor-pointer group" htmlFor="a11y-robotic">
+        <div className="flex items-center gap-2.5">
+          <Cpu className="w-4 h-4 text-slate-400 group-hover:text-cyan-400 transition-colors" />
+          <div>
+            <span className="text-sm text-slate-200 font-medium">Robotic / prosthetic input</span>
+            {!compact && <p className="text-xs text-slate-500">Adaptive sensitivity for robotic arms, myoelectric prosthetics — adjusts snap zones and drag thresholds</p>}
+          </div>
+        </div>
+        <button
+          id="a11y-robotic"
+          role="switch"
+          aria-checked={false}
+          className={`${toggleClass} bg-slate-700`}
+        >
+          <span className={`${dotClass}`} />
+        </button>
+      </label>
+
+      {/* Haptic Feedback */}
+      <label className="flex items-center justify-between gap-3 cursor-pointer group" htmlFor="a11y-haptic">
+        <div className="flex items-center gap-2.5">
+          <Hand className="w-4 h-4 text-slate-400 group-hover:text-amber-400 transition-colors" />
+          <div>
+            <span className="text-sm text-slate-200 font-medium">Haptic feedback cues</span>
+            {!compact && <p className="text-xs text-slate-500">Visual pulses that mirror haptic patterns — wall snaps, grid alignment, and selection confirmations</p>}
+          </div>
+        </div>
+        <button
+          id="a11y-haptic"
+          role="switch"
+          aria-checked={false}
+          className={`${toggleClass} bg-slate-700`}
+        >
+          <span className={`${dotClass}`} />
+        </button>
+      </label>
     </div>
   );
 }

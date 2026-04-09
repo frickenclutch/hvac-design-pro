@@ -231,49 +231,63 @@ function RetailerCard({ retailer, isSelected, onSelect }: {
   onSelect: () => void;
 }) {
   return (
-    <button onClick={onSelect}
-      className={`w-full text-left p-4 rounded-xl border transition-all ${
+    <div className={`w-full text-left rounded-xl border transition-all ${
         isSelected
           ? 'bg-emerald-500/10 border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.1)]'
           : 'bg-slate-900/50 border-slate-800/40 hover:border-slate-700/60'
       }`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            {retailer.preferred && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
-                <Star className="w-2.5 h-2.5 fill-current" /> Preferred
-              </span>
+      <button onClick={onSelect} className="w-full text-left p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              {retailer.preferred && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
+                  <Star className="w-2.5 h-2.5 fill-current" /> Preferred
+                </span>
+              )}
+              <h5 className="text-sm font-bold text-white truncate">{retailer.name}</h5>
+            </div>
+            <p className="text-xs text-slate-400">
+              {retailer.address.line1}, {retailer.address.city}, {retailer.address.state} {retailer.address.zip}
+            </p>
+            {retailer.description && (
+              <p className="text-xs text-slate-500 mt-1 line-clamp-2">{retailer.description}</p>
             )}
-            <h5 className="text-sm font-bold text-white truncate">{retailer.name}</h5>
-          </div>
-          <p className="text-xs text-slate-400">
-            {retailer.address.line1}, {retailer.address.city}, {retailer.address.state} {retailer.address.zip}
-          </p>
-          {retailer.description && (
-            <p className="text-xs text-slate-500 mt-1 line-clamp-2">{retailer.description}</p>
-          )}
-          <div className="flex items-center gap-3 mt-2">
-            <span className="text-xs text-slate-500 flex items-center gap-1">
-              <Phone className="w-3 h-3" /> {retailer.phone}
-            </span>
             {retailer.hours && (
-              <span className="text-xs text-slate-600">{retailer.hours}</span>
+              <p className="text-xs text-slate-600 mt-1">{retailer.hours}</p>
             )}
           </div>
+          <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+            {retailer.distanceMiles !== null ? (
+              <span className="text-sm font-bold text-emerald-400 font-mono">
+                {retailer.distanceMiles} mi
+              </span>
+            ) : (
+              <span className="text-xs text-slate-600">—</span>
+            )}
+            <ChevronRight className={`w-4 h-4 transition-colors ${isSelected ? 'text-emerald-400' : 'text-slate-700'}`} />
+          </div>
         </div>
-        <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-          {retailer.distanceMiles !== null ? (
-            <span className="text-sm font-bold text-emerald-400 font-mono">
-              {retailer.distanceMiles} mi
-            </span>
-          ) : (
-            <span className="text-xs text-slate-600">—</span>
-          )}
-          <ChevronRight className={`w-4 h-4 transition-colors ${isSelected ? 'text-emerald-400' : 'text-slate-700'}`} />
-        </div>
+      </button>
+
+      {/* Quick actions — always visible */}
+      <div className="px-4 pb-3 flex items-center gap-2">
+        <a href={`tel:${retailer.phone}`} onClick={e => e.stopPropagation()}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold hover:bg-emerald-500/20 transition-all">
+          <Phone className="w-3 h-3" /> {retailer.phone}
+        </a>
+        <a href={getDirectionsUrl(retailer)} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400 text-xs font-bold hover:bg-sky-500/20 transition-all">
+          <Navigation className="w-3 h-3" /> Directions
+        </a>
+        {retailer.website && (
+          <a href={retailer.website} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-bold hover:bg-amber-500/20 transition-all">
+            <ExternalLink className="w-3 h-3" /> Store Page
+          </a>
+        )}
       </div>
-    </button>
+    </div>
   );
 }
 

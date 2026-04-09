@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { MessageCircle, X, Send, Zap, Thermometer, Wind, Calculator, ChevronDown } from 'lucide-react';
+import { X, Send, Zap, Thermometer, Wind, Calculator } from 'lucide-react';
 import { useCadStore } from '../store/useCadStore';
 
 // ── Built-in HVAC knowledge base ────────────────────────────────────────────

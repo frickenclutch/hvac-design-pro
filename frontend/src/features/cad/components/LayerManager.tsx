@@ -68,7 +68,7 @@ export default function LayerManager() {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="absolute right-6 bottom-6 z-10 glass-panel rounded-xl p-3 border border-slate-700/50 backdrop-blur-xl bg-slate-900/70 shadow-[0_0_30px_rgba(0,0,0,0.5)] hover:border-emerald-500/40 transition-colors pointer-events-auto"
+        className="fixed right-6 bottom-20 z-[55] glass-panel rounded-xl p-3 border border-slate-700/50 backdrop-blur-xl bg-slate-900/70 shadow-[0_0_30px_rgba(0,0,0,0.5)] hover:border-emerald-500/40 transition-colors pointer-events-auto"
         title="Show Layers"
       >
         <Layers className="w-5 h-5 text-emerald-400" />
