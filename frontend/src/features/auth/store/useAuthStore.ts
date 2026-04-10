@@ -34,20 +34,59 @@ export interface Organisation {
   phone?: string;
 }
 
-interface AuthState {
-  user: User | null;
-  organisation: Organisation | null;
-  isAuthenticated: boolean;
-  isOnboarding: boolean;
-  
-  // Actions
-  login: (email: string) => void;
-  logout: () => void;
-  setAuthenticated: (isAuthenticated: boolean) => void;
-  setOnboarding: (isOnboarding: boolean) => void;
-  completeOnboarding: (user: User, org: Organisation) => void;
+// ── Persistence ────────────────────────────────────────────────────────────────
+const TOKEN_KEY = 'hvac_session_token';
+const USER_KEY = 'hvac_session_user';
+const ORG_KEY = 'hvac_session_org';
+
+function persistSession(token: string, user: User, org: Organisation) {
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+    localStorage.setItem(ORG_KEY, JSON.stringify(org));
+  } catch { /* storage full */ }
 }
 
+function clearPersistedSession() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+  localStorage.removeItem(ORG_KEY);
+}
+
+function loadPersistedSession(): { token: string; user: User; org: Organisation } | null {
+  try {
+    const token = localStorage.getItem(TOKEN_KEY);
+    const user = localStorage.getItem(USER_KEY);
+    const org = localStorage.getItem(ORG_KEY);
+    if (token && user && org) {
+      return { token, user: JSON.parse(user), org: JSON.parse(org) };
+    }
+  } catch { /* corrupted */ }
+  return null;
+}
+
+// ── API ────────────────────────────────────────────────────────────────────────
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+
+async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<{ data?: T; error?: string; status: number }> {
+  try {
+    const token = localStorage.getItem(TOKEN_KEY);
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(opts.headers as Record<string, string> || {}),
+    };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) return { error: (body as { error?: string }).error || `HTTP ${res.status}`, status: res.status };
+    return { data: body as T, status: res.status };
+  } catch {
+    return { error: 'Network error — backend may be offline', status: 0 };
+  }
+}
+
+// ── Guest fallback ────────────────────────────────────────────────────────────
 const guestUser: User = {
   id: 'guest',
   email: 'guest@designpro.app',
@@ -65,63 +104,144 @@ const guestOrg: Organisation = {
   regionCode: 'NA_ASHRAE',
 };
 
-export const useAuthStore = create<AuthState>((set) => ({
-  user: null,
-  organisation: null,
-  isAuthenticated: false,
-  isOnboarding: false,
+// ── Store ──────────────────────────────────────────────────────────────────────
+interface AuthState {
+  user: User | null;
+  organisation: Organisation | null;
+  token: string | null;
+  isAuthenticated: boolean;
+  isOnboarding: boolean;
+  authError: string | null;
+  authLoading: boolean;
 
-  login: (email) => {
+  // Actions
+  login: (email: string, password: string) => Promise<void>;
+  loginAsGuest: () => void;
+  register: (data: { email: string; password: string; firstName: string; lastName: string; orgName?: string; orgType?: OrgType; regionCode?: RegionCode }) => Promise<void>;
+  logout: () => void;
+  setAuthenticated: (isAuthenticated: boolean) => void;
+  setOnboarding: (isOnboarding: boolean) => void;
+  restoreSession: () => Promise<void>;
+  clearError: () => void;
+}
+
+// Hydrate from persisted session on creation
+const persisted = loadPersistedSession();
+
+export const useAuthStore = create<AuthState>((set, get) => ({
+  user: persisted?.user ?? null,
+  organisation: persisted?.org ?? null,
+  token: persisted?.token ?? null,
+  isAuthenticated: !!persisted,
+  isOnboarding: false,
+  authError: null,
+  authLoading: false,
+
+  login: async (email, password) => {
+    set({ authLoading: true, authError: null });
+
+    const { data, error } = await apiFetch<{ token: string; user: User; organisation: Organisation }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+
+    if (error || !data) {
+      // Fallback for offline/dev: if backend is unreachable, allow demo login
+      if (error === 'Network error — backend may be offline') {
+        const devUser: User = { id: 'user-dev', email, role: 'admin', firstName: email.split('@')[0], lastName: '', isVerified: true };
+        persistSession('dev-token', devUser, guestOrg);
+        set({ user: devUser, organisation: guestOrg, token: 'dev-token', isAuthenticated: true, authLoading: false, authError: null });
+        return;
+      }
+      set({ authLoading: false, authError: error || 'Login failed' });
+      return;
+    }
+
+    persistSession(data.token, data.user, data.organisation);
     set({
+      user: data.user,
+      organisation: data.organisation,
+      token: data.token,
       isAuthenticated: true,
-      user: email === 'guest@designpro.app' ? guestUser : {
-        id: 'user-1',
-        email,
-        role: 'admin',
-        firstName: 'Dev',
-        lastName: 'User',
-        isVerified: true
-      },
-      organisation: guestOrg,
+      authLoading: false,
+      authError: null,
     });
   },
 
-  logout: () => set({ user: null, organisation: null, isAuthenticated: false, isOnboarding: false }),
+  loginAsGuest: () => {
+    persistSession('guest-token', guestUser, guestOrg);
+    set({
+      user: guestUser,
+      organisation: guestOrg,
+      token: 'guest-token',
+      isAuthenticated: true,
+      authError: null,
+    });
+  },
+
+  register: async (data) => {
+    set({ authLoading: true, authError: null });
+
+    const { data: resp, error } = await apiFetch<{ token: string; user: User; organisation: Organisation }>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+
+    if (error || !resp) {
+      // Fallback for offline/dev
+      if (error === 'Network error — backend may be offline') {
+        const newUser: User = { id: 'user-new', email: data.email, role: 'admin', firstName: data.firstName, lastName: data.lastName, isVerified: true };
+        const newOrg: Organisation = { id: 'org-new', name: data.orgName || `${data.firstName}'s Workspace`, type: data.orgType || 'individual', slug: data.firstName.toLowerCase(), regionCode: data.regionCode || 'NA_ASHRAE' };
+        persistSession('dev-token', newUser, newOrg);
+        set({ user: newUser, organisation: newOrg, token: 'dev-token', isAuthenticated: true, authLoading: false, authError: null });
+        return;
+      }
+      set({ authLoading: false, authError: error || 'Registration failed' });
+      return;
+    }
+
+    persistSession(resp.token, resp.user, resp.organisation);
+    set({
+      user: resp.user,
+      organisation: resp.organisation,
+      token: resp.token,
+      isAuthenticated: true,
+      authLoading: false,
+      authError: null,
+    });
+  },
+
+  logout: () => {
+    const token = get().token;
+    if (token && token !== 'guest-token' && token !== 'dev-token') {
+      apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    }
+    clearPersistedSession();
+    set({ user: null, organisation: null, token: null, isAuthenticated: false, isOnboarding: false, authError: null });
+  },
 
   setAuthenticated: (isAuthenticated) => set({ isAuthenticated }),
 
   setOnboarding: (isOnboarding) => set({ isOnboarding }),
 
-  completeOnboarding: async (user, org) => {
-    try {
-      // 🚀 Trigger real backend onboarding & email
-      const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8081';
-      await fetch(`${baseUrl}/api/auth/onboard`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fullName: `${user.firstName} ${user.lastName}`,
-          email: user.email,
-          orgName: org.name,
-          region: org.regionCode
-        })
-      });
-      
-      set({ 
-        user, 
-        organisation: org, 
-        isAuthenticated: false, 
-        isOnboarding: true 
-      });
-    } catch (err) {
-      console.error('Onboarding API failed, but continuing with local state for now:', err);
-      // Fallback to local state so user isn't blocked by backend being down in dev
-      set({ 
-        user, 
-        organisation: org, 
-        isAuthenticated: false, 
-        isOnboarding: true 
-      });
+  restoreSession: async () => {
+    const saved = loadPersistedSession();
+    if (!saved) return;
+
+    // Validate token with backend
+    const { data, error } = await apiFetch<{ user: User; organisation: Organisation }>('/api/auth/me');
+    if (error || !data) {
+      // Token expired or invalid — but don't log out if it's just a network error
+      if (error !== 'Network error — backend may be offline') {
+        clearPersistedSession();
+        set({ user: null, organisation: null, token: null, isAuthenticated: false });
+      }
+      return;
     }
+
+    persistSession(saved.token, data.user, data.organisation);
+    set({ user: data.user, organisation: data.organisation, isAuthenticated: true });
   },
+
+  clearError: () => set({ authError: null }),
 }));

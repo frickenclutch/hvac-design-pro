@@ -142,7 +142,7 @@ export default function SettingsPage() {
                   { value: 'tabloid', label: 'Tabloid' },
                 ]}
                 value={prefs.pdfPageSize}
-                onChange={(v) => prefs.update({ pdfPageSize: v as any })}
+                onChange={(v) => prefs.update({ pdfPageSize: v as 'letter' | 'a4' | 'tabloid' })}
               />
             </OptionGroup>
 
@@ -153,7 +153,7 @@ export default function SettingsPage() {
                   { value: 'portrait', label: 'Portrait' },
                 ]}
                 value={prefs.pdfOrientation}
-                onChange={(v) => prefs.update({ pdfOrientation: v as any })}
+                onChange={(v) => prefs.update({ pdfOrientation: v as 'landscape' | 'portrait' })}
               />
             </OptionGroup>
 
@@ -189,7 +189,7 @@ export default function SettingsPage() {
                     { value: 'bottom-right', label: 'Bottom Right' },
                   ]}
                   value={prefs.firmStampPosition}
-                  onChange={(v) => prefs.update({ firmStampPosition: v as any })}
+                  onChange={(v) => prefs.update({ firmStampPosition: v as 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' })}
                 />
               </OptionGroup>
             )}

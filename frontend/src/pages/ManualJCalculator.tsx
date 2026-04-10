@@ -65,9 +65,7 @@ export default function ManualJCalculator() {
 
   const addRoom = (floorName?: string) => {
     const newRoom = createDefaultRoom(rooms.length);
-    if (floorName) {
-      (newRoom as any).floorName = floorName;
-    }
+    if (floorName) newRoom.floorName = floorName;
     setRooms(prev => [...prev, newRoom]);
     setWholeHouse(null);
   };
@@ -76,12 +74,10 @@ export default function ManualJCalculator() {
     const cadState = useCadStore.getState();
     const floorCount = cadState.floors.length;
     const floorName = `Floor ${floorCount + 1}`;
-    // Add a new floor to the CAD store
     cadState.addFloor(floorName);
-    // Add a default room for that floor in Manual J
     const newRoom = createDefaultRoom(rooms.length);
-    (newRoom as any).floorName = floorName;
-    (newRoom as any).floorId = useCadStore.getState().activeFloorId;
+    newRoom.floorName = floorName;
+    newRoom.floorId = useCadStore.getState().activeFloorId;
     setRooms(prev => [...prev, newRoom]);
     setWholeHouse(null);
   };
@@ -91,9 +87,9 @@ export default function ManualJCalculator() {
     const cadState = useCadStore.getState();
     let updated = 0;
     for (const room of rooms) {
-      const cadRoomId = (room as any).cadRoomId;
+      const cadRoomId = room.cadRoomId;
       if (!cadRoomId) continue;
-      const floorId = (room as any).floorId;
+      const floorId = room.floorId;
       const floor = floorId
         ? cadState.floors.find(f => f.id === floorId)
         : cadState.floors.find(f => f.rooms.some(r => r.id === cadRoomId));
@@ -142,7 +138,7 @@ export default function ManualJCalculator() {
     // Group rooms by floor name for multi-floor export
     const floorGroups = new Map<string, RoomInput[]>();
     for (const room of rooms) {
-      const floorName = (room as any).floorName || 'Floor 1';
+      const floorName = room.floorName || 'Floor 1';
       if (!floorGroups.has(floorName)) floorGroups.set(floorName, []);
       floorGroups.get(floorName)!.push(room);
     }
@@ -632,7 +628,7 @@ export default function ManualJCalculator() {
               const hasFloors = rooms.some((r: any) => r.floorName);
               let lastFloor = '';
               return rooms.map((room, idx) => {
-                const floorName = (room as any).floorName as string | undefined;
+                const floorName = room.floorName;
                 const showFloorHeader = hasFloors && floorName && floorName !== lastFloor;
                 if (floorName) lastFloor = floorName;
                 return (

@@ -4,6 +4,11 @@ import type { WallMaterial, Opening, HvacUnit, PipeSegment, PipeMaterial, Detect
 import { fmtLength, fmtArea, fmtTemp, smallLengthUnit } from '../../../utils/units';
 import { Settings2, Layers, Ruler, Triangle, Wind, DoorOpen, LayoutGrid, ScanLine, ImageIcon, Lock, Unlock, Trash2, Type, RotateCcw, Bold, Italic, AlignLeft, AlignCenter, AlignRight, ChevronLeft, ChevronRight } from 'lucide-react';
 
+/** Extract name from a Fabric object (all CAD objects carry a .name string). */
+function fabricName(obj: unknown): string | undefined {
+  return (obj as { name?: string })?.name;
+}
+
 const MATERIAL_LABELS: Record<WallMaterial, string> = {
   insulated_stud: 'Insulated Wood Stud',
   cmu: 'CMU Block',
@@ -33,7 +38,7 @@ export default function PropertyInspector() {
   // Detect selected opening or HVAC unit from fabric object name
   const selectedOpening = useMemo(() => {
     if (!selectedObject || !floor) return null;
-    const name = (selectedObject as any).name as string | undefined;
+    const name = fabricName(selectedObject);
     if (!name?.startsWith('opening-')) return null;
     const id = name.replace('opening-', '');
     return floor.openings.find(o => o.id === id) ?? null;
@@ -41,7 +46,7 @@ export default function PropertyInspector() {
 
   const selectedHvac = useMemo(() => {
     if (!selectedObject || !floor) return null;
-    const name = (selectedObject as any).name as string | undefined;
+    const name = fabricName(selectedObject);
     if (!name?.startsWith('hvac-')) return null;
     const id = name.replace('hvac-', '');
     return floor.hvacUnits.find(u => u.id === id) ?? null;
@@ -49,7 +54,7 @@ export default function PropertyInspector() {
 
   const selectedUnderlay = useMemo(() => {
     if (!selectedObject || !floor) return null;
-    const name = (selectedObject as any).name as string | undefined;
+    const name = fabricName(selectedObject);
     if (!name?.startsWith('underlay-')) return null;
     const id = name.replace('underlay-', '');
     return floor.underlays?.find(u => u.id === id) ?? null;
@@ -57,7 +62,7 @@ export default function PropertyInspector() {
 
   const selectedAnnotation = useMemo(() => {
     if (!selectedObject || !floor) return null;
-    const name = (selectedObject as any).name as string | undefined;
+    const name = fabricName(selectedObject);
     if (!name?.startsWith('ann-')) return null;
     const id = name.replace('ann-', '');
     return floor.annotations.find(a => a.id === id) ?? null;
@@ -65,7 +70,7 @@ export default function PropertyInspector() {
 
   const selectedPipe = useMemo(() => {
     if (!selectedObject || !floor) return null;
-    const name = (selectedObject as any).name as string | undefined;
+    const name = fabricName(selectedObject);
     if (!name?.startsWith('pipe-')) return null;
     const id = name.replace('pipe-', '');
     return (floor.pipes ?? []).find(p => p.id === id) ?? null;

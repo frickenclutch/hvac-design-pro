@@ -56,6 +56,11 @@ export interface RoomInput {
 
   // Occupancy
   occupantCount: number;
+
+  // Floor metadata (populated when linked to CAD)
+  floorName?: string;
+  floorId?: string;
+  cadRoomId?: string;
 }
 
 export interface DesignConditions {

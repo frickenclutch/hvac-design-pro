@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { Home, Compass, Settings, Users, LogOut, Thermometer, PenTool, Menu, X, Search, BookOpen } from 'lucide-react';
 import LandingPage from './pages/LandingPage';
@@ -30,7 +30,10 @@ function App() {
 }
 
 function AppLayout() {
-  const { isAuthenticated, organisation, logout } = useAuthStore();
+  const { isAuthenticated, organisation, logout, restoreSession } = useAuthStore();
+
+  // Validate persisted session on mount
+  useEffect(() => { restoreSession(); }, [restoreSession]);
   const { sidebarCollapsed, update: updatePrefs } = usePreferencesStore();
   const location = useLocation();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
