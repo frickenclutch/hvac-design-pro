@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, MapPin, Calendar, ArrowRight } from 'lucide-react';
+import { Plus, Search, MapPin, Calendar, ArrowRight, Pencil, Check, X, Trash2, Building2, Home } from 'lucide-react';
 import NewProjectModal from '../features/projects/components/NewProjectModal';
 
 interface Project {
@@ -32,6 +32,9 @@ export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<Partial<Project>>({});
+  const editNameRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -43,6 +46,35 @@ export default function Dashboard() {
     setProjects(updated);
     saveProjects(updated);
     navigate(`/project/${newProject.id}/cad`);
+  };
+
+  const startEditing = (proj: Project) => {
+    setEditingId(proj.id);
+    setEditDraft({ name: proj.name, address: proj.address, city: proj.city, type: proj.type });
+    setTimeout(() => editNameRef.current?.focus(), 50);
+  };
+
+  const saveEdit = () => {
+    if (!editingId) return;
+    const updated = projects.map(p =>
+      p.id === editingId ? { ...p, ...editDraft } : p
+    );
+    setProjects(updated);
+    saveProjects(updated);
+    setEditingId(null);
+    setEditDraft({});
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditDraft({});
+  };
+
+  const deleteProject = (id: string) => {
+    const updated = projects.filter(p => p.id !== id);
+    setProjects(updated);
+    saveProjects(updated);
+    if (editingId === id) cancelEdit();
   };
 
   const filtered = projects.filter(p =>
@@ -102,39 +134,127 @@ export default function Dashboard() {
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 lg:gap-8 gap-6 overflow-y-auto pb-20 pr-4">
-          {filtered.map(proj => (
-            <div key={proj.id} className="glass-panel p-6 rounded-3xl hover:border-emerald-500/30 transition-all duration-300 group relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-4">
-                <span className={`text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full ${proj.status === 'Completed' ? 'bg-slate-800 text-slate-300' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}>
-                  {proj.status}
-                </span>
-              </div>
+          {filtered.map(proj => {
+            const isEditing = editingId === proj.id;
 
-              <h3 className="text-xl font-bold text-white mb-1 group-hover:text-emerald-300 transition-colors">{proj.name}</h3>
-              <div className="flex items-center gap-2 text-slate-400 text-sm mb-6">
-                <span className="bg-slate-800 px-2 py-0.5 rounded-md text-slate-300 text-xs">{proj.type}</span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 mb-8">
-                <div className="flex items-center gap-2 text-slate-400 text-sm">
-                  <MapPin className="w-4 h-4 text-slate-500" />
-                  <span className="truncate">{proj.address}{proj.city ? `, ${proj.city}` : ''}</span>
+            return (
+              <div key={proj.id} className="glass-panel p-6 rounded-3xl hover:border-emerald-500/30 transition-all duration-300 group relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 flex items-center gap-2">
+                  {!isEditing && (
+                    <button
+                      onClick={() => startEditing(proj)}
+                      className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-slate-700/50 transition-colors opacity-0 group-hover:opacity-100"
+                      title="Edit project details"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <span className={`text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full ${proj.status === 'Completed' ? 'bg-slate-800 text-slate-300' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}>
+                    {proj.status}
+                  </span>
                 </div>
-                <div className="flex items-center gap-2 text-slate-400 text-sm">
-                  <Calendar className="w-4 h-4 text-slate-500" />
-                  <span>{new Date(proj.date).toLocaleDateString()}</span>
-                </div>
-              </div>
 
-              <div className="flex justify-end border-t border-slate-800/50 pt-4 mt-auto">
-                <Link to={`/project/${proj.id}/cad`} className="flex items-center gap-2 text-emerald-400 hover:text-emerald-300 font-semibold group-hover:gap-3 transition-all">
-                  Open Workspace <ArrowRight className="w-4 h-4" />
-                </Link>
-              </div>
+                {isEditing ? (
+                  <>
+                    {/* Editable name */}
+                    <input
+                      ref={editNameRef}
+                      value={editDraft.name ?? ''}
+                      onChange={e => setEditDraft(d => ({ ...d, name: e.target.value }))}
+                      onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
+                      className="text-xl font-bold text-white bg-slate-800/60 border border-slate-600/50 rounded-xl px-3 py-1.5 mb-2 w-full focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                      placeholder="Project name"
+                    />
 
-              <div className="absolute -inset-1 bg-gradient-to-r from-emerald-500/0 via-emerald-500/0 to-emerald-500/0 group-hover:via-emerald-500/5 blur-2xl transition-all duration-700 pointer-events-none rounded-3xl" />
-            </div>
-          ))}
+                    {/* Editable type */}
+                    <div className="flex gap-2 mb-4">
+                      <button
+                        onClick={() => setEditDraft(d => ({ ...d, type: 'Residential' }))}
+                        className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all ${editDraft.type === 'Residential' ? 'bg-emerald-500/10 border border-emerald-500/50 text-emerald-400' : 'bg-slate-800 border border-slate-700 text-slate-400 hover:border-slate-600'}`}
+                      >
+                        <Home className="w-3 h-3" /> Residential
+                      </button>
+                      <button
+                        onClick={() => setEditDraft(d => ({ ...d, type: 'Commercial' }))}
+                        className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all ${editDraft.type === 'Commercial' ? 'bg-emerald-500/10 border border-emerald-500/50 text-emerald-400' : 'bg-slate-800 border border-slate-700 text-slate-400 hover:border-slate-600'}`}
+                      >
+                        <Building2 className="w-3 h-3" /> Commercial
+                      </button>
+                    </div>
+
+                    {/* Editable address / city */}
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                      <input
+                        value={editDraft.address ?? ''}
+                        onChange={e => setEditDraft(d => ({ ...d, address: e.target.value }))}
+                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
+                        className="bg-slate-800/60 border border-slate-600/50 rounded-xl px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                        placeholder="Address"
+                      />
+                      <input
+                        value={editDraft.city ?? ''}
+                        onChange={e => setEditDraft(d => ({ ...d, city: e.target.value }))}
+                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
+                        className="bg-slate-800/60 border border-slate-600/50 rounded-xl px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                        placeholder="City"
+                      />
+                    </div>
+
+                    {/* Save / Cancel / Delete */}
+                    <div className="flex items-center gap-2 border-t border-slate-800/50 pt-4">
+                      <button
+                        onClick={saveEdit}
+                        disabled={!editDraft.name?.trim()}
+                        className="flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-emerald-500/20 transition-all disabled:opacity-40"
+                      >
+                        <Check className="w-4 h-4" /> Save
+                      </button>
+                      <button
+                        onClick={cancelEdit}
+                        className="flex items-center gap-1.5 text-slate-400 hover:text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-slate-800 transition-all"
+                      >
+                        <X className="w-4 h-4" /> Cancel
+                      </button>
+                      <div className="flex-1" />
+                      <button
+                        onClick={() => deleteProject(proj.id)}
+                        className="flex items-center gap-1.5 text-red-400/60 hover:text-red-400 hover:bg-red-500/10 px-3 py-2 rounded-xl text-sm font-semibold transition-all"
+                        title="Delete project"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="text-xl font-bold text-white mb-1 group-hover:text-emerald-300 transition-colors">{proj.name}</h3>
+                    <div className="flex items-center gap-2 text-slate-400 text-sm mb-6">
+                      <span className="bg-slate-800 px-2 py-0.5 rounded-md text-slate-300 text-xs">{proj.type}</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 mb-8">
+                      <div className="flex items-center gap-2 text-slate-400 text-sm">
+                        <MapPin className="w-4 h-4 text-slate-500" />
+                        <span className="truncate">{proj.address}{proj.city ? `, ${proj.city}` : ''}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-slate-400 text-sm">
+                        <Calendar className="w-4 h-4 text-slate-500" />
+                        <span>{new Date(proj.date).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end border-t border-slate-800/50 pt-4 mt-auto">
+                      <Link to={`/project/${proj.id}/cad`} className="flex items-center gap-2 text-emerald-400 hover:text-emerald-300 font-semibold group-hover:gap-3 transition-all">
+                        Open Workspace <ArrowRight className="w-4 h-4" />
+                      </Link>
+                    </div>
+                  </>
+                )}
+
+                <div className="absolute -inset-1 bg-gradient-to-r from-emerald-500/0 via-emerald-500/0 to-emerald-500/0 group-hover:via-emerald-500/5 blur-2xl transition-all duration-700 pointer-events-none rounded-3xl" />
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
