@@ -11,7 +11,7 @@
  * - Direct links to edit properties (click wall/window → select on canvas)
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import {
   X, Thermometer, Flame, Snowflake, Wind, Eye, EyeOff,
   ChevronDown, ChevronUp, GripVertical, AlertTriangle,
@@ -23,9 +23,6 @@ import {
   GRADE_COLORS,
   GRADE_LABELS,
   type ThermalGrade,
-  type WallThermalInfo,
-  type WindowThermalInfo,
-  type RoomThermalSummary,
 } from '../hooks/useThermalAnalysis';
 
 interface Props {

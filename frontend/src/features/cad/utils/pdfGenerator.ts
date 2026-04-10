@@ -704,19 +704,9 @@ function drawNotesPage(doc: jsPDF, metadata: ProjectMetadata, pageNum: number): 
   doc.saveGraphicsState();
   const cx = PAGE_W / 2;
   const cy = PAGE_H / 2;
-  const angleRad = (-30 * Math.PI) / 180;
-  // jsPDF text rotation via transform matrix
-  const cosA = Math.cos(angleRad);
-  const sinA = Math.sin(angleRad);
-  // Use internal transform: [cos, sin, -sin, cos, tx, ty]
   const textW = doc.getTextWidth('PREPARED FOR PERMIT REVIEW \u2014 NOT FOR CONSTRUCTION');
-  doc.internal.write(
-    `q ${cosA.toFixed(4)} ${sinA.toFixed(4)} ${(-sinA).toFixed(4)} ${cosA.toFixed(4)} ${(cx * 2.835).toFixed(2)} ${(cy * 2.835).toFixed(2)} cm`,
-  );
-  // Convert from mm to pts for text placement (jsPDF internal uses pts at 72dpi but unit is mm)
-  // Simpler: just use the text method with a calculated position
-  doc.internal.write('Q');
-  // Fallback: use text with rotation angle (jsPDF supports angle parameter)
+
+  // Use text with rotation angle (jsPDF supports angle parameter)
   doc.text(
     'PREPARED FOR PERMIT REVIEW \u2014 NOT FOR CONSTRUCTION',
     cx - textW / 2 + 20,

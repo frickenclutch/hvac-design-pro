@@ -243,6 +243,7 @@ export default function CadCanvas() {
         angle,
         selectable: true,
         evented: true,
+        // @ts-ignore
         name: `${PREFIX.opening}${o.id}`,
         hasControls: false,
       });
@@ -306,6 +307,7 @@ export default function CadCanvas() {
       const group = new fabric.Group([rect, ...lines], {
         selectable: true,
         evented: true,
+        // @ts-ignore
         name: `${PREFIX.hvac}${unit.id}`,
         hasControls: false,
         angle: unit.rotation,
@@ -327,6 +329,7 @@ export default function CadCanvas() {
       return new fabric.Group([circle, fan1, fan2], {
         selectable: true,
         evented: true,
+        // @ts-ignore
         name: `${PREFIX.hvac}${unit.id}`,
         hasControls: false,
         angle: unit.rotation,
@@ -351,6 +354,7 @@ export default function CadCanvas() {
       return new fabric.Group([outer, inner], {
         selectable: true,
         evented: true,
+        // @ts-ignore
         name: `${PREFIX.hvac}${unit.id}`,
         hasControls: false,
       });
@@ -371,6 +375,7 @@ export default function CadCanvas() {
     return new fabric.Group([rect], {
       selectable: true,
       evented: true,
+      // @ts-ignore
       name: `${PREFIX.hvac}${unit.id}`,
       hasControls: false,
       angle: unit.rotation,
@@ -824,9 +829,9 @@ export default function CadCanvas() {
           state.setDrawingInfo(null);
           state.setActiveTool('select');
           canvas.requestRenderAll();
-        } else if (tool !== 'select' && tool !== 'pan') {
-          // Cancel any other placement tool
-          cancelDrawing();
+        } else if (tool !== 'select') {
+           // Cancel any other placement tool
+           cancelDrawing();
           state.setActiveTool('select');
         }
         return;
@@ -1258,7 +1263,6 @@ export default function CadCanvas() {
 
       const scaleX = obj.scaleX ?? 1;
       const scaleY = obj.scaleY ?? 1;
-      const newWidth = (existing.width) * scaleX / (existing.width / (obj.width ?? existing.width));
       // Simpler: use the actual rendered dimensions
       const renderedW = (obj.width ?? existing.width) * scaleX;
       const renderedH = (obj.height ?? existing.height) * scaleY;

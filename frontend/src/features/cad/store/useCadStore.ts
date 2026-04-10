@@ -184,12 +184,6 @@ const createDefaultFloor = (): Floor => ({
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 let floorCounter = 1;
 
-const _getActiveFloor = (state: CadState): Floor => {
-  return (
-    state.floors.find((f) => f.id === state.activeFloorId) ?? state.floors[0]
-  );
-};
-
 const updateActiveFloor = (
   state: CadState,
   updater: (floor: Floor) => Floor,

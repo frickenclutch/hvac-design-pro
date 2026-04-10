@@ -1,3 +1,5 @@
+import { useEffect } from 'react';
+import { useParams } from 'react-router-dom';
 import CadCanvas from '../features/cad/components/CadCanvas';
 import Toolbox from '../features/cad/components/Toolbox';
 import PropertyInspector from '../features/cad/components/PropertyInspector';
@@ -9,10 +11,23 @@ import ThermalLegend from '../features/cad/components/ThermalLegend';
 import { useAutoSave } from '../features/cad/hooks/useAutoSave';
 import Mason from '../components/Mason';
 import ErrorBoundary from '../components/ErrorBoundary';
+import { useProjectStore } from '../stores/useProjectStore';
 
 export default function CadWorkspace() {
   // Auto-save drawing to D1 / localStorage
   useAutoSave();
+
+  // Hydrate the active project store from the route param
+  const { id } = useParams<{ id: string }>();
+  const setActiveProject = useProjectStore((s) => s.setActiveProject);
+  const clearActiveProject = useProjectStore((s) => s.clearActiveProject);
+
+  useEffect(() => {
+    if (id) {
+      setActiveProject(id);
+    }
+    return () => clearActiveProject();
+  }, [id, setActiveProject, clearActiveProject]);
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950 font-sans text-slate-100 overflow-hidden">

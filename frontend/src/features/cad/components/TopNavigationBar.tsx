@@ -5,6 +5,7 @@ import ErrorBoundary from '../../../components/ErrorBoundary';
 import { Link, useParams } from 'react-router-dom';
 import { useCadStore } from '../store/useCadStore';
 import { useAuthStore } from '../../auth/store/useAuthStore';
+import { useProjectStore } from '../../../stores/useProjectStore';
 
 // Lazy-load heavy dependencies (Three.js ~1.2MB, jsPDF ~200KB)
 const Viewer3D = lazy(() => import('./Viewer3D'));
@@ -15,6 +16,10 @@ export default function TopNavigationBar() {
   const [show3D, setShow3D] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const { user, organisation } = useAuthStore();
+  const { activeProjectName, activeProjectType, activeProjectAddress } = useProjectStore();
+
+  // Derive display name — fall back gracefully when no project route
+  const displayName = activeProjectName ?? (id ? `Project ${id}` : 'CAD Workspace');
 
   // Global Ctrl+K / Cmd+K shortcut for search
   useEffect(() => {
@@ -52,12 +57,12 @@ export default function TopNavigationBar() {
     }
 
     const metadata = {
-      projectName: 'BUILDING_SCHEMA_1029_A',
-      engineerName: user ? `${user.firstName} ${user.lastName}` : 'UNAUTHORIZED_PRO',
-      organisationName: organisation?.name || 'GENERIC_FIRM',
+      projectName: activeProjectName ?? displayName,
+      engineerName: user ? `${user.firstName} ${user.lastName}` : 'HVAC Engineer',
+      organisationName: organisation?.name || 'HVAC Design Pro',
       date: new Date().toLocaleDateString(),
       region: organisation?.regionCode || 'NA_ASHRAE',
-      projectId: id || '1029-A',
+      projectId: id || 'DRAFT',
     };
 
     const storeFloors = useCadStore.getState().floors;
@@ -138,10 +143,15 @@ export default function TopNavigationBar() {
 
           <div className="flex flex-col">
             <div className="flex items-center gap-3">
-              <h2 className="text-lg font-bold text-slate-100 tracking-wide drop-shadow-md">Building Schema</h2>
+              <h2 className="text-lg font-bold text-slate-100 tracking-wide drop-shadow-md">{displayName}</h2>
+              {activeProjectType && (
+                <span className="text-[10px] text-violet-400 bg-violet-500/10 border border-violet-500/20 px-2 py-0.5 rounded font-mono uppercase tracking-widest">{activeProjectType}</span>
+              )}
               <span className={`${saveStatusColor} text-[10px] uppercase font-mono tracking-widest px-2 py-0.5 rounded border`}>{saveStatusText}</span>
             </div>
-            <span className="text-xs text-slate-500 font-mono">ID: {id || '1029-A'}</span>
+            <span className="text-xs text-slate-500 font-mono truncate max-w-xs">
+              {activeProjectAddress ?? (id ? `ID: ${id}` : 'No project loaded')}
+            </span>
           </div>
         </div>
 

@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Send, Zap, Thermometer, Wind, Calculator, Phone } from 'lucide-react';
+import { X, Send, Zap, Thermometer, Wind, Calculator, Phone, Command } from 'lucide-react';
+import { useProjectStore } from '../stores/useProjectStore';
+import { useCadStore } from '../features/cad/store/useCadStore';
 
 // ── Mason — your AI HVAC engineering assistant ───────────────────────────────
 // Named after the masons who've built the world's buildings, brick by brick.
@@ -618,6 +620,24 @@ function findAnswer(query: string, context: MasonContext): string {
   return contextHelp;
 }
 
+function processCommands(query: string, context: MasonContext): string | null {
+  if (query.trim().toLowerCase() === '/status') {
+    const cadStore = useCadStore.getState();
+    const projStore = useProjectStore.getState();
+    const numRooms = cadStore.floors.flatMap(f => f.rooms).length;
+    const numWalls = cadStore.floors.flatMap(f => f.walls).length;
+    return `**Live Workspace Status**
+
+- **Project**: ${projStore.activeProjectName || 'Untitled Project'}
+- **Current Floor**: ${cadStore.floors.find(f => f.id === cadStore.activeFloorId)?.name || 'N/A'}
+- **Total Floors**: ${cadStore.floors.length}
+- **Detected Rooms in CAD**: ${numRooms}
+- **Walls Drawn**: ${numWalls}
+- **Current Mode**: ${context.toUpperCase()}`;
+  }
+  return null;
+}
+
 // ── Quick calculators ───────────────────────────────────────────────────────
 interface QuickCalc {
   id: string;
@@ -723,6 +743,33 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
   const [activeCalc, setActiveCalc] = useState<string | null>(null);
   const [calcValues, setCalcValues] = useState<Record<string, number>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Global Keyboard Shortcuts
+  useEffect(() => {
+    const handleGlobalKey = (e: KeyboardEvent) => {
+      if (e.altKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        setIsOpen(prev => !prev);
+      }
+      if (e.altKey && e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        setIsOpen(true);
+        setTimeout(() => {
+          setInput('/cad ');
+          inputRef.current?.focus();
+        }, 50);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKey);
+    return () => window.removeEventListener('keydown', handleGlobalKey);
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -735,7 +782,11 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
     if (!query) return;
 
     const userMsg: ChatMessage = { role: 'user', content: query };
-    const answer = findAnswer(query, context);
+    
+    // Check for special commands first
+    const commandResponse = processCommands(query, context);
+    const answer = commandResponse || findAnswer(query, context);
+    
     const masonMsg: ChatMessage = { role: 'mason', content: answer };
     setMessages(prev => [...prev, userMsg, masonMsg]);
     setInput('');
@@ -949,13 +1000,29 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
       {/* Input */}
       <div className="p-3 border-t border-slate-800 bg-slate-900/50 flex-shrink-0">
         <form onSubmit={e => { e.preventDefault(); handleSend(); }} className="flex gap-2">
-          <input
-            type="text"
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            placeholder={context === 'manualj' ? "Ask Mason about measurements, R-values, temps..." : "Ask Mason about HVAC, walls, duct sizing..."}
-            className="flex-1 bg-slate-950/80 border border-slate-700 text-slate-200 rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-amber-500/50 transition-colors placeholder:text-slate-600"
-          />
+          <div className="relative flex-1">
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              placeholder={context === 'manualj' ? "Ask Mason or type /status..." : "Ask Mason about HVAC, or type /status..."}
+              className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-amber-500/50 transition-colors placeholder:text-slate-600"
+            />
+            {input === '/' && (
+              <div className="absolute bottom-full mb-2 left-0 w-48 bg-slate-800 border border-slate-700 rounded-xl shadow-xl overflow-hidden py-1 z-10 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-amber-500/10 hover:text-amber-400 flex items-center gap-2"
+                  onClick={() => { setInput('/status'); inputRef.current?.focus(); }}
+                >
+                  <Command className="w-3.5 h-3.5" />
+                  <span className="font-mono">/status</span>
+                  <span className="text-slate-500 text-[10px] ml-auto">CAD State</span>
+                </button>
+              </div>
+            )}
+          </div>
           <button
             type="submit"
             disabled={!input.trim()}

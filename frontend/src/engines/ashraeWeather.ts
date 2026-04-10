@@ -899,7 +899,6 @@ const DATA: Record<string, AshraeEntry> = {
   '838': { city: 'Coeur d\'Alene', state: 'ID', heat99: -2, cool1: 92, lat: 47.7, elev: 2157, range: 'high', grains: 38 },
 
   // Mississippi / Louisiana / Arkansas / Oklahoma
-  '386': { city: 'Memphis', state: 'TN', heat99: 14, cool1: 97, lat: 35.1, elev: 263, range: 'medium', grains: 115 },
   '388': { city: 'Tupelo', state: 'MS', heat99: 16, cool1: 96, lat: 34.3, elev: 285, range: 'medium', grains: 115 },
   '389': { city: 'Grenada', state: 'MS', heat99: 18, cool1: 96, lat: 33.8, elev: 200, range: 'medium', grains: 118 },
   '390': { city: 'Jackson', state: 'MS', heat99: 22, cool1: 97, lat: 32.3, elev: 330, range: 'medium', grains: 120 },

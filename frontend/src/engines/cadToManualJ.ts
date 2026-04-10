@@ -3,7 +3,7 @@
  * Converts detected rooms from the CAD floor plan into Manual J RoomInput entries.
  */
 
-import type { Floor, DetectedRoom, WallSegment, Opening } from '../features/cad/store/useCadStore';
+import type { Floor } from '../features/cad/store/useCadStore';
 import type { RoomInput } from './manualJ';
 
 interface ConvertedRoom extends RoomInput {
@@ -16,7 +16,6 @@ interface ConvertedRoom extends RoomInput {
  */
 export function convertCadRoomsToManualJ(
   floor: Floor,
-  pxPerFt: number,
 ): ConvertedRoom[] {
   return floor.rooms.map((room, idx) => {
     // Gather walls belonging to this room
@@ -32,7 +31,6 @@ export function convertCadRoomsToManualJ(
       room.wallIds.includes(o.wallId)
     );
     const windows = roomOpenings.filter(o => o.type === 'window');
-    const doors = roomOpenings.filter(o => o.type === 'door' || o.type === 'sliding_door');
 
     // Sum window area
     const totalWindowSqFt = windows.reduce((sum, w) => {

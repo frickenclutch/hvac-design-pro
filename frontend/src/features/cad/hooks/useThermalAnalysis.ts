@@ -6,9 +6,8 @@
 
 import { useMemo } from 'react';
 import { useCadStore } from '../store/useCadStore';
-import type { Floor, DetectedRoom, WallSegment, Opening } from '../store/useCadStore';
-import { calculateRoom, calculateWholeHouse, createDefaultConditions } from '../../../engines/manualJ';
-import type { RoomInput, RoomResult, WholeHouseResult, DesignConditions } from '../../../engines/manualJ';
+import { calculateWholeHouse, createDefaultConditions } from '../../../engines/manualJ';
+import type { RoomResult, WholeHouseResult, DesignConditions } from '../../../engines/manualJ';
 import { convertCadRoomsToManualJ } from '../../../engines/cadToManualJ';
 
 // ── Wall thermal rating ─────────────────────────────────────────────────────
@@ -173,7 +172,7 @@ export function useThermalAnalysis(conditionsOverride?: DesignConditions): Therm
     let wholeHouse: WholeHouseResult | null = null;
 
     if (hasRooms) {
-      const roomInputs = convertCadRoomsToManualJ(floor, pxPerFt);
+      const roomInputs = convertCadRoomsToManualJ(floor);
       try {
         wholeHouse = calculateWholeHouse(roomInputs, conditions);
 

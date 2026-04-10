@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useCadStore } from '../store/useCadStore';
-import type { Floor, WallSegment, Opening, HvacUnit, DetectedRoom, Annotation, UnderlayImage } from '../store/useCadStore';
+import type { Floor } from '../store/useCadStore';
 import { Search, X, Layers, DoorOpen, Wind, MessageSquare, Image, ScanLine } from 'lucide-react';
 import { fmtLength, fmtSmallLength, fmtArea } from '../../../utils/units';
 

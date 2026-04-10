@@ -30,11 +30,17 @@ const Colors = {
 
   ductSilver:   0xb0b0b0,
   ductFlange:   0x888888,
+  ductInsulation: 0xdcdcdc,
 
   swingArc:     0xffa500,
 
   registerSlat: 0xc8c8c8,
   grilleBar:    0xa8a8a8,
+  
+  doorThreshold: 0xa0a0a0,
+  refrigerantCopper: 0xc47e5a,
+  refrigerantInsulation: 0x111111,
+  pvcWhite: 0xdddddd,
 } as const;
 
 // ── Shared helper ─────────────────────────────────────────────────────────────
@@ -48,6 +54,7 @@ function makeMat(
     roughness: number;
     side: THREE.Side;
     emissive: number;
+    emissiveIntensity: number;
   }>,
 ): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
@@ -59,6 +66,7 @@ function makeMat(
     opacity: opts?.opacity ?? 1.0,
     side: opts?.side ?? THREE.FrontSide,
     emissive: opts?.emissive ?? 0x000000,
+    emissiveIntensity: opts?.emissiveIntensity ?? 1.0,
   });
 }
 
@@ -188,6 +196,15 @@ export function createDoorModel(
     group.add(arc);
   }
 
+  // ── Optional Threshold ──────────────────────────────────────────────────
+  const thresholdMat = makeMat(Colors.doorThreshold, { wireframe: wf, metalness: 0.5, roughness: 0.6 });
+  const threshold = new THREE.Mesh(
+    new THREE.BoxGeometry(widthFt + frameThick * 2, 0.04, frameDepth + 0.1),
+    thresholdMat,
+  );
+  threshold.position.set(0, 0.02, 0);
+  group.add(threshold);
+
   return group;
 }
 
@@ -211,9 +228,9 @@ export function createWindowModel(
   const glassMat = makeMat(Colors.windowGlass, {
     wireframe: wf,
     transparent: true,
-    opacity: 0.3,
-    roughness: 0.05,
-    metalness: 0.2,
+    opacity: 0.35,
+    roughness: 0.0,
+    metalness: 0.9,
     side: THREE.DoubleSide,
   });
   const sillMat = makeMat(Colors.windowSill, { wireframe: wf, roughness: 0.7 });
@@ -315,23 +332,32 @@ export function createSupplyRegisterModel(
   frame.position.set(0, regH / 2, 0);
   group.add(frame);
 
+  // ── Duct neck (stub) ───────────────────────────────────────────────────
+  const neckMat = makeMat(Colors.sheetMetalDk, { wireframe: wf, metalness: 0.5, roughness: 0.5 });
+  const neck = new THREE.Mesh(
+    new THREE.BoxGeometry(regW * 0.85, 0.4, regD * 0.85),
+    neckMat,
+  );
+  neck.position.set(0, -0.2, 0);
+  group.add(neck);
+
   // ── Louver slats ────────────────────────────────────────────────────────
-  const slatMat = makeMat(Colors.registerSlat, { wireframe: wf, metalness: 0.3, roughness: 0.35 });
+  const slatMat = makeMat(Colors.registerSlat, { wireframe: wf, metalness: 0.4, roughness: 0.3 });
   const slatCount = 8;
   const slatW = regW * 0.88;
   const slatSpacing = regD * 0.88 / slatCount;
 
   for (let i = 0; i < slatCount; i++) {
     const slat = new THREE.Mesh(
-      new THREE.BoxGeometry(slatW, 0.01, slatSpacing * 0.55),
+      new THREE.BoxGeometry(slatW, 0.015, slatSpacing * 0.7),
       slatMat,
     );
     slat.position.set(
       0,
-      regH + 0.005,
+      regH / 2 + 0.01,
       -regD * 0.44 / 2 + slatSpacing * i + slatSpacing * 0.5 - regD * 0.04,
     );
-    slat.rotation.x = 0.35; // angled louvers
+    slat.rotation.x = 0.45; // steeper angled louvers
     group.add(slat);
   }
 
@@ -351,33 +377,67 @@ export function createReturnGrilleModel(
   const grilleD = 1.5;  // ft
   const grilleH = 0.06; // ft
 
-  // ── Outer frame ─────────────────────────────────────────────────────────
+  // ── Outer frame (stamped lip) ───────────────────────────────────────────
   const frameMat = makeMat(Colors.sheetMetal, { wireframe: wf, metalness: 0.35, roughness: 0.4 });
-  const frame = new THREE.Mesh(
-    new THREE.BoxGeometry(grilleW, grilleH, grilleD),
-    frameMat,
-  );
-  frame.position.set(0, grilleH / 2, 0);
-  group.add(frame);
+  
+  // Create hollow frame using 4 bars
+  const frameThick = 0.1;
+  const topBar = new THREE.Mesh(new THREE.BoxGeometry(grilleW, grilleH, frameThick), frameMat);
+  topBar.position.set(0, grilleH / 2, -grilleD / 2 + frameThick / 2);
+  group.add(topBar);
 
-  // ── Horizontal bars ─────────────────────────────────────────────────────
-  const barMat = makeMat(Colors.grilleBar, { wireframe: wf, metalness: 0.3, roughness: 0.35 });
-  const barCount = 12;
-  const barW = grilleW * 0.9;
-  const barSpacing = grilleD * 0.9 / barCount;
+  const bottomBar = new THREE.Mesh(new THREE.BoxGeometry(grilleW, grilleH, frameThick), frameMat);
+  bottomBar.position.set(0, grilleH / 2, grilleD / 2 - frameThick / 2);
+  group.add(bottomBar);
+
+  const leftBar = new THREE.Mesh(new THREE.BoxGeometry(frameThick, grilleH, grilleD - frameThick * 2), frameMat);
+  leftBar.position.set(-grilleW / 2 + frameThick / 2, grilleH / 2, 0);
+  group.add(leftBar);
+
+  const rightBar = new THREE.Mesh(new THREE.BoxGeometry(frameThick, grilleH, grilleD - frameThick * 2), frameMat);
+  rightBar.position.set(grilleW / 2 - frameThick / 2, grilleH / 2, 0);
+  group.add(rightBar);
+  
+  // ── Mounting Screws ─────────────────────────────────────────────────────
+  const screwMat = makeMat(0xd0d0d0, { wireframe: wf, metalness: 0.8, roughness: 0.2 });
+  const sx = grilleW / 2 - 0.05;
+  const sz = grilleD / 2 - 0.05;
+  for (const bx of [-sx, sx]) {
+    for (const bz of [-sz, sz]) {
+      const screw = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.01, 8), screwMat);
+      screw.position.set(bx, grilleH + 0.005, bz);
+      group.add(screw);
+    }
+  }
+
+  // ── Horizontal fine bars ────────────────────────────────────────────────
+  const barMat = makeMat(Colors.grilleBar, { wireframe: wf, metalness: 0.2, roughness: 0.5 });
+  const barCount = 20; // more bars for finer texture
+  const barW = grilleW - frameThick * 2;
+  const barSpacing = (grilleD - frameThick * 2) / barCount;
 
   for (let i = 0; i < barCount; i++) {
     const bar = new THREE.Mesh(
-      new THREE.BoxGeometry(barW, 0.015, 0.015),
+      new THREE.BoxGeometry(barW, 0.02, 0.01),
       barMat,
     );
     bar.position.set(
       0,
-      grilleH + 0.008,
-      -grilleD * 0.45 + barSpacing * i + barSpacing * 0.5,
+      grilleH / 2,
+      -(grilleD - frameThick * 2) / 2 + barSpacing * i + barSpacing / 2,
     );
+    bar.rotation.x = -0.3; // stamped louvers angle
     group.add(bar);
   }
+
+  // ── Duct neck (stub) ───────────────────────────────────────────────────
+  const neckMat = makeMat(Colors.sheetMetalDk, { wireframe: wf, metalness: 0.5, roughness: 0.5 });
+  const neck = new THREE.Mesh(
+    new THREE.BoxGeometry(barW, 0.5, grilleD - frameThick * 2),
+    neckMat,
+  );
+  neck.position.set(0, -0.25, 0);
+  group.add(neck);
 
   return group;
 }
@@ -396,7 +456,7 @@ export function createAirHandlerModel(
   const boxD = 2;   // ft
 
   // ── Main cabinet ────────────────────────────────────────────────────────
-  const cabinetMat = makeMat(Colors.sheetMetal, { wireframe: wf, metalness: 0.3, roughness: 0.5 });
+  const cabinetMat = makeMat(Colors.sheetMetal, { wireframe: wf, metalness: 0.35, roughness: 0.45 });
   const cabinet = new THREE.Mesh(
     new THREE.BoxGeometry(boxW, boxH, boxD),
     cabinetMat,
@@ -404,82 +464,79 @@ export function createAirHandlerModel(
   cabinet.position.set(0, boxH / 2, 0);
   group.add(cabinet);
 
-  // ── Fan cylinder (top section) ──────────────────────────────────────────
-  const fanMat = makeMat(Colors.fanBlade, { wireframe: wf, metalness: 0.5, roughness: 0.3 });
-  const fan = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.55, 0.55, 0.5, 20),
-    fanMat,
-  );
-  fan.position.set(0, boxH - 0.5, 0);
-  group.add(fan);
+  // ── Sub-panels and Seams ───────────────────────────────────────────────
+  const seamMat = makeMat(Colors.sheetMetalDk, { wireframe: wf, metalness: 0.5, roughness: 0.5 });
+  // Horizontal seam splitting the unit (blower vs coil sections)
+  const midSeam = new THREE.Mesh(new THREE.BoxGeometry(boxW + 0.01, 0.02, boxD + 0.01), seamMat);
+  midSeam.position.set(0, boxH * 0.55, 0);
+  group.add(midSeam);
 
-  // Fan hub
-  const hubMat = makeMat(0x303030, { wireframe: wf, metalness: 0.6 });
-  const hub = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.12, 0.12, 0.52, 12),
-    hubMat,
-  );
-  hub.position.set(0, boxH - 0.5, 0);
-  group.add(hub);
+  // ── Supply / Return Collars ─────────────────────────────────────────────
+  const collarMat = makeMat(Colors.sheetMetal, { wireframe: wf, metalness: 0.3, roughness: 0.6 });
+  const topCollar = new THREE.Mesh(new THREE.BoxGeometry(boxW * 0.8, 0.2, boxD * 0.8), collarMat);
+  topCollar.position.set(0, boxH + 0.1, 0);
+  group.add(topCollar);
 
-  // ── Coil section (copper bands on front) ────────────────────────────────
-  const coilMat = makeMat(Colors.copperCoil, { wireframe: wf, metalness: 0.55, roughness: 0.35 });
-  const coilCount = 5;
-  for (let i = 0; i < coilCount; i++) {
-    const coil = new THREE.Mesh(
-      new THREE.BoxGeometry(boxW * 0.85, 0.06, 0.04),
-      coilMat,
-    );
-    coil.position.set(0, 0.6 + i * 0.3, boxD / 2 + 0.02);
-    group.add(coil);
+  const bottomCollar = new THREE.Mesh(new THREE.BoxGeometry(boxW * 0.8, 0.2, boxD * 0.8), collarMat);
+  bottomCollar.position.set(0, -0.1, 0);
+  group.add(bottomCollar);
+
+  // ── Refrigerant Line Stubs (right side) ───────────────────────────────
+  const copperMat = makeMat(Colors.refrigerantCopper, { wireframe: wf, metalness: 0.7, roughness: 0.2 });
+  const insulMat = makeMat(Colors.refrigerantInsulation, { wireframe: wf, roughness: 0.9 });
+  
+  // Suction line (insulated)
+  const suctionHole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.1, 12), insulMat);
+  suctionHole.rotation.z = Math.PI / 2;
+  suctionHole.position.set(boxW / 2 + 0.05, boxH * 0.3, 0.2);
+  group.add(suctionHole);
+
+  // Liquid line (bare copper)
+  const liquidLine = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.15, 8), copperMat);
+  liquidLine.rotation.z = Math.PI / 2;
+  liquidLine.position.set(boxW / 2 + 0.075, boxH * 0.3, -0.2);
+  group.add(liquidLine);
+
+  // ── Wiring Conduit (left side) ─────────────────────────────────────────
+  const conduitMat = makeMat(Colors.pvcWhite, { wireframe: wf, roughness: 0.4 });
+  const conduit = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.4, 8), conduitMat);
+  conduit.rotation.z = Math.PI / 2;
+  conduit.position.set(-boxW / 2 - 0.2, boxH * 0.7, 0);
+  group.add(conduit);
+  
+  const jBox = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.4, 0.4), conduitMat);
+  jBox.position.set(-boxW / 2 - 0.1, boxH * 0.7, 0);
+  group.add(jBox);
+
+  // ── Access Doors (front) ──────────────────────────────────────────────
+  const doorMat = makeMat(Colors.servicePanelGreen, { wireframe: wf, roughness: 0.6, metalness: 0.15 });
+  const topDoor = new THREE.Mesh(new THREE.BoxGeometry(boxW * 0.9, boxH * 0.4, 0.02), doorMat);
+  topDoor.position.set(0, boxH * 0.75, boxD / 2 + 0.01);
+  group.add(topDoor);
+
+  const bottomDoor = new THREE.Mesh(new THREE.BoxGeometry(boxW * 0.9, boxH * 0.45, 0.02), doorMat);
+  bottomDoor.position.set(0, boxH * 0.25, boxD / 2 + 0.01);
+  group.add(bottomDoor);
+
+  // Door handles/knobs
+  const knobMat = makeMat(0x222222, { wireframe: wf, roughness: 0.8 });
+  for (const hy of [boxH * 0.75, boxH * 0.25]) {
+    const knob1 = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.04, 12), knobMat);
+    knob1.rotation.x = Math.PI / 2;
+    knob1.position.set(-boxW * 0.35, hy, boxD / 2 + 0.03);
+    group.add(knob1);
+
+    const knob2 = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.04, 12), knobMat);
+    knob2.rotation.x = Math.PI / 2;
+    knob2.position.set(boxW * 0.35, hy, boxD / 2 + 0.03);
+    group.add(knob2);
   }
 
-  // ── Filter slot (bottom, slightly recessed) ─────────────────────────────
+  // ── Return Filter Slot ────────────────────────────────────────────────
   const filterMat = makeMat(Colors.filterTan, { wireframe: wf, roughness: 0.8, metalness: 0.0 });
-  const filter = new THREE.Mesh(
-    new THREE.BoxGeometry(boxW * 0.9, 0.08, boxD * 0.9),
-    filterMat,
-  );
-  filter.position.set(0, 0.15, 0);
+  const filter = new THREE.Mesh(new THREE.BoxGeometry(boxW * 0.95, 0.1, boxD * 0.9), filterMat);
+  filter.position.set(0, 0.05, 0);
   group.add(filter);
-
-  // Filter handle tab
-  const tabMat = makeMat(Colors.sheetMetalDk, { wireframe: wf, metalness: 0.4 });
-  const tab = new THREE.Mesh(
-    new THREE.BoxGeometry(0.3, 0.04, 0.08),
-    tabMat,
-  );
-  tab.position.set(0, 0.21, boxD / 2 * 0.9);
-  group.add(tab);
-
-  // ── Service panel (front, lower half) ───────────────────────────────────
-  const panelMat = makeMat(Colors.servicePanelGreen, { wireframe: wf, roughness: 0.6, metalness: 0.15 });
-  const panel = new THREE.Mesh(
-    new THREE.BoxGeometry(boxW * 0.6, boxH * 0.35, 0.03),
-    panelMat,
-  );
-  panel.position.set(0, boxH * 0.35, boxD / 2 + 0.04);
-  group.add(panel);
-
-  // Panel screws (corners)
-  const screwMat = makeMat(0xaaaaaa, { wireframe: wf, metalness: 0.7, roughness: 0.2 });
-  const panelHalfW = boxW * 0.6 * 0.4;
-  const panelHalfH = boxH * 0.35 * 0.4;
-  for (const sx of [-1, 1]) {
-    for (const sy of [-1, 1]) {
-      const screw = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.02, 0.02, 0.04, 8),
-        screwMat,
-      );
-      screw.rotation.x = Math.PI / 2;
-      screw.position.set(
-        sx * panelHalfW,
-        boxH * 0.35 + sy * panelHalfH,
-        boxD / 2 + 0.06,
-      );
-      group.add(screw);
-    }
-  }
 
   return group;
 }
@@ -494,8 +551,8 @@ export function createCondenserModel(
   const wf = showWireframe;
 
   const radius = 1.5;
-  const height = 2;
-  const segments = 24;
+  const height = 2.2;
+  const segments = 32;
 
   // ── Main cylindrical body ───────────────────────────────────────────────
   const bodyMat = makeMat(Colors.condenserGray, { wireframe: wf, metalness: 0.35, roughness: 0.5 });
@@ -507,22 +564,66 @@ export function createCondenserModel(
   group.add(body);
 
   // ── Fin texture (vertical strips around cylinder) ───────────────────────
-  const finMat = makeMat(Colors.condenserFin, { wireframe: wf, metalness: 0.4, roughness: 0.45 });
-  const finCount = 16;
+  const finMat = makeMat(Colors.condenserFin, { wireframe: wf, metalness: 0.5, roughness: 0.6 });
+  const finCount = 36; // denser fins
   for (let i = 0; i < finCount; i++) {
     const angle = (Math.PI * 2 / finCount) * i;
+    // Leave a gap for the service panel
+    if (angle > -0.2 && angle < 0.8) continue;
+    
     const fin = new THREE.Mesh(
-      new THREE.BoxGeometry(0.02, height * 0.75, 0.3),
+      new THREE.BoxGeometry(0.04, height * 0.85, 0.2),
       finMat,
     );
     fin.position.set(
-      Math.cos(angle) * (radius - 0.01),
+      Math.cos(angle) * (radius - 0.02),
       height / 2,
-      Math.sin(angle) * (radius - 0.01),
+      Math.sin(angle) * (radius - 0.02),
     );
     fin.rotation.y = -angle;
     group.add(fin);
   }
+
+  // ── Service Panel (Side) ────────────────────────────────────────────────
+  const panelMat = makeMat(Colors.sheetMetal, { wireframe: wf, metalness: 0.2, roughness: 0.4 });
+  const panelAngle = 0.3;
+  const panel = new THREE.Mesh(
+    new THREE.BoxGeometry(radius * 0.6, height * 0.9, 0.1),
+    panelMat,
+  );
+  panel.position.set(
+    Math.cos(panelAngle) * radius,
+    height / 2,
+    Math.sin(panelAngle) * radius,
+  );
+  panel.rotation.y = -panelAngle + Math.PI / 2;
+  group.add(panel);
+
+  // ── Refrigerant Line Sets ───────────────────────────────────────────────
+  const copperMat = makeMat(Colors.refrigerantCopper, { wireframe: wf, metalness: 0.8, roughness: 0.2 });
+  const insulMat = makeMat(Colors.refrigerantInsulation, { wireframe: wf, roughness: 0.8 });
+
+  // Valves on panel
+  const valve1 = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.1, 8), copperMat);
+  valve1.rotation.x = Math.PI / 2;
+  valve1.position.set(Math.cos(panelAngle) * radius + 0.1, 0.4, Math.sin(panelAngle) * radius - 0.1);
+  group.add(valve1);
+
+  const valve2 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.1, 12), insulMat);
+  valve2.rotation.x = Math.PI / 2;
+  valve2.position.set(Math.cos(panelAngle) * radius + 0.1, 0.25, Math.sin(panelAngle) * radius + 0.1);
+  group.add(valve2);
+
+  // ── Internal Compressor (visible through top) ───────────────────────────
+  const compMat = makeMat(0x111111, { wireframe: wf, metalness: 0.9, roughness: 0.2 });
+  const compressor = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1.0, 16), compMat);
+  compressor.position.set(-0.3, 0.5, -0.2); // Offset hump
+  group.add(compressor);
+
+  // Compressor dome
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2), compMat);
+  dome.position.set(-0.3, 1.0, -0.2);
+  group.add(dome);
 
   // ── Top fan guard (wire grill disk) ─────────────────────────────────────
   const guardMat = makeMat(Colors.condenserGuard, {
@@ -562,12 +663,12 @@ export function createCondenserModel(
   hub.position.set(0, height - 0.1, 0);
   group.add(hub);
 
-  // Fan blades (3)
+  // Fan blades (4)
   const bladeMat = makeMat(Colors.fanBlade, { wireframe: wf, metalness: 0.4, roughness: 0.35 });
-  for (let i = 0; i < 3; i++) {
-    const angle = (Math.PI * 2 / 3) * i;
+  for (let i = 0; i < 4; i++) {
+    const angle = (Math.PI / 2) * i;
     const blade = new THREE.Mesh(
-      new THREE.BoxGeometry(0.12, 0.03, radius * 0.7),
+      new THREE.BoxGeometry(0.18, 0.02, radius * 0.75),
       bladeMat,
     );
     blade.rotation.y = angle + 0.3; // slight pitch
@@ -616,9 +717,9 @@ export function createThermostatModel(
   const group = new THREE.Group();
   const wf = showWireframe;
 
-  const bodyW = 0.3;  // ft (~3.6")
-  const bodyH = 0.5;  // ft (~6")
-  const bodyD = 0.06; // ft (~0.7")
+  const bodyW = 0.35; // ft 
+  const bodyH = 0.55; // ft 
+  const bodyD = 0.08; // ft 
 
   // ── Main body ───────────────────────────────────────────────────────────
   const bodyMat = makeMat(Colors.thermostatBody, { wireframe: wf, roughness: 0.3, metalness: 0.05 });
@@ -631,53 +732,61 @@ export function createThermostatModel(
 
   // ── Bezel / border ──────────────────────────────────────────────────────
   const bezelMat = makeMat(Colors.thermostatBezel, { wireframe: wf, roughness: 0.25, metalness: 0.15 });
-  const bezelThick = 0.015;
+  const bezelThick = 0.02;
 
   // Top bezel
-  const topBezel = new THREE.Mesh(new THREE.BoxGeometry(bodyW + 0.01, bezelThick, bodyD + 0.01), bezelMat);
+  const topBezel = new THREE.Mesh(new THREE.BoxGeometry(bodyW + 0.015, bezelThick, bodyD + 0.015), bezelMat);
   topBezel.position.set(0, bodyH / 2 - bezelThick / 2, 0);
   group.add(topBezel);
 
   // Bottom bezel
-  const bottomBezel = new THREE.Mesh(new THREE.BoxGeometry(bodyW + 0.01, bezelThick, bodyD + 0.01), bezelMat);
+  const bottomBezel = new THREE.Mesh(new THREE.BoxGeometry(bodyW + 0.015, bezelThick, bodyD + 0.015), bezelMat);
   bottomBezel.position.set(0, -bodyH / 2 + bezelThick / 2, 0);
   group.add(bottomBezel);
 
-  // ── Screen area ─────────────────────────────────────────────────────────
+  // ── Screen area (Glowing LCD) ───────────────────────────────────────────
   const screenMat = makeMat(Colors.thermostatScreen, {
     wireframe: wf,
-    roughness: 0.1,
-    metalness: 0.05,
-    emissive: 0x0a1a2e,
+    roughness: 0.05,
+    metalness: 0.1,
+    emissive: 0x1f4e85, // Brigher blue glow
+    emissiveIntensity: 0.8
   });
-  const screenW = bodyW * 0.7;
-  const screenH = bodyH * 0.4;
+  const screenW = bodyW * 0.75;
+  const screenH = bodyH * 0.45;
   const screen = new THREE.Mesh(
-    new THREE.BoxGeometry(screenW, screenH, 0.005),
+    new THREE.BoxGeometry(screenW, screenH, 0.01),
     screenMat,
   );
-  screen.position.set(0, bodyH * 0.1, bodyD / 2 + 0.003);
+  screen.position.set(0, bodyH * 0.1, bodyD / 2 + 0.005);
   group.add(screen);
 
-  // ── Buttons (2 small bumps below screen) ────────────────────────────────
+  // LCD text mock (inner rectangle)
+  const lcdTextMat = makeMat(0x66ccff, { wireframe: wf, emissive: 0x66ccff, emissiveIntensity: 1.0 });
+  const textMock = new THREE.Mesh(new THREE.PlaneGeometry(screenW * 0.5, screenH * 0.4), lcdTextMat);
+  textMock.position.set(0, bodyH * 0.1, bodyD / 2 + 0.011);
+  group.add(textMock);
+
+  // ── Buttons ─────────────────────────────────────────────────────────────
   const btnMat = makeMat(0xd0d0d0, { wireframe: wf, roughness: 0.3 });
-  for (const bx of [-0.05, 0.05]) {
+  for (const bx of [-0.06, 0, 0.06]) {
     const btn = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.015, 0.015, 0.01, 8),
+      new THREE.CylinderGeometry(0.015, 0.015, 0.015, 12),
       btnMat,
     );
     btn.rotation.x = Math.PI / 2;
-    btn.position.set(bx, -bodyH * 0.22, bodyD / 2 + 0.005);
+    btn.position.set(bx, -bodyH * 0.25, bodyD / 2 + 0.005);
     group.add(btn);
   }
 
-  // ── Wall mount plate (behind body) ──────────────────────────────────────
-  const mountMat = makeMat(0xcccccc, { wireframe: wf, roughness: 0.6 });
+  // ── Wall mount plate (thickened) ───────────────────────────────────────
+  const mountMat = makeMat(0xbbbbbb, { wireframe: wf, roughness: 0.7 });
   const mount = new THREE.Mesh(
-    new THREE.BoxGeometry(bodyW * 1.1, bodyH * 1.05, 0.015),
+    new THREE.BoxGeometry(bodyW * 1.15, bodyH * 1.1, 0.03),
     mountMat,
   );
-  mount.position.set(0, 0, -bodyD / 2 - 0.008);
+  // Bring it out slightly more realistically
+  mount.position.set(0, 0, -bodyD / 2 - 0.015);
   group.add(mount);
 
   return group;
@@ -692,72 +801,77 @@ export function createDuctRunModel(
   const group = new THREE.Group();
   const wf = showWireframe;
 
-  const ductW = 1.0;   // ft
-  const ductH = 0.75;  // ft
-  const ductLen = 3.0;  // ft
-  const flangeThick = 0.04;
+  const ductLen = 3.0; // ft
+  const radiusX = 0.5; // ft (12" dia)
+  const insulationThick = 0.08;
 
-  // ── Main duct section (rectangular) ─────────────────────────────────────
-  const ductMat = makeMat(Colors.ductSilver, { wireframe: wf, metalness: 0.4, roughness: 0.4 });
-  const duct = new THREE.Mesh(
-    new THREE.BoxGeometry(ductLen, ductH, ductW),
+  // ── Inner spiral duct ────────────────────────────────────────────────────
+  const ductMat = makeMat(Colors.ductSilver, { wireframe: wf, metalness: 0.5, roughness: 0.35 });
+  const innerDuct = new THREE.Mesh(
+    new THREE.CylinderGeometry(radiusX, radiusX, ductLen, 24),
     ductMat,
   );
-  duct.position.set(0, 0, 0);
-  group.add(duct);
+  // Cylinder default is Y-up, our duct length is along X axis
+  innerDuct.rotation.z = Math.PI / 2;
+  group.add(innerDuct);
 
-  // ── Seam line along top ─────────────────────────────────────────────────
-  const seamMat = makeMat(Colors.ductFlange, { wireframe: wf, metalness: 0.5, roughness: 0.35 });
-  const seam = new THREE.Mesh(
-    new THREE.BoxGeometry(ductLen, 0.015, 0.03),
-    seamMat,
-  );
-  seam.position.set(0, ductH / 2 + 0.007, 0);
-  group.add(seam);
-
-  // ── Connection flanges (both ends) ──────────────────────────────────────
-  const flangeMat = makeMat(Colors.ductFlange, { wireframe: wf, metalness: 0.45, roughness: 0.35 });
-
-  for (const side of [-1, 1]) {
-    const flange = new THREE.Mesh(
-      new THREE.BoxGeometry(flangeThick, ductH + 0.12, ductW + 0.12),
-      flangeMat,
+  // ── Spiral Corrugation ──────────────────────────────────────────────────
+  const seamMat = makeMat(Colors.ductFlange, { wireframe: wf, metalness: 0.6, roughness: 0.4 });
+  const corrugationRings = 20;
+  const ringSpacing = ductLen / corrugationRings;
+  
+  for (let i = 0; i < corrugationRings; i++) {
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(radiusX + 0.005, 0.008, 6, 24),
+      seamMat
     );
-    flange.position.set(side * (ductLen / 2 + flangeThick / 2), 0, 0);
-    group.add(flange);
-
-    // Flange bolts (4 per end)
-    const boltMat = makeMat(0x666666, { wireframe: wf, metalness: 0.6, roughness: 0.25 });
-    const boltOffsets = [
-      [0, (ductH + 0.12) * 0.35, (ductW + 0.12) * 0.35],
-      [0, (ductH + 0.12) * 0.35, -(ductW + 0.12) * 0.35],
-      [0, -(ductH + 0.12) * 0.35, (ductW + 0.12) * 0.35],
-      [0, -(ductH + 0.12) * 0.35, -(ductW + 0.12) * 0.35],
-    ];
-    for (const [bx, by, bz] of boltOffsets) {
-      const bolt = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.02, 0.02, flangeThick + 0.02, 6),
-        boltMat,
-      );
-      bolt.rotation.z = Math.PI / 2;
-      bolt.position.set(
-        side * (ductLen / 2 + flangeThick / 2) + bx,
-        by,
-        bz,
-      );
-      group.add(bolt);
-    }
+    ring.rotation.y = Math.PI / 2;
+    ring.position.set(-ductLen / 2 + ringSpacing * i + ringSpacing / 2, 0, 0);
+    // Add small tilt to simulate spiral seam
+    ring.rotation.x = 0.05;
+    group.add(ring);
   }
 
-  // ── Hanging strap tabs (2 along top) ────────────────────────────────────
+  // ── Insulation jacket (Outer wrap) ───────────────────────────────────────
+  const insulMat = makeMat(Colors.ductInsulation, { wireframe: wf, roughness: 0.85, metalness: 0.1 });
+  const insulation = new THREE.Mesh(
+    new THREE.CylinderGeometry(radiusX + insulationThick, radiusX + insulationThick, ductLen - 0.1, 24),
+    insulMat,
+  );
+  insulation.rotation.z = Math.PI / 2;
+  group.add(insulation);
+
+  // ── Connection collars (uninsulated ends) ──────────────────────────────
+  const collarMat = makeMat(Colors.ductSilver, { wireframe: wf, metalness: 0.45, roughness: 0.35 });
+  for (const side of [-1, 1]) {
+    const collar = new THREE.Mesh(
+      new THREE.CylinderGeometry(radiusX + 0.01, radiusX + 0.01, 0.1, 24),
+      collarMat,
+    );
+    collar.rotation.z = Math.PI / 2;
+    collar.position.set(side * (ductLen / 2 + 0.05), 0, 0);
+    group.add(collar);
+  }
+
+  // ── Hanging straps ──────────────────────────────────────────────────────
   const strapMat = makeMat(Colors.sheetMetalDk, { wireframe: wf, metalness: 0.3, roughness: 0.5 });
   for (const sx of [-0.6, 0.6]) {
-    const strap = new THREE.Mesh(
-      new THREE.BoxGeometry(0.08, 0.2, ductW + 0.06),
+    // Vertical drop
+    const drop = new THREE.Mesh(
+      new THREE.BoxGeometry(0.04, radiusX + 0.5, 0.04), // strap down to middle
       strapMat,
     );
-    strap.position.set(sx, ductH / 2 + 0.1, 0);
-    group.add(strap);
+    drop.position.set(sx, radiusX + insulationThick + 0.25, 0);
+    group.add(drop);
+
+    // Band around insulation
+    const band = new THREE.Mesh(
+      new THREE.TorusGeometry(radiusX + insulationThick + 0.01, 0.02, 6, 24),
+      strapMat
+    );
+    band.rotation.y = Math.PI / 2;
+    band.position.set(sx, 0, 0);
+    group.add(band);
   }
 
   return group;

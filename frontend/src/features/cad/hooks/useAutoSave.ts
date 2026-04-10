@@ -12,15 +12,15 @@ export function useAutoSave() {
   const setSaving = useCadStore(s => s.setSaving);
   const setSaveError = useCadStore(s => s.setSaveError);
 
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!isDirty || isSaving) return;
 
     // Clear existing timer
-    if (timerRef.current) clearTimeout(timerRef.current);
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
 
-    timerRef.current = setTimeout(async () => {
+    saveTimeoutRef.current = setTimeout(async () => {
       const data = serializeDrawing();
 
       // Always save to localStorage as fallback
@@ -64,9 +64,9 @@ export function useAutoSave() {
     }, 3000);
 
     return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
-  }, [isDirty, isSaving, drawingId, projectId]);
+  }, [isDirty, isSaving, drawingId, projectId, markSaved, serializeDrawing, setSaveError, setSaving]);
 }
 
 export async function loadDrawing(projectId: string): Promise<any | null> {

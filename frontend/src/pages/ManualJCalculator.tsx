@@ -4,7 +4,6 @@ import {
   ChevronDown, ChevronUp, Home, Building2, Info,
   FileDown, Printer, Gauge, Shield, MapPin
 } from 'lucide-react';
-import type jsPDF from 'jspdf';
 import {
   type RoomInput, type DesignConditions, type WholeHouseResult,
   type GlassType, type DuctLocation, type WallGradeType, type Construction, type DailyRange,
@@ -12,10 +11,12 @@ import {
 } from '../engines/manualJ';
 import { lookupByZip } from '../engines/ashraeWeather';
 import { convertCadRoomsToManualJ } from '../engines/cadToManualJ';
+import { generateCadFloorFromManualJ, type LayoutAlgorithm } from '../engines/manualJToCad';
 import { useCadStore } from '../features/cad/store/useCadStore';
 import RetailerFinderPanel from '../features/retailer/components/RetailerFinderPanel';
 import { useRetailerStore } from '../features/retailer/store/useRetailerStore';
 import Mason from '../components/Mason';
+import { useProjectStore } from '../stores/useProjectStore';
 
 // ── Persistence helpers ───────────────────────────────────────────────────────
 const STORAGE_KEY = 'hvac_manualj_inputs';
@@ -46,6 +47,11 @@ export default function ManualJCalculator() {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
   const [zipCode, setZipCode] = useState('');
   const [zipLocation, setZipLocation] = useState<string | null>(null);
+  const [showExportCadDialog, setShowExportCadDialog] = useState(false);
+  const [layoutAlgorithm, setLayoutAlgorithm] = useState<LayoutAlgorithm>('horizontal_strip');
+
+  const activeProjectName = useProjectStore((s) => s.activeProjectName);
+  const displayName = activeProjectName || 'HVAC DesignPro';
 
   // Auto-save all inputs to localStorage whenever they change
   const isFirstRender = useRef(true);
@@ -69,9 +75,25 @@ export default function ManualJCalculator() {
       alert('No detected rooms found in the CAD workspace. Use the Detect Rooms (R) tool first.');
       return;
     }
-    const converted = convertCadRoomsToManualJ(floor, cadState.projectScale.pxPerFt);
+    const converted = convertCadRoomsToManualJ(floor);
     setRooms(converted);
     setWholeHouse(null);
+  };
+
+  const exportToCad = () => {
+    const pxPerFt = useCadStore.getState().projectScale.pxPerFt;
+    const newFloor = generateCadFloorFromManualJ(rooms, pxPerFt, layoutAlgorithm);
+    
+    useCadStore.setState((s) => ({
+      floors: [...s.floors, newFloor],
+      activeFloorId: newFloor.id,
+      isDirty: true,
+      undoStack: [],
+      redoStack: [],
+    }));
+    
+    setShowExportCadDialog(false);
+    alert('CAD Floor Generated! Switch to the 2D CAD Workspace to view it.');
   };
 
   const removeRoom = (id: string) => {
@@ -135,7 +157,7 @@ export default function ManualJCalculator() {
       </style>
     </head><body>
       <div class="header">
-        <h1>HVAC DesignPro — Manual J Load Report</h1>
+        <h1>${displayName} — Manual J Load Report</h1>
         <p>ACCA Manual J 8th Edition — Residential Heating & Cooling Load Calculation</p>
       </div>
       <div class="timestamp">Generated: ${new Date().toLocaleString()}</div>
@@ -205,7 +227,7 @@ export default function ManualJCalculator() {
     // Title block
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(20);
-    doc.text('HVAC DesignPro', pw / 2, y, { align: 'center' });
+    doc.text(displayName, pw / 2, y, { align: 'center' });
     y += 18;
     doc.setFontSize(11);
     doc.setFont('helvetica', 'normal');
@@ -320,7 +342,9 @@ export default function ManualJCalculator() {
             <div className="p-2.5 rounded-xl bg-orange-500/10 border border-orange-500/20">
               <Thermometer className="w-6 h-6 text-orange-400" />
             </div>
-            <h2 className="text-3xl font-bold text-white">Manual J Calculator</h2>
+            <h2 className="text-3xl font-bold text-white">
+              {activeProjectName ? `${activeProjectName} — Manual J` : 'Manual J Calculator'}
+            </h2>
             {saveStatus === 'saved' && (
               <span className="text-xs text-emerald-400 font-medium bg-emerald-500/10 px-2.5 py-1 rounded-lg animate-in fade-in duration-300">
                 Inputs saved
@@ -481,6 +505,44 @@ export default function ManualJCalculator() {
             </div>
           </div>
 
+          {showExportCadDialog && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+              <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-sm w-full shadow-2xl">
+                <h3 className="text-xl font-bold text-white mb-2">Export to CAD</h3>
+                <p className="text-sm text-slate-400 mb-6">Choose a layout algorithm to arrange your Manual J rooms in the 2D CAD workspace.</p>
+                
+                <div className="space-y-3 mb-6">
+                  <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-700 bg-slate-800/50 cursor-pointer hover:border-emerald-500/50 transition-colors">
+                    <input type="radio" checked={layoutAlgorithm === 'horizontal_strip'} onChange={() => setLayoutAlgorithm('horizontal_strip')} className="w-5 h-5 text-emerald-500 bg-slate-900 border-slate-600 focus:ring-emerald-500" />
+                    <div>
+                      <div className="text-sm font-bold text-white">Horizontal Strip</div>
+                      <div className="text-xs text-slate-400">Rooms arranged side-by-side</div>
+                    </div>
+                  </label>
+                  <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-700 bg-slate-800/50 cursor-pointer hover:border-emerald-500/50 transition-colors">
+                    <input type="radio" checked={layoutAlgorithm === 'grid'} onChange={() => setLayoutAlgorithm('grid')} className="w-5 h-5 text-emerald-500 bg-slate-900 border-slate-600 focus:ring-emerald-500" />
+                    <div>
+                      <div className="text-sm font-bold text-white">Grid Layout</div>
+                      <div className="text-xs text-slate-400">Rooms arranged in a square grid</div>
+                    </div>
+                  </label>
+                  <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-700 bg-slate-800/50 cursor-pointer hover:border-emerald-500/50 transition-colors">
+                    <input type="radio" checked={layoutAlgorithm === 'l_shape'} onChange={() => setLayoutAlgorithm('l_shape')} className="w-5 h-5 text-emerald-500 bg-slate-900 border-slate-600 focus:ring-emerald-500" />
+                    <div>
+                      <div className="text-sm font-bold text-white">L-Shape Layout</div>
+                      <div className="text-xs text-slate-400">Rooms arranged in an L-shape</div>
+                    </div>
+                  </label>
+                </div>
+
+                <div className="flex gap-3">
+                  <button onClick={() => setShowExportCadDialog(false)} className="flex-1 py-3 rounded-xl font-bold text-sm bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors">Cancel</button>
+                  <button onClick={exportToCad} className="flex-1 py-3 rounded-xl font-bold text-sm bg-emerald-500 text-slate-950 hover:bg-emerald-400 transition-colors">Generate CAD</button>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-4">
             {rooms.map((room, idx) => (
               <RoomInputCard
@@ -536,6 +598,10 @@ export default function ManualJCalculator() {
 
             {/* Export / Print Buttons */}
             <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 sm:justify-end">
+              <button onClick={() => setShowExportCadDialog(true)}
+                className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-semibold text-sm hover:bg-emerald-500/20 hover:border-emerald-500/50 transition-all min-h-[44px]">
+                <ArrowRight className="w-4 h-4" /> Export to CAD
+              </button>
               <button onClick={handleExportPdf}
                 className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-400 font-semibold text-sm hover:bg-sky-500/20 hover:border-sky-500/50 transition-all min-h-[44px]">
                 <FileDown className="w-4 h-4" /> Export PDF
