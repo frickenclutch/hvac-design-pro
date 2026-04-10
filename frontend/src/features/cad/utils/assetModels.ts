@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { PipeMaterial } from '../store/useCadStore';
 
 // ── Color Palette ─────────────────────────────────────────────────────────────
 const Colors = {
@@ -41,6 +42,9 @@ const Colors = {
   refrigerantCopper: 0xc47e5a,
   refrigerantInsulation: 0x111111,
   pvcWhite: 0xdddddd,
+  pipeLiquid: 0xfca5a5,
+  pipeSuction: 0xef4444,
+  pipeGas: 0x444444,
 } as const;
 
 // ── Shared helper ─────────────────────────────────────────────────────────────
@@ -872,6 +876,60 @@ export function createDuctRunModel(
     band.rotation.y = Math.PI / 2;
     band.position.set(sx, 0, 0);
     group.add(band);
+  }
+
+  return group;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 9. Pipe Model
+// ═══════════════════════════════════════════════════════════════════════════════
+export function createPipeModel(
+  lengthFt: number,
+  diameterIn: number,
+  material: PipeMaterial,
+  showWireframe: boolean = false,
+): THREE.Group {
+  const group = new THREE.Group();
+  const wf = showWireframe;
+  const radius = (diameterIn / 2) / 12; // inches to feet
+
+  let color = Colors.pvcWhite;
+  let metalness = 0.1;
+  let roughness = 0.5;
+
+  if (material === 'copper_liquid') {
+    color = Colors.pipeLiquid;
+    metalness = 0.6;
+    roughness = 0.3;
+  } else if (material === 'copper_suction') {
+    color = Colors.pipeSuction;
+    metalness = 0.6;
+    roughness = 0.3;
+  } else if (material === 'gas_black_iron') {
+    color = Colors.pipeGas;
+    metalness = 0.4;
+    roughness = 0.6;
+  }
+
+  const mat = makeMat(color, { wireframe: wf, metalness, roughness });
+  const geo = new THREE.CylinderGeometry(radius, radius, lengthFt, 12);
+  const mesh = new THREE.Mesh(geo, mat);
+
+  // Cylinder is vertical by default (along Y), rotate to align with X (length)
+  mesh.rotation.z = Math.PI / 2;
+  mesh.position.set(lengthFt / 2, 0, 0);
+  
+  group.add(mesh);
+
+  // Add insulation if it's a suction line
+  if (material === 'copper_suction') {
+    const insulMat = makeMat(0x111111, { wireframe: wf, roughness: 0.9 });
+    const insulGeo = new THREE.CylinderGeometry(radius + 0.04, radius + 0.04, lengthFt - 0.1, 12);
+    const insulMesh = new THREE.Mesh(insulGeo, insulMat);
+    insulMesh.rotation.z = Math.PI / 2;
+    insulMesh.position.set(lengthFt / 2, 0, 0);
+    group.add(insulMesh);
   }
 
   return group;

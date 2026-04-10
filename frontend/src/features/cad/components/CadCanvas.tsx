@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import * as fabric from 'fabric';
 import { useCadStore } from '../store/useCadStore';
-import type { WallMaterial, WallSegment, Opening, HvacUnit, Annotation, UnderlayImage } from '../store/useCadStore';
+import type { WallMaterial, WallSegment, Opening, HvacUnit, PipeMaterial, PipeSegment, Annotation, UnderlayImage } from '../store/useCadStore';
 import { showSnapPulse, showPlacementConfirm, triggerHapticVibration } from '../utils/haptics';
 
 // ── Drawing state machine ──────────────────────────────────────────────────────
@@ -17,6 +17,7 @@ const PREFIX = {
   wall: 'wall-',
   opening: 'opening-',
   hvac: 'hvac-',
+  pipe: 'pipe-',
   annotation: 'ann-',
   room: 'room-',
   ghost: '__ghost_',
@@ -32,6 +33,13 @@ const HVAC_COLORS: Record<string, string> = {
   condenser: '#fb923c',
   thermostat: '#facc15',
   duct_run: '#94a3b8',
+};
+
+const PIPE_COLORS: Record<PipeMaterial, string> = {
+  copper_liquid: '#fca5a5',
+  copper_suction: '#ef4444',
+  pvc_condensate: '#ffffff',
+  gas_black_iron: '#64748b',
 };
 
 export default function CadCanvas() {
@@ -378,7 +386,23 @@ export default function CadCanvas() {
       // @ts-ignore
       name: `${PREFIX.hvac}${unit.id}`,
       hasControls: false,
-      angle: unit.rotation,
+    });
+  }, []);
+
+  const createPipeLine = useCallback((p: PipeSegment): fabric.Line => {
+    const color = PIPE_COLORS[p.material] || '#cbd5e1';
+    
+    return new fabric.Line([p.x1, p.y1, p.x2, p.y2], {
+      stroke: color,
+      strokeWidth: p.diameterIn * 4, // scale diameter to visual width
+      strokeLineCap: 'round',
+      selectable: true,
+      evented: true,
+      name: `${PREFIX.pipe}${p.id}`,
+      hasControls: false,
+      hasBorders: false,
+      lockMovementX: true,
+      lockMovementY: true,
     });
   }, []);
 
@@ -437,7 +461,8 @@ export default function CadCanvas() {
       const n = (obj as any).name as string | undefined;
       if (!n) return false;
       return n.startsWith(PREFIX.wall) || n.startsWith(PREFIX.opening) ||
-             n.startsWith(PREFIX.hvac) || n.startsWith(PREFIX.annotation) ||
+             n.startsWith(PREFIX.hvac) || n.startsWith(PREFIX.pipe) ||
+             n.startsWith(PREFIX.annotation) ||
              n.startsWith(PREFIX.room) || n.startsWith(PREFIX.underlay);
     });
     toRemove.forEach(obj => canvas.remove(obj));
@@ -526,6 +551,17 @@ export default function CadCanvas() {
       }
     }
 
+    // Piping
+    const pipingLayer = state.layers.find(l => l.id === 'piping');
+    if (pipingLayer?.visible) {
+      for (const p of (floor.pipes ?? [])) {
+        const line = createPipeLine(p);
+        line.set({ opacity: pipingLayer.opacity });
+        if (pipingLayer.locked) line.set({ selectable: false, evented: false });
+        canvas.add(line);
+      }
+    }
+
     // Annotations
     if (annotationsLayer?.visible) {
       for (const a of floor.annotations) {
@@ -537,26 +573,28 @@ export default function CadCanvas() {
     }
 
     // Render ghost floors (faded outlines of other visible floors)
-    for (const otherFloor of state.floors) {
-      if (otherFloor.id === state.activeFloorId || !otherFloor.isVisible) continue;
-      for (const w of otherFloor.walls) {
-        const ghostWall = new fabric.Line([w.x1, w.y1, w.x2, w.y2], {
-          stroke: '#475569',
-          strokeWidth: 4,
-          strokeLineCap: 'round',
-          strokeDashArray: [6, 4],
-          selectable: false,
-          evented: false,
-          name: `${PREFIX.ghost}floor_${otherFloor.id}_${w.id}`,
-          opacity: 0.3,
-        });
-        canvas.add(ghostWall);
-        canvas.sendObjectToBack(ghostWall);
+    if (state.ghostingEnabled) {
+      for (const otherFloor of state.floors) {
+        if (otherFloor.id === state.activeFloorId || !otherFloor.isVisible) continue;
+        for (const w of otherFloor.walls) {
+          const ghostWall = new fabric.Line([w.x1, w.y1, w.x2, w.y2], {
+            stroke: '#475569',
+            strokeWidth: 4,
+            strokeLineCap: 'round',
+            strokeDashArray: [6, 4],
+            selectable: false,
+            evented: false,
+            name: `${PREFIX.ghost}floor_${otherFloor.id}_${w.id}`,
+            opacity: 0.3,
+          });
+          canvas.add(ghostWall);
+          canvas.sendObjectToBack(ghostWall);
+        }
       }
     }
 
     canvas.requestRenderAll();
-  }, [createWallLine, createOpeningShape, createHvacShape, createAnnotationShape]);
+  }, [createWallLine, createOpeningShape, createHvacShape, createPipeLine, createAnnotationShape]);
 
   // Keep ref in sync for image import handlers
   syncRef.current = syncFloorToCanvas;
@@ -819,10 +857,10 @@ export default function CadCanvas() {
       const ptr = canvas.getScenePoint(evt);
       const snapped = snapToGrid(ptr.x, ptr.y);
 
-      // ─ Right-click ends wall chain or cancels placement ─────────────
+      // ─ Right-click ends wall/pipe chain or cancels placement ───────
       if (evt.button === 2) {
-        if (tool === 'draw_wall' && drawing.active) {
-          // End wall chain, return to select
+        if ((tool === 'draw_wall' || tool === 'draw_pipe') && drawing.active) {
+          // End chain, return to select
           if (drawing.ghostLine) canvas.remove(drawing.ghostLine);
           drawing.ghostLine = null;
           drawing.active = false;
@@ -896,6 +934,57 @@ export default function CadCanvas() {
             drawing.startX = endX;
             drawing.startY = endY;
             drawing.ghostLine = createGhostLine(endX, endY);
+          } else {
+            drawing.active = false;
+            state.setDrawingInfo(null);
+          }
+
+          canvas.requestRenderAll();
+        }
+        return;
+      }
+
+      // ─ Pipe draw mode ───────────────────────────────────────────────
+      if (tool === 'draw_pipe' && evt.button === 0) {
+        if (!drawing.active) {
+          drawing.active = true;
+          drawing.startX = snapped.x;
+          drawing.startY = snapped.y;
+          drawing.ghostLine = createGhostLine(snapped.x, snapped.y);
+          drawing.ghostLine.set({ stroke: '#ec4899', strokeWidth: 4 });
+        } else {
+          const { startX, startY } = drawing;
+          const endX = snapped.x;
+          const endY = snapped.y;
+
+          if (drawing.ghostLine) canvas.remove(drawing.ghostLine);
+          drawing.ghostLine = null;
+
+          const lengthFt = computeLengthFt(startX, startY, endX, endY);
+
+          if (lengthFt >= 0.1) {
+            const pipeId = `pipe-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+            
+            const newPipe: PipeSegment = {
+              id: pipeId,
+              x1: startX,
+              y1: startY,
+              x2: endX,
+              y2: endY,
+              diameterIn: 0.75, // default 3/4"
+              material: 'copper_liquid', // default
+              fabricId: pipeId,
+            };
+
+            state.addPipe(newPipe);
+            state.markDirty();
+            syncFloorToCanvas(canvas);
+
+            // Chain mode
+            drawing.startX = endX;
+            drawing.startY = endY;
+            drawing.ghostLine = createGhostLine(endX, endY);
+            drawing.ghostLine.set({ stroke: '#ec4899', strokeWidth: 4 });
           } else {
             drawing.active = false;
             state.setDrawingInfo(null);
@@ -1125,8 +1214,8 @@ export default function CadCanvas() {
       const ptr = canvas.getScenePoint(evt);
       const snapped = snapToGrid(ptr.x, ptr.y);
 
-      // Ghost line update for wall draw and dimension
-      if ((tool === 'draw_wall' || tool === 'add_dimension') && drawing.active && drawing.ghostLine) {
+      // Ghost line update for wall draw, pipe draw, and dimension
+      if ((tool === 'draw_wall' || tool === 'draw_pipe' || tool === 'add_dimension') && drawing.active && drawing.ghostLine) {
         drawing.ghostLine.set({ x2: snapped.x, y2: snapped.y });
         canvas.requestRenderAll();
 
@@ -1193,26 +1282,39 @@ export default function CadCanvas() {
       }
     });
 
-    // ── Double-click ends wall chain ───────────────────────────────
+    // ── Double-click ends wall/pipe chain ─────────────────────────
     canvas.on('mouse:dblclick', (opt) => {
       const state = useCadStore.getState();
-      if (state.activeTool === 'draw_wall' && drawing.active) {
-        // Commit current ghost as final wall, then end chain
+      const tool = state.activeTool;
+      if ((tool === 'draw_wall' || tool === 'draw_pipe') && drawing.active) {
+        // Commit current ghost as final segment, then end chain
         const evt = opt.e as MouseEvent;
         const ptr = canvas.getScenePoint(evt);
         const snapped = snapToGrid(ptr.x, ptr.y);
         const lengthFt = computeLengthFt(drawing.startX, drawing.startY, snapped.x, snapped.y);
 
         if (lengthFt >= 0.1) {
-          const wallId = `wall-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-          state.addWall({
-            id: wallId,
-            x1: drawing.startX, y1: drawing.startY,
-            x2: snapped.x, y2: snapped.y,
-            thicknessIn: 3.5, rValue: 19,
-            material: 'insulated_stud' as WallMaterial,
-            fabricId: wallId,
-          });
+          if (tool === 'draw_wall') {
+            const wallId = `wall-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+            state.addWall({
+              id: wallId,
+              x1: drawing.startX, y1: drawing.startY,
+              x2: snapped.x, y2: snapped.y,
+              thicknessIn: 3.5, rValue: 19,
+              material: 'insulated_stud' as WallMaterial,
+              fabricId: wallId,
+            });
+          } else {
+            const pipeId = `pipe-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+            state.addPipe({
+              id: pipeId,
+              x1: drawing.startX, y1: drawing.startY,
+              x2: snapped.x, y2: snapped.y,
+              diameterIn: 0.75,
+              material: 'copper_liquid',
+              fabricId: pipeId,
+            });
+          }
           state.markDirty();
         }
 
@@ -1401,7 +1503,7 @@ export default function CadCanvas() {
     const drawing = drawingRef.current;
     if (!cvs) return;
 
-    if (activeTool !== 'draw_wall' && activeTool !== 'add_dimension' && drawing.active) {
+    if (activeTool !== 'draw_wall' && activeTool !== 'draw_pipe' && activeTool !== 'add_dimension' && drawing.active) {
       if (drawing.ghostLine) {
         cvs.remove(drawing.ghostLine);
         drawing.ghostLine = null;

@@ -11,7 +11,8 @@ export type ToolType =
   | 'place_hvac'
   | 'add_dimension'
   | 'add_label'
-  | 'room_detect';
+  | 'room_detect'
+  | 'draw_pipe';
 
 // ── Wall ────────────────────────────────────────────────────────────────────────
 export type WallMaterial = 'insulated_stud' | 'cmu' | 'concrete';
@@ -60,6 +61,20 @@ export interface HvacUnit {
   rotation: number;
   cfm?: number;
   label?: string;
+  fabricId: string;
+}
+
+// ── Piping ──────────────────────────────────────────────────────────────────────
+export type PipeMaterial = 'copper_liquid' | 'copper_suction' | 'pvc_condensate' | 'gas_black_iron';
+
+export interface PipeSegment {
+  id: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  diameterIn: number;
+  material: PipeMaterial;
   fabricId: string;
 }
 
@@ -122,6 +137,7 @@ export interface Floor {
   openings: Opening[];
   rooms: DetectedRoom[];
   hvacUnits: HvacUnit[];
+  pipes: PipeSegment[];
   annotations: Annotation[];
   underlays: UnderlayImage[];
 }
@@ -162,6 +178,7 @@ const DEFAULT_LAYERS: Layer[] = [
   { id: 'walls', name: 'Walls', visible: true, locked: false, color: '#22c55e', opacity: 1 },
   { id: 'openings', name: 'Openings', visible: true, locked: false, color: '#38bdf8', opacity: 1 },
   { id: 'hvac', name: 'HVAC', visible: true, locked: false, color: '#a78bfa', opacity: 1 },
+  { id: 'piping', name: 'Piping', visible: true, locked: false, color: '#ec4899', opacity: 1 },
   { id: 'annotations', name: 'Annotations', visible: true, locked: false, color: '#f59e0b', opacity: 1 },
   { id: 'underlay', name: 'Underlay', visible: true, locked: true, color: '#64748b', opacity: 0.3 },
 ];
@@ -177,6 +194,7 @@ const createDefaultFloor = (): Floor => ({
   openings: [],
   rooms: [],
   hvacUnits: [],
+  pipes: [],
   annotations: [],
   underlays: [],
 });
@@ -264,6 +282,8 @@ interface CadState {
   removeFloor: (id: string) => void;
   setActiveFloor: (id: string) => void;
   updateFloor: (id: string, patch: Partial<Floor>) => void;
+  ghostingEnabled: boolean;
+  setGhostingEnabled: (enabled: boolean) => void;
 
   // ── Backwards-compat wall accessors (delegate to active floor) ──────────────
   walls: WallSegment[];
@@ -299,8 +319,18 @@ interface CadState {
 
   // ── Layers ──────────────────────────────────────────────────────────────────
   layers: Layer[];
+  activeLayerId: string;
+  setActiveLayer: (id: string) => void;
   toggleLayerVisibility: (id: string) => void;
   toggleLayerLock: (id: string) => void;
+  setLayerOpacity: (id: string, opacity: number) => void;
+  soloLayer: (id: string) => void;
+
+  // ── Piping Actions ──────────────────────────────────────────────────────────
+  pipes: PipeSegment[];
+  addPipe: (pipe: PipeSegment) => void;
+  updatePipe: (id: string, patch: Partial<PipeSegment>) => void;
+  removePipe: (id: string) => void;
 
   // ── Undo / Redo ─────────────────────────────────────────────────────────────
   undoStack: HistoryEntry[];
@@ -399,12 +429,14 @@ export const useCadStore = create<CadState>((set, get) => {
     // ── Multi-floor system ────────────────────────────────────────────────────
     floors: [defaultFloor],
     activeFloorId: defaultFloor.id,
+    ghostingEnabled: true,
+    setGhostingEnabled: (enabled) => set({ ghostingEnabled: enabled }),
 
     addFloor: (name?) => {
       floorCounter += 1;
       const state = get();
       const newIndex = state.floors.length;
-      const newFloor: Floor = {
+    const newFloor: Floor = {
         id: `floor-${floorCounter}`,
         name: name ?? `Floor ${floorCounter}`,
         index: newIndex,
@@ -415,6 +447,7 @@ export const useCadStore = create<CadState>((set, get) => {
         openings: [],
         rooms: [],
         hvacUnits: [],
+        pipes: [],
         annotations: [],
         underlays: [],
       };
@@ -599,6 +632,9 @@ export const useCadStore = create<CadState>((set, get) => {
 
     // ── Layers ────────────────────────────────────────────────────────────────
     layers: [...DEFAULT_LAYERS],
+    activeLayerId: 'walls',
+
+    setActiveLayer: (id) => set({ activeLayerId: id }),
 
     toggleLayerVisibility: (id) =>
       set((s) => ({
@@ -612,6 +648,52 @@ export const useCadStore = create<CadState>((set, get) => {
         layers: s.layers.map((l) =>
           l.id === id ? { ...l, locked: !l.locked } : l,
         ),
+      })),
+
+    setLayerOpacity: (id, opacity) =>
+      set((s) => ({
+        layers: s.layers.map((l) =>
+          l.id === id ? { ...l, opacity } : l,
+        ),
+      })),
+
+    soloLayer: (id) =>
+      set((s) => ({
+        layers: s.layers.map((l) => ({
+          ...l,
+          visible: l.id === id,
+        })),
+      })),
+
+    // ── Piping ────────────────────────────────────────────────────────────────
+    get pipes() {
+      const state = get();
+      const floor = state.floors.find((f) => f.id === state.activeFloorId);
+      return floor?.pipes ?? [];
+    },
+
+    addPipe: (pipe) =>
+      set((s) => ({
+        ...updateActiveFloor(s, (f) => ({
+          ...f,
+          pipes: [...(f.pipes ?? []), pipe],
+        })),
+      })),
+
+    updatePipe: (id, patch) =>
+      set((s) => ({
+        ...updateActiveFloor(s, (f) => ({
+          ...f,
+          pipes: (f.pipes ?? []).map((p) => (p.id === id ? { ...p, ...patch } : p)),
+        })),
+      })),
+
+    removePipe: (id) =>
+      set((s) => ({
+        ...updateActiveFloor(s, (f) => ({
+          ...f,
+          pipes: (f.pipes ?? []).filter((p) => p.id !== id),
+        })),
       })),
 
     // ── Undo / Redo ───────────────────────────────────────────────────────────

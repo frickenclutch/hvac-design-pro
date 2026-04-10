@@ -8,7 +8,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { X, RotateCcw, Grid3x3, Sun, Eye, EyeOff, Download, Upload, Thermometer } from 'lucide-react';
 import { useCadStore } from '../store/useCadStore';
 import { useProjectStore } from '../../../stores/useProjectStore';
-import type { WallSegment } from '../store/useCadStore';
+import type { WallSegment, PipeSegment } from '../store/useCadStore';
 import { fmtLength, fmtArea } from '../../../utils/units';
 import {
   createDoorModel,
@@ -19,6 +19,7 @@ import {
   createCondenserModel,
   createThermostatModel,
   createDuctRunModel,
+  createPipeModel,
 } from '../utils/assetModels';
 import { exportSceneAsSTL, exportSceneAsOBJ } from '../utils/stlExporter';
 
@@ -365,6 +366,57 @@ export default function Viewer3D({ isOpen, onClose }: Viewer3DProps) {
           group.add(mesh);
           meshesRef.current.push(mesh);
         }
+
+        // ── Piping ─────────────────────────────────────────────────────────
+        const pipingLayer = state.layers.find(l => l.id === 'piping');
+        if (pipingLayer?.visible && floor.pipes) {
+          floor.pipes.forEach((pipe) => {
+            const len = wallLength(pipe as any, pxPerFt);
+            if (len < 0.01) return;
+            const angle = wallAngle(pipe as any);
+            const [cx, cz] = wallCenter(pipe as any, pxPerFt);
+            
+            // Mounting height: default to floor level for now, or HVAC unit height
+            const y = floorOffset + 0.1; // slightly above floor to avoid z-fighting
+            
+            const pipeGroup = createPipeModel(len, pipe.diameterIn, pipe.material, showWireframe);
+            pipeGroup.position.set(cx - (len/2 * Math.cos(angle)), y, cz - (len/2 * Math.sin(angle)));
+            pipeGroup.rotation.y = -angle;
+
+            const ud = {
+              id: pipe.id,
+              objectType: 'pipe',
+              material: pipe.material,
+              diameter: pipe.diameterIn,
+              length: len.toFixed(1),
+            };
+            pipeGroup.userData = ud;
+            pipeGroup.traverse((child) => {
+              if (child instanceof THREE.Mesh) {
+                child.castShadow = showShadows;
+                child.receiveShadow = showShadows;
+                child.userData = { ...ud };
+                child.material.transparent = true;
+                child.material.opacity *= (pipingLayer.opacity ?? 1);
+                meshesRef.current.push(child);
+              }
+            });
+            group.add(pipeGroup);
+          });
+        }
+
+        // ── Floor Slab (Physical structure between floors) ────────────────
+        const slabGeo = new THREE.BoxGeometry(maxX - minX + 10, 0.4, maxZ - minZ + 10);
+        const slabMat = new THREE.MeshStandardMaterial({
+          color: 0x334155,
+          transparent: true,
+          opacity: 0.15,
+          roughness: 0.9,
+        });
+        const slab = new THREE.Mesh(slabGeo, slabMat);
+        slab.position.set((minX + maxX) / 2, floorOffset - 0.2, (minZ + maxZ) / 2);
+        slab.receiveShadow = true;
+        group.add(slab);
 
         scene.add(group);
       });

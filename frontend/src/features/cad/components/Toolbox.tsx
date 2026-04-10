@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { MousePointer2, Hand, SquarePen, LayoutGrid, DoorOpen, Wind, Ruler, Type, ScanLine, ImagePlus, Package, Thermometer, ChevronLeft, ChevronRight } from 'lucide-react';
+import { MousePointer2, Hand, SquarePen, LayoutGrid, DoorOpen, Wind, Ruler, Type, ScanLine, ImagePlus, Package, Thermometer, ChevronLeft, ChevronRight, Cylinder } from 'lucide-react';
 import { useCadStore } from '../store/useCadStore';
 import type { ToolType, UnderlayImage } from '../store/useCadStore';
 import AssetLibrary from './AssetLibrary';
@@ -166,9 +166,19 @@ export default function Toolbox() {
         <ToolButton
           id="place_hvac"
           icon={<Wind className="w-5 h-5" />}
-          label="HVAC Unit"
+          label="HVAC Units"
           active={activeTool === 'place_hvac'}
           onClick={() => setActiveTool('place_hvac')}
+          primary
+        />
+
+
+        <ToolButton
+          id="draw_pipe"
+          icon={<Cylinder className="w-5 h-5" />}
+          label="Pipe Builder"
+          active={activeTool === 'draw_pipe'}
+          onClick={() => setActiveTool('draw_pipe')}
           primary
         />
 

@@ -1,10 +1,21 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Plus, Eye, EyeOff, Lock, Unlock, Trash2, Layers, ChevronUp, ChevronDown } from 'lucide-react';
+import { Plus, Eye, EyeOff, Lock, Unlock, Trash2, Layers, ChevronUp, ChevronDown, Layout } from 'lucide-react';
 import { useCadStore } from '../store/useCadStore';
 import { fmtLength } from '../../../utils/units';
 
 export default function FloorSelector() {
-  const { floors, activeFloorId, setActiveFloor, addFloor, updateFloor, removeFloor, panelFloors, setPanelFloors } = useCadStore();
+  const { 
+    floors, 
+    activeFloorId, 
+    setActiveFloor, 
+    addFloor, 
+    updateFloor, 
+    removeFloor, 
+    panelFloors, 
+    setPanelFloors,
+    ghostingEnabled,
+    setGhostingEnabled
+  } = useCadStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -176,6 +187,22 @@ export default function FloorSelector() {
             );
           })}
         </div>
+
+        <div className="w-px h-5 bg-slate-700/60 mx-1" />
+
+        {/* Ghost Mode Toggle */}
+        <button
+          onClick={() => setGhostingEnabled(!ghostingEnabled)}
+          className={`p-1.5 rounded-lg transition-all duration-200 group relative ${
+            ghostingEnabled ? 'text-emerald-400 bg-emerald-500/10' : 'text-slate-500 hover:text-slate-300'
+          }`}
+          title="Toggle Ghosting (Show other floors as faded outlines)"
+        >
+          <Layout className="w-3.5 h-3.5" />
+          <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1 bg-slate-800/90 border border-slate-700 text-slate-200 text-[10px] font-medium rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 backdrop-blur-md shadow-xl">
+            Ghost Floors: {ghostingEnabled ? 'ON' : 'OFF'}
+          </div>
+        </button>
 
         <div className="w-px h-5 bg-slate-700/60 mx-1" />
 

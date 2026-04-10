@@ -1,0 +1,63 @@
+# HVAC Design Pro — Multi-Floor & Piping Expansion
+
+This plan outlines the integration of cross-floor design capabilities, professional layer management, and a dedicated piping system for HVAC technicians.
+
+## User Review Required
+
+> [!IMPORTANT]
+> The **Pipe Builder** will introduce a new "Piping" layer. Existing projects will be automatically upgraded to include this layer.
+> 
+> [!NOTE]
+> 3D performance might be slightly affected by high-fidelity pipe runs. I will implement geometric optimizations (instancing/merged geometry) where possible.
+
+## Proposed Changes
+
+### 1. CAD Core & State [useCadStore.ts]
+- **[MODIFY]** [useCadStore.ts](file:///c:/Users/ngriffith/Desktop/HVAC%20Design%20Pro/hvac-design-pro/frontend/src/features/cad/store/useCadStore.ts)
+  - Add `Piping` to the `Layer` definitions.
+  - Add `PipeSegment` type: `id`, `startX`, `startY`, `endX`, `endY`, `type` (Liquid, Suction, Condensate, Gas), `diameterIn`.
+  - Add `pipes` array to the `Floor` interface.
+  - Add CRUD actions for pipes: `addPipe`, `updatePipe`, `removePipe`.
+  - Add `activeLayerId` to track the current target for drawing.
+
+### 2. 2D Drawing Engine [CadCanvas.tsx]
+- **[MODIFY]** [CadCanvas.tsx](file:///c:/Users/ngriffith/Desktop/HVAC%20Design%20Pro/hvac-design-pro/frontend/src/features/cad/components/CadCanvas.tsx)
+  - Implement `draw_pipe` tool handler.
+  - Logic for multi-segmented pipe runs (similar to walls but snapping to HVAC units).
+  - Enhance "Ghost Floors" to show HVAC units from floors above/below to help align riser pipes.
+
+### 3. Layer Management UI [LayerManager.tsx]
+- **[MODIFY]** [LayerManager.tsx](file:///c:/Users/ngriffith/Desktop/HVAC%20Design%20Pro/hvac-design-pro/frontend/src/features/cad/components/LayerManager.tsx)
+  - Fully bind to `useCadStore` (remove local state).
+  - Add **Solo Mode** (Alt-click visibility).
+  - Add **Active Layer Indicator** (radio-style selection to set target layer).
+  - Add **Select All** button for each layer.
+  - Improve slider aesthetics for opacity.
+
+### 4. 3D Visualization [Viewer3D.tsx & assetModels.ts]
+- **[MODIFY]** [Viewer3D.tsx](file:///c:/Users/ngriffith/Desktop/HVAC%20Design%20Pro/hvac-design-pro/frontend/src/features/cad/components/Viewer3D.tsx)
+  - Add rendering logic for `PipeSegment` as cylindrical geometry.
+  - Implement **Floor Slabs**: Semi-transparent planes between floor levels to give a sense of physical structure.
+  - Add "Section Cut" (optional) if requested, or just better floor-stacking visuals.
+- **[MODIFY]** [assetModels.ts](file:///c:/Users/ngriffith/Desktop/HVAC%20Design%20Pro/hvac-design-pro/frontend/src/features/cad/utils/assetModels.ts)
+  - Add `createPipeModel` and `createPipeElbowModel`.
+
+### 5. Architectural Tooling [FloorSelector.tsx]
+- **[MODIFY]** [FloorSelector.tsx](file:///c:/Users/ngriffith/Desktop/HVAC%20Design%20Pro/hvac-design-pro/frontend/src/features/cad/components/FloorSelector.tsx)
+  - Add a "Merge/Compare" mode to overlay multiple floors with different colors.
+
+## Open Questions
+
+- **Pipe Height**: Should pipes be assumed to be at floor level, ceiling level (under-joist), or mid-wall? I propose a default "Mounting Height" property in the inspector.
+- **Auto-Routing**: Should the pipe builder try to avoid walls or go through them? (Initial version: straight lines, user manual control).
+
+## Verification Plan
+
+### Automated Tests
+- No automated tests currently exist in the repo. I will perform manual verification.
+
+### Manual Verification
+- **Multi-floor check**: Draw walls on Floor 1, switch to Floor 2, verify Floor 1 is visible as a ghost.
+- **Pipe Builder check**: Draw a refrigerant line from an indoor Air Handler to an outdoor Condenser. Verify it appears in 3D.
+- **Layer Control check**: Hide "HVAC" layer and ensure all units and pipes (if assigned to HVAC layer) disappear.
+- **3D Slab check**: Open 3D viewer and verify distinct floor levels with slabs.
