@@ -368,7 +368,7 @@ export default function Viewer3D({ isOpen, onClose }: Viewer3DProps) {
         }
 
         // ── Piping ─────────────────────────────────────────────────────────
-        const pipingLayer = state.layers.find(l => l.id === 'piping');
+        const pipingLayer = useCadStore.getState().layers.find(l => l.id === 'piping');
         if (pipingLayer?.visible && floor.pipes) {
           floor.pipes.forEach((pipe) => {
             const len = wallLength(pipe as any, pxPerFt);
@@ -406,17 +406,19 @@ export default function Viewer3D({ isOpen, onClose }: Viewer3DProps) {
         }
 
         // ── Floor Slab (Physical structure between floors) ────────────────
-        const slabGeo = new THREE.BoxGeometry(maxX - minX + 10, 0.4, maxZ - minZ + 10);
-        const slabMat = new THREE.MeshStandardMaterial({
-          color: 0x334155,
-          transparent: true,
-          opacity: 0.15,
-          roughness: 0.9,
-        });
-        const slab = new THREE.Mesh(slabGeo, slabMat);
-        slab.position.set((minX + maxX) / 2, floorOffset - 0.2, (minZ + maxZ) / 2);
-        slab.receiveShadow = true;
-        group.add(slab);
+        if (isFinite(minX) && isFinite(maxX) && isFinite(minZ) && isFinite(maxZ)) {
+          const slabGeo = new THREE.BoxGeometry(maxX - minX + 10, 0.4, maxZ - minZ + 10);
+          const slabMat = new THREE.MeshStandardMaterial({
+            color: 0x334155,
+            transparent: true,
+            opacity: 0.15,
+            roughness: 0.9,
+          });
+          const slab = new THREE.Mesh(slabGeo, slabMat);
+          slab.position.set((minX + maxX) / 2, floorOffset - 0.2, (minZ + maxZ) / 2);
+          slab.receiveShadow = true;
+          group.add(slab);
+        }
 
         scene.add(group);
       });
