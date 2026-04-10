@@ -1404,13 +1404,43 @@ export default function CadCanvas() {
         return;
       }
 
-      // Delete selected
+      // Delete selected object (wall, opening, HVAC, pipe, annotation, underlay)
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const state = useCadStore.getState();
+        // Check wall first (tracked separately)
         if (state.selectedWallId) {
           state.removeWall(state.selectedWallId);
           state.setSelectedWallId(null);
+          state.setSelectedObject(null);
           state.markDirty();
+          syncFloorToCanvas(canvas);
+          return;
+        }
+        // Check fabric selectedObject for other types
+        const obj = state.selectedObject;
+        const name = (obj as any)?.name as string | undefined;
+        if (name) {
+          if (name.startsWith(PREFIX.opening)) {
+            const id = name.slice(PREFIX.opening.length);
+            state.removeOpening(id);
+          } else if (name.startsWith(PREFIX.hvac)) {
+            const id = name.slice(PREFIX.hvac.length);
+            state.removeHvacUnit(id);
+          } else if (name.startsWith(PREFIX.pipe)) {
+            const id = name.slice(PREFIX.pipe.length);
+            state.removePipe(id);
+          } else if (name.startsWith(PREFIX.annotation)) {
+            const id = name.slice(PREFIX.annotation.length);
+            state.removeAnnotation(id);
+          } else if (name.startsWith(PREFIX.underlay)) {
+            const id = name.slice(PREFIX.underlay.length);
+            state.removeUnderlay(id);
+          } else {
+            return; // Unknown object type, skip
+          }
+          state.setSelectedObject(null);
+          state.markDirty();
+          canvas.discardActiveObject();
           syncFloorToCanvas(canvas);
           return;
         }

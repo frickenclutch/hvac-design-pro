@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useCadStore } from '../store/useCadStore';
-import type { WallMaterial, Opening, HvacUnit, DetectedRoom, UnderlayImage, Annotation } from '../store/useCadStore';
+import type { WallMaterial, Opening, HvacUnit, PipeSegment, PipeMaterial, DetectedRoom, UnderlayImage, Annotation } from '../store/useCadStore';
 import { fmtLength, fmtArea, fmtTemp, smallLengthUnit } from '../../../utils/units';
 import { Settings2, Layers, Ruler, Triangle, Wind, DoorOpen, LayoutGrid, ScanLine, ImageIcon, Lock, Unlock, Trash2, Type, RotateCcw, Bold, Italic, AlignLeft, AlignCenter, AlignRight, ChevronLeft, ChevronRight } from 'lucide-react';
 
@@ -23,7 +23,7 @@ const HVAC_TYPE_LABELS: Record<string, string> = {
 const uFactor = (r: number) => (r > 0 ? (1 / r).toFixed(4) : '—');
 
 export default function PropertyInspector() {
-  const { selectedObject, selectedWallId, walls, updateWall, updateOpening, updateHvacUnit, updateUnderlay, removeUnderlay, updateAnnotation, floors, activeFloorId, panelProperties, setPanelProperties } = useCadStore();
+  const { selectedObject, selectedWallId, setSelectedWallId, setSelectedObject, canvas, walls, updateWall, removeWall, updateOpening, removeOpening, updateHvacUnit, removeHvacUnit, removePipe, updateUnderlay, removeUnderlay, updateAnnotation, removeAnnotation, markDirty, floors, activeFloorId, panelProperties, setPanelProperties } = useCadStore();
 
   const floor = floors.find(f => f.id === activeFloorId);
 
@@ -63,7 +63,15 @@ export default function PropertyInspector() {
     return floor.annotations.find(a => a.id === id) ?? null;
   }, [selectedObject, floor]);
 
-  const headerText = selectedWall ? 'Wall Selected' : selectedOpening ? 'Opening Selected' : selectedHvac ? 'HVAC Unit Selected' : selectedUnderlay ? 'Underlay Selected' : selectedAnnotation ? 'Label Selected' : selectedObject ? 'Object Selected' : 'Canvas Settings';
+  const selectedPipe = useMemo(() => {
+    if (!selectedObject || !floor) return null;
+    const name = (selectedObject as any).name as string | undefined;
+    if (!name?.startsWith('pipe-')) return null;
+    const id = name.replace('pipe-', '');
+    return (floor.pipes ?? []).find(p => p.id === id) ?? null;
+  }, [selectedObject, floor]);
+
+  const headerText = selectedWall ? 'Wall Selected' : selectedOpening ? 'Opening Selected' : selectedHvac ? 'HVAC Unit Selected' : selectedPipe ? 'Pipe Selected' : selectedUnderlay ? 'Underlay Selected' : selectedAnnotation ? 'Label Selected' : selectedObject ? 'Object Selected' : 'Canvas Settings';
 
   if (!panelProperties) {
     return (
@@ -117,6 +125,9 @@ export default function PropertyInspector() {
           ) : selectedHvac ? (
             <HvacPanel unit={selectedHvac} onUpdate={(patch) => updateHvacUnit(selectedHvac.id, patch)} />
 
+          ) : selectedPipe ? (
+            <PipePanel pipe={selectedPipe} onUpdate={(patch) => useCadStore.getState().updatePipe(selectedPipe.id, patch)} />
+
           ) : selectedUnderlay ? (
             <UnderlayPanel
               underlay={selectedUnderlay}
@@ -160,6 +171,35 @@ export default function PropertyInspector() {
                 <PropertyField label="Position X" value={selectedObject.left?.toFixed(2) || '0'} isReadOnly />
                 <PropertyField label="Position Y" value={selectedObject.top?.toFixed(2) || '0'} isReadOnly />
               </div>
+            </div>
+          )}
+
+          {/* ── Delete Action (shown for any selected entity) ── */}
+          {(selectedWall || selectedOpening || selectedHvac || selectedPipe || selectedAnnotation) && (
+            <div className="mt-6 pt-4 border-t border-slate-800/50">
+              <button
+                onClick={() => {
+                  if (selectedWall) {
+                    removeWall(selectedWall.id);
+                    setSelectedWallId(null);
+                  } else if (selectedOpening) {
+                    removeOpening(selectedOpening.id);
+                  } else if (selectedHvac) {
+                    removeHvacUnit(selectedHvac.id);
+                  } else if (selectedPipe) {
+                    removePipe(selectedPipe.id);
+                  } else if (selectedAnnotation) {
+                    removeAnnotation(selectedAnnotation.id);
+                  }
+                  setSelectedObject(null);
+                  markDirty();
+                  canvas?.discardActiveObject();
+                  canvas?.requestRenderAll();
+                }}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-red-400 bg-red-500/5 border border-red-500/20 hover:bg-red-500/10 hover:text-red-300 transition-all text-sm font-semibold"
+              >
+                <Trash2 className="w-4 h-4" /> Delete Selected
+              </button>
             </div>
           )}
 
@@ -464,6 +504,71 @@ function HvacPanel({ unit, onUpdate }: { unit: HvacUnit; onUpdate: (patch: Parti
       </div>
       <div className="pt-4 border-t border-slate-800">
         <PropertyField label="ID" value={unit.id.slice(0, 20) + '…'} isReadOnly />
+      </div>
+    </div>
+  );
+}
+
+// ── Pipe panel ──────────────────────────────────────────────────────────────
+const PIPE_MATERIAL_LABELS: Record<string, string> = {
+  copper_liquid: 'Copper — Liquid Line',
+  copper_suction: 'Copper — Suction Line',
+  pvc_condensate: 'PVC — Condensate Drain',
+  gas_black_iron: 'Black Iron — Gas Line',
+};
+
+function PipePanel({ pipe, onUpdate }: { pipe: PipeSegment; onUpdate: (patch: Partial<PipeSegment>) => void }) {
+  const pxPerFt = useCadStore.getState().projectScale.pxPerFt;
+  const dx = pipe.x2 - pipe.x1;
+  const dy = pipe.y2 - pipe.y1;
+  const lengthFt = (Math.sqrt(dx * dx + dy * dy) / pxPerFt).toFixed(2);
+
+  return (
+    <div className="space-y-6 animate-in slide-in-from-right-4 duration-300 fade-in">
+      <div>
+        <h4 className="text-xs font-semibold text-pink-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+          Pipe Segment
+        </h4>
+        <PropertyField label="Material" value={PIPE_MATERIAL_LABELS[pipe.material] ?? pipe.material} isReadOnly />
+        <PropertyField label="Length" value={`${lengthFt} ft`} isReadOnly />
+        <PropertyField label="Diameter" value={`${pipe.diameterIn}" OD`} isReadOnly />
+
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Material Type</label>
+          <select
+            value={pipe.material}
+            onChange={(e) => onUpdate({ material: e.target.value as PipeMaterial })}
+            className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500/50 transition-colors"
+          >
+            {Object.entries(PIPE_MATERIAL_LABELS).map(([val, label]) => (
+              <option key={val} value={val}>{label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Diameter (in)</label>
+          <select
+            value={pipe.diameterIn}
+            onChange={(e) => onUpdate({ diameterIn: parseFloat(e.target.value) })}
+            className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500/50 transition-colors"
+          >
+            {[0.375, 0.5, 0.625, 0.75, 0.875, 1.0, 1.125, 1.375, 1.625, 2.125].map(d => (
+              <option key={d} value={d}>{d}"</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Thermal info */}
+      <div className="pt-4 border-t border-slate-800">
+        <h4 className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-3">Thermal</h4>
+        <PropertyField label="Line Type" value={pipe.material.includes('suction') ? 'Cold (Insulated)' : pipe.material.includes('liquid') ? 'Warm' : pipe.material.includes('gas') ? 'Hot' : 'Ambient'} isReadOnly />
+        <PropertyField label="Est. Heat Loss" value={`${(parseFloat(lengthFt) * (pipe.material.includes('suction') ? 4.2 : pipe.material.includes('liquid') ? 1.8 : 0.5)).toFixed(0)} BTU/hr`} isReadOnly />
+      </div>
+
+      <div className="pt-4 border-t border-slate-800">
+        <PropertyField label="ID" value={pipe.id.slice(0, 20) + '…'} isReadOnly />
       </div>
     </div>
   );

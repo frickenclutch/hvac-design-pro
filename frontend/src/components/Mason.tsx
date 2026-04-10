@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Send, Zap, Thermometer, Wind, Calculator, Phone, Command } from 'lucide-react';
+import { X, Send, Zap, Thermometer, Wind, Calculator, Phone, Command, MessageSquarePlus, Camera, Check, ArrowLeft, Upload } from 'lucide-react';
 import { useProjectStore } from '../stores/useProjectStore';
 import { useCadStore } from '../features/cad/store/useCadStore';
 
@@ -745,6 +745,14 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Feedback form state
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [feedbackType, setFeedbackType] = useState<'bug' | 'suggestion' | 'question'>('bug');
+  const [feedbackText, setFeedbackText] = useState('');
+  const [feedbackScreenshot, setFeedbackScreenshot] = useState<string | null>(null);
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+  const feedbackFileRef = useRef<HTMLInputElement>(null);
+
   // Global Keyboard Shortcuts
   useEffect(() => {
     const handleGlobalKey = (e: KeyboardEvent) => {
@@ -844,6 +852,13 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
           <span className="text-[8px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wider ml-1">Online</span>
         </div>
         <div className="flex items-center gap-1">
+          <button
+            onClick={() => { setShowFeedback(!showFeedback); setFeedbackSubmitted(false); }}
+            className={`p-1.5 rounded-lg transition-colors ${showFeedback ? 'text-amber-400 bg-amber-500/10' : 'text-slate-500 hover:text-amber-400 hover:bg-amber-500/10'}`}
+            title="Submit Feedback"
+          >
+            <MessageSquarePlus className="w-4 h-4" />
+          </button>
           <a
             href="tel:+13153933791"
             className="p-1.5 rounded-lg text-emerald-500 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors group/phone relative"
@@ -997,41 +1012,143 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
         </div>
       )}
 
-      {/* Input */}
-      <div className="p-3 border-t border-slate-800 bg-slate-900/50 flex-shrink-0">
-        <form onSubmit={e => { e.preventDefault(); handleSend(); }} className="flex gap-2">
-          <div className="relative flex-1">
-            <input
-              ref={inputRef}
-              type="text"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              placeholder={context === 'manualj' ? "Ask Mason or type /status..." : "Ask Mason about HVAC, or type /status..."}
-              className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-amber-500/50 transition-colors placeholder:text-slate-600"
-            />
-            {input === '/' && (
-              <div className="absolute bottom-full mb-2 left-0 w-48 bg-slate-800 border border-slate-700 rounded-xl shadow-xl overflow-hidden py-1 z-10 animate-in fade-in slide-in-from-bottom-2 duration-200">
-                <button
-                  type="button"
-                  className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-amber-500/10 hover:text-amber-400 flex items-center gap-2"
-                  onClick={() => { setInput('/status'); inputRef.current?.focus(); }}
-                >
-                  <Command className="w-3.5 h-3.5" />
-                  <span className="font-mono">/status</span>
-                  <span className="text-slate-500 text-[10px] ml-auto">CAD State</span>
-                </button>
+      {/* Feedback Form (replaces input when active) */}
+      {showFeedback ? (
+        <div className="p-4 border-t border-slate-800 bg-slate-900/50 flex-shrink-0 space-y-3">
+          {feedbackSubmitted ? (
+            <div className="text-center py-4 space-y-2">
+              <div className="w-10 h-10 mx-auto rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                <Check className="w-5 h-5 text-emerald-400" />
               </div>
-            )}
-          </div>
-          <button
-            type="submit"
-            disabled={!input.trim()}
-            className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            <Send className="w-4 h-4" />
-          </button>
-        </form>
-      </div>
+              <p className="text-sm font-bold text-emerald-400">Feedback Submitted</p>
+              <p className="text-[10px] text-slate-500">Thank you! Our team will review this.</p>
+              <button onClick={() => { setShowFeedback(false); setFeedbackSubmitted(false); }} className="text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 mx-auto mt-2">
+                <ArrowLeft className="w-3 h-3" /> Back to Chat
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold text-slate-300">Submit Feedback</p>
+                <button onClick={() => setShowFeedback(false)} className="text-[10px] text-slate-500 hover:text-slate-300">Cancel</button>
+              </div>
+
+              {/* Type selector */}
+              <div className="flex gap-2">
+                {(['bug', 'suggestion', 'question'] as const).map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setFeedbackType(t)}
+                    className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${feedbackType === t ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30' : 'bg-slate-800/50 text-slate-500 border border-slate-700/50 hover:text-slate-300'}`}
+                  >
+                    {t === 'bug' ? 'Bug' : t === 'suggestion' ? 'Idea' : 'Question'}
+                  </button>
+                ))}
+              </div>
+
+              {/* Description */}
+              <textarea
+                value={feedbackText}
+                onChange={e => setFeedbackText(e.target.value)}
+                placeholder="Describe the issue or suggestion..."
+                rows={3}
+                className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500/50 transition-colors placeholder:text-slate-600 resize-none"
+              />
+
+              {/* Screenshot */}
+              <input ref={feedbackFileRef} type="file" accept="image/*" className="hidden" onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                if (file.size > 5 * 1024 * 1024) { alert('Max 5MB'); return; }
+                const reader = new FileReader();
+                reader.onload = () => { if (typeof reader.result === 'string') setFeedbackScreenshot(reader.result); };
+                reader.readAsDataURL(file);
+                e.target.value = '';
+              }} />
+
+              <div className="flex items-center gap-2">
+                {feedbackScreenshot ? (
+                  <div className="flex items-center gap-2 flex-1">
+                    <img src={feedbackScreenshot} alt="Screenshot" className="w-10 h-10 rounded-lg object-cover border border-slate-700" />
+                    <span className="text-[10px] text-slate-400 flex-1">Screenshot attached</span>
+                    <button onClick={() => setFeedbackScreenshot(null)} className="text-[10px] text-red-400">Remove</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => feedbackFileRef.current?.click()}
+                    className="flex items-center gap-1.5 text-[10px] text-slate-500 hover:text-slate-300 transition-colors"
+                  >
+                    <Camera className="w-3.5 h-3.5" /> Attach Screenshot
+                  </button>
+                )}
+              </div>
+
+              {/* Submit */}
+              <button
+                disabled={!feedbackText.trim()}
+                onClick={() => {
+                  // Store feedback locally (can be sent to API later)
+                  const feedbackData = {
+                    type: feedbackType,
+                    text: feedbackText,
+                    screenshot: feedbackScreenshot ? '(attached)' : null,
+                    context,
+                    timestamp: new Date().toISOString(),
+                    userAgent: navigator.userAgent,
+                  };
+                  try {
+                    const existing = JSON.parse(localStorage.getItem('hvac_feedback') || '[]');
+                    existing.push(feedbackData);
+                    localStorage.setItem('hvac_feedback', JSON.stringify(existing));
+                  } catch { /* full */ }
+                  setFeedbackText('');
+                  setFeedbackScreenshot(null);
+                  setFeedbackSubmitted(true);
+                }}
+                className="w-full py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold hover:bg-amber-500/20 transition-all disabled:opacity-30"
+              >
+                <Send className="w-3.5 h-3.5 inline mr-1.5" /> Submit Feedback
+              </button>
+            </>
+          )}
+        </div>
+      ) : (
+        /* Input */
+        <div className="p-3 border-t border-slate-800 bg-slate-900/50 flex-shrink-0">
+          <form onSubmit={e => { e.preventDefault(); handleSend(); }} className="flex gap-2">
+            <div className="relative flex-1">
+              <input
+                ref={inputRef}
+                type="text"
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                placeholder={context === 'manualj' ? "Ask Mason or type /status..." : "Ask Mason about HVAC, or type /status..."}
+                className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-amber-500/50 transition-colors placeholder:text-slate-600"
+              />
+              {input === '/' && (
+                <div className="absolute bottom-full mb-2 left-0 w-48 bg-slate-800 border border-slate-700 rounded-xl shadow-xl overflow-hidden py-1 z-10 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                  <button
+                    type="button"
+                    className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-amber-500/10 hover:text-amber-400 flex items-center gap-2"
+                    onClick={() => { setInput('/status'); inputRef.current?.focus(); }}
+                  >
+                    <Command className="w-3.5 h-3.5" />
+                    <span className="font-mono">/status</span>
+                    <span className="text-slate-500 text-[10px] ml-auto">CAD State</span>
+                  </button>
+                </div>
+              )}
+            </div>
+            <button
+              type="submit"
+              disabled={!input.trim()}
+              className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

@@ -518,7 +518,9 @@ export default function Viewer3D({ isOpen, onClose }: Viewer3DProps) {
       dirtyRef.current = true;
       return { minX, maxX, minZ, maxZ };
     },
-    [floors, pxPerFt, showWireframe, showShadows, showAllFloors, visibleFloors, thermalMode, roofStyle, roofPitch],
+    // Stabilize visibleFloors Set by converting to sorted string key
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [floors, pxPerFt, showWireframe, showShadows, showAllFloors, [...visibleFloors].sort().join(','), thermalMode, roofStyle, roofPitch],
   );
 
   // ── Init Three.js ────────────────────────────────────────────────────────────

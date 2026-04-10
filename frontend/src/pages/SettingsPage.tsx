@@ -1,5 +1,6 @@
+import { useRef } from 'react';
 import { usePreferencesStore, type ThemeMode, type UIDensity, type UnitSystem } from '../stores/usePreferencesStore';
-import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility } from 'lucide-react';
+import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image } from 'lucide-react';
 import A11yPanel from '../components/accessibility/A11yPanel';
 
 export default function SettingsPage() {
@@ -123,6 +124,86 @@ export default function SettingsPage() {
             <A11yPanel />
           </Section>
 
+          {/* PDF & Print Settings */}
+          <Section icon={<FileText className="w-5 h-5 text-orange-400" />} title="PDF & Print Settings">
+            <p className="text-xs text-slate-500 mb-4">Choose which sections to include when exporting PDF reports and blueprints.</p>
+
+            <SwitchOption label="Floor Plan Drawing" description="Canvas plot on cover page" checked={prefs.pdfIncludeDrawing} onChange={(v) => prefs.update({ pdfIncludeDrawing: v })} />
+            <SwitchOption label="Room & Wall Schedules" description="Room areas, wall lengths, R-values" checked={prefs.pdfIncludeRoomSchedule} onChange={(v) => prefs.update({ pdfIncludeRoomSchedule: v })} />
+            <SwitchOption label="Opening & HVAC Schedules" description="Windows, doors, equipment tables" checked={prefs.pdfIncludeOpeningSchedule} onChange={(v) => prefs.update({ pdfIncludeOpeningSchedule: v })} />
+            <SwitchOption label="Manual J Load Summary" description="Heating/cooling calculations (if available)" checked={prefs.pdfIncludeLoadSummary} onChange={(v) => prefs.update({ pdfIncludeLoadSummary: v })} />
+            <SwitchOption label="Notes & Codes Page" description="Standard disclaimers and code references" checked={prefs.pdfIncludeNotes} onChange={(v) => prefs.update({ pdfIncludeNotes: v })} />
+
+            <OptionGroup label="Page Size">
+              <ToggleRow
+                options={[
+                  { value: 'letter', label: 'Letter' },
+                  { value: 'a4', label: 'A4' },
+                  { value: 'tabloid', label: 'Tabloid' },
+                ]}
+                value={prefs.pdfPageSize}
+                onChange={(v) => prefs.update({ pdfPageSize: v as any })}
+              />
+            </OptionGroup>
+
+            <OptionGroup label="Orientation">
+              <ToggleRow
+                options={[
+                  { value: 'landscape', label: 'Landscape' },
+                  { value: 'portrait', label: 'Portrait' },
+                ]}
+                value={prefs.pdfOrientation}
+                onChange={(v) => prefs.update({ pdfOrientation: v as any })}
+              />
+            </OptionGroup>
+
+            <OptionGroup label="Watermark Text">
+              <input
+                type="text"
+                value={prefs.pdfWatermarkText}
+                onChange={(e) => prefs.update({ pdfWatermarkText: e.target.value })}
+                placeholder="Custom watermark text"
+                className="w-full bg-slate-800/60 border border-slate-700/50 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+              />
+            </OptionGroup>
+          </Section>
+
+          {/* Blueprint Stamps */}
+          <Section icon={<Stamp className="w-5 h-5 text-pink-400" />} title="Blueprint Stamps">
+            <p className="text-xs text-slate-500 mb-4">Upload your firm's PE seal or notary stamp to automatically include on exported blueprints.</p>
+
+            <StampUpload
+              label="Firm / PE Seal"
+              dataUrl={prefs.firmStampDataUrl}
+              onUpload={(url) => prefs.update({ firmStampDataUrl: url })}
+              onClear={() => prefs.update({ firmStampDataUrl: '' })}
+            />
+
+            {prefs.firmStampDataUrl && (
+              <OptionGroup label="Stamp Position">
+                <ToggleRow
+                  options={[
+                    { value: 'top-left', label: 'Top Left' },
+                    { value: 'top-right', label: 'Top Right' },
+                    { value: 'bottom-left', label: 'Bottom Left' },
+                    { value: 'bottom-right', label: 'Bottom Right' },
+                  ]}
+                  value={prefs.firmStampPosition}
+                  onChange={(v) => prefs.update({ firmStampPosition: v as any })}
+                />
+              </OptionGroup>
+            )}
+
+            <div className="my-3 border-t border-slate-800/40" />
+
+            <StampUpload
+              label="Notary Stamp"
+              dataUrl={prefs.notaryStampDataUrl}
+              onUpload={(url) => prefs.update({ notaryStampDataUrl: url })}
+              onClear={() => prefs.update({ notaryStampDataUrl: '' })}
+            />
+          </Section>
+
           {/* System */}
           <Section icon={<Monitor className="w-5 h-5 text-amber-400" />} title="System">
             <div className="flex items-center justify-between py-3">
@@ -211,6 +292,52 @@ function SwitchOption({ label, description, checked, onChange }: { label: string
       >
         <div className={`w-4.5 h-4.5 rounded-full bg-white shadow-md absolute top-0.5 transition-all ${checked ? 'left-5.5' : 'left-0.5'}`} />
       </button>
+    </div>
+  );
+}
+
+function StampUpload({ label, dataUrl, onUpload, onClear }: { label: string; dataUrl: string; onUpload: (url: string) => void; onClear: () => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      alert('File must be under 2MB');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') onUpload(reader.result);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  return (
+    <div>
+      <p className="text-sm font-semibold text-white mb-2">{label}</p>
+      <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFile} className="hidden" />
+      {dataUrl ? (
+        <div className="flex items-center gap-4">
+          <div className="w-20 h-20 rounded-xl border border-slate-700/50 bg-slate-800/50 overflow-hidden flex items-center justify-center p-1">
+            <img src={dataUrl} alt={label} className="max-w-full max-h-full object-contain" />
+          </div>
+          <div className="flex flex-col gap-2">
+            <button onClick={() => fileRef.current?.click()} className="text-xs font-bold text-sky-400 hover:text-sky-300 flex items-center gap-1.5"><Upload className="w-3 h-3" /> Replace</button>
+            <button onClick={onClear} className="text-xs font-bold text-red-400 hover:text-red-300 flex items-center gap-1.5"><Trash2 className="w-3 h-3" /> Remove</button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => fileRef.current?.click()}
+          className="w-full py-6 rounded-xl border-2 border-dashed border-slate-700/50 bg-slate-800/20 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-all flex flex-col items-center gap-2 text-slate-500 hover:text-slate-300"
+        >
+          <Image className="w-6 h-6" />
+          <span className="text-xs font-semibold">Click to upload {label.toLowerCase()}</span>
+          <span className="text-[10px] text-slate-600">PNG, JPG — Max 2MB</span>
+        </button>
+      )}
     </div>
   );
 }

@@ -6,8 +6,10 @@
 import type { Floor } from '../features/cad/store/useCadStore';
 import type { RoomInput } from './manualJ';
 
-interface ConvertedRoom extends RoomInput {
+export interface ConvertedRoom extends RoomInput {
   cadRoomId: string; // back-reference to the CAD detected room
+  floorId: string;
+  floorName: string;
 }
 
 /**
@@ -69,6 +71,8 @@ export function convertCadRoomsToManualJ(
 
     return {
       cadRoomId: room.id,
+      floorId: floor.id,
+      floorName: floor.name,
       id: `cad-room-${room.id}`,
       name: room.name || `Room ${idx + 1}`,
       lengthFt: Math.max(lengthFt, 1),
@@ -91,4 +95,12 @@ export function convertCadRoomsToManualJ(
       occupantCount: Math.max(1, Math.round(area / 200)), // ~1 person per 200 sq ft
     };
   });
+}
+
+/**
+ * Convert detected rooms from ALL floors into Manual J room inputs.
+ * Returns rooms tagged with their source floor for grouping in the UI.
+ */
+export function convertAllFloorsToManualJ(floors: Floor[]): ConvertedRoom[] {
+  return floors.flatMap(floor => convertCadRoomsToManualJ(floor));
 }

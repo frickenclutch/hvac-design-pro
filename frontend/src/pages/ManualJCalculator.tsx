@@ -10,7 +10,7 @@ import {
   calculateWholeHouse, tonnageFromBtu, createDefaultRoom, createDefaultConditions, GLASS_PRESETS,
 } from '../engines/manualJ';
 import { lookupByZip } from '../engines/ashraeWeather';
-import { convertCadRoomsToManualJ } from '../engines/cadToManualJ';
+import { convertCadRoomsToManualJ, convertAllFloorsToManualJ } from '../engines/cadToManualJ';
 import { generateCadFloorFromManualJ, type LayoutAlgorithm } from '../engines/manualJToCad';
 import { useCadStore } from '../features/cad/store/useCadStore';
 import RetailerFinderPanel from '../features/retailer/components/RetailerFinderPanel';
@@ -63,37 +63,110 @@ export default function ManualJCalculator() {
     return () => clearTimeout(t);
   }, [buildingType, rooms, conditions]);
 
-  const addRoom = () => {
-    setRooms(prev => [...prev, createDefaultRoom(prev.length)]);
+  const addRoom = (floorName?: string) => {
+    const newRoom = createDefaultRoom(rooms.length);
+    if (floorName) {
+      (newRoom as any).floorName = floorName;
+    }
+    setRooms(prev => [...prev, newRoom]);
     setWholeHouse(null);
+  };
+
+  const addFloor = () => {
+    const cadState = useCadStore.getState();
+    const floorCount = cadState.floors.length;
+    const floorName = `Floor ${floorCount + 1}`;
+    // Add a new floor to the CAD store
+    cadState.addFloor(floorName);
+    // Add a default room for that floor in Manual J
+    const newRoom = createDefaultRoom(rooms.length);
+    (newRoom as any).floorName = floorName;
+    (newRoom as any).floorId = useCadStore.getState().activeFloorId;
+    setRooms(prev => [...prev, newRoom]);
+    setWholeHouse(null);
+  };
+
+  // Sync Manual J room edits back to CAD detected rooms
+  const syncToCad = () => {
+    const cadState = useCadStore.getState();
+    let updated = 0;
+    for (const room of rooms) {
+      const cadRoomId = (room as any).cadRoomId;
+      if (!cadRoomId) continue;
+      const floorId = (room as any).floorId;
+      const floor = floorId
+        ? cadState.floors.find(f => f.id === floorId)
+        : cadState.floors.find(f => f.rooms.some(r => r.id === cadRoomId));
+      if (!floor) continue;
+      // Update wall R-values for walls belonging to this room
+      const cadRoom = floor.rooms.find(r => r.id === cadRoomId);
+      if (!cadRoom) continue;
+      for (const wallId of cadRoom.wallIds) {
+        cadState.updateWall(wallId, { rValue: room.wallRValue });
+      }
+      // Update window properties
+      const roomOpenings = floor.openings.filter(o => cadRoom.wallIds.includes(o.wallId) && o.type === 'window');
+      for (const opening of roomOpenings) {
+        cadState.updateOpening(opening.id, {
+          uFactor: room.windowUValue,
+          shgc: room.windowSHGC
+        });
+      }
+      updated++;
+    }
+    cadState.markDirty();
+    if (updated > 0) {
+      alert(`Synced ${updated} room(s) back to CAD workspace.`);
+    } else {
+      alert('No rooms with CAD links found. Import from CAD first.');
+    }
   };
 
   const importFromCad = () => {
     const cadState = useCadStore.getState();
-    const floor = cadState.floors.find(f => f.id === cadState.activeFloorId);
-    if (!floor || floor.rooms.length === 0) {
+    // Import from ALL floors that have detected rooms
+    const floorsWithRooms = cadState.floors.filter(f => f.rooms.length > 0);
+    if (floorsWithRooms.length === 0) {
       alert('No detected rooms found in the CAD workspace. Use the Detect Rooms (R) tool first.');
       return;
     }
-    const converted = convertCadRoomsToManualJ(floor);
+    const converted = convertAllFloorsToManualJ(floorsWithRooms);
     setRooms(converted);
     setWholeHouse(null);
   };
 
   const exportToCad = () => {
-    const pxPerFt = useCadStore.getState().projectScale.pxPerFt;
-    const newFloor = generateCadFloorFromManualJ(rooms, pxPerFt, layoutAlgorithm);
-    
+    const cadState = useCadStore.getState();
+    const pxPerFt = cadState.projectScale.pxPerFt;
+
+    // Group rooms by floor name for multi-floor export
+    const floorGroups = new Map<string, RoomInput[]>();
+    for (const room of rooms) {
+      const floorName = (room as any).floorName || 'Floor 1';
+      if (!floorGroups.has(floorName)) floorGroups.set(floorName, []);
+      floorGroups.get(floorName)!.push(room);
+    }
+
+    const newFloors: ReturnType<typeof generateCadFloorFromManualJ>[] = [];
+    let baseIndex = cadState.floors.length;
+    for (const [floorName, floorRooms] of floorGroups) {
+      const newFloor = generateCadFloorFromManualJ(floorRooms, pxPerFt, layoutAlgorithm, baseIndex);
+      newFloor.name = floorName;
+      newFloors.push(newFloor);
+      baseIndex++;
+    }
+
+    const lastFloorId = newFloors[newFloors.length - 1]?.id;
     useCadStore.setState((s) => ({
-      floors: [...s.floors, newFloor],
-      activeFloorId: newFloor.id,
+      floors: [...s.floors, ...newFloors],
+      activeFloorId: lastFloorId || s.activeFloorId,
       isDirty: true,
       undoStack: [],
       redoStack: [],
     }));
-    
+
     setShowExportCadDialog(false);
-    alert('CAD Floor Generated! Switch to the 2D CAD Workspace to view it.');
+    alert(`${newFloors.length} floor(s) generated! Switch to the 2D CAD Workspace to view.`);
   };
 
   const removeRoom = (id: string) => {
@@ -491,14 +564,24 @@ export default function ManualJCalculator() {
               <Wind className="w-5 h-5 text-sky-400" />
               Room-by-Room Inputs
             </h3>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <button onClick={syncToCad}
+                className="text-sm font-bold text-amber-400 hover:text-amber-300 transition-colors flex items-center gap-1.5"
+                title="Push Manual J edits back to CAD walls & windows">
+                <ArrowRight className="w-3.5 h-3.5" />
+                Sync to CAD
+              </button>
               <button onClick={importFromCad}
                 className="text-sm font-bold text-sky-400 hover:text-sky-300 transition-colors flex items-center gap-1.5"
-                title="Import detected rooms from CAD floor plan">
+                title="Import detected rooms from all CAD floors">
                 <ArrowRight className="w-3.5 h-3.5 rotate-180" />
                 Import from CAD
               </button>
-              <button onClick={addRoom}
+              <button onClick={addFloor}
+                className="text-sm font-bold text-violet-400 hover:text-violet-300 transition-colors">
+                + Add Floor
+              </button>
+              <button onClick={() => addRoom()}
                 className="text-sm font-bold text-emerald-400 hover:text-emerald-300 transition-colors">
                 + Add Room
               </button>
@@ -544,18 +627,36 @@ export default function ManualJCalculator() {
           )}
 
           <div className="space-y-4">
-            {rooms.map((room, idx) => (
-              <RoomInputCard
-                key={room.id}
-                room={room}
-                index={idx}
-                expanded={expandedRoom === room.id}
-                onToggle={() => setExpandedRoom(expandedRoom === room.id ? null : room.id)}
-                onChange={(patch) => updateRoom(room.id, patch)}
-                onRemove={() => removeRoom(room.id)}
-                canRemove={rooms.length > 1}
-              />
-            ))}
+            {(() => {
+              // Group rooms by floor if they have floorName
+              const hasFloors = rooms.some((r: any) => r.floorName);
+              let lastFloor = '';
+              return rooms.map((room, idx) => {
+                const floorName = (room as any).floorName as string | undefined;
+                const showFloorHeader = hasFloors && floorName && floorName !== lastFloor;
+                if (floorName) lastFloor = floorName;
+                return (
+                  <div key={room.id}>
+                    {showFloorHeader && (
+                      <div className="flex items-center gap-3 mt-4 mb-2 first:mt-0">
+                        <div className="h-px flex-1 bg-slate-700/50" />
+                        <span className="text-xs font-bold text-violet-400 uppercase tracking-widest">{floorName}</span>
+                        <div className="h-px flex-1 bg-slate-700/50" />
+                      </div>
+                    )}
+                    <RoomInputCard
+                      room={room}
+                      index={idx}
+                      expanded={expandedRoom === room.id}
+                      onToggle={() => setExpandedRoom(expandedRoom === room.id ? null : room.id)}
+                      onChange={(patch) => updateRoom(room.id, patch)}
+                      onRemove={() => removeRoom(room.id)}
+                      canRemove={rooms.length > 1}
+                    />
+                  </div>
+                );
+              });
+            })()}
           </div>
         </section>
 

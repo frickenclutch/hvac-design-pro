@@ -6,12 +6,13 @@ export type LayoutAlgorithm = 'horizontal_strip' | 'grid' | 'l_shape';
 export function generateCadFloorFromManualJ(
   rooms: RoomInput[],
   pxPerFt: number,
-  algorithm: LayoutAlgorithm = 'horizontal_strip'
+  algorithm: LayoutAlgorithm = 'horizontal_strip',
+  floorIndex: number = 0,
 ): Floor {
   const floor: Floor = {
     id: `floor-${crypto.randomUUID()}`,
     name: 'Auto-Generated Floor',
-    index: 0,
+    index: floorIndex,
     heightFt: rooms.length > 0 ? rooms[0].ceilingHeightFt : 9,
     isVisible: true,
     isLocked: false,
@@ -19,6 +20,7 @@ export function generateCadFloorFromManualJ(
     openings: [],
     rooms: [],
     hvacUnits: [],
+    pipes: [],
     annotations: [],
     underlays: [],
   };

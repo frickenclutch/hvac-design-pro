@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import CadCanvas from '../features/cad/components/CadCanvas';
 import Toolbox from '../features/cad/components/Toolbox';
@@ -8,6 +8,7 @@ import WallLengthOverlay from '../features/cad/components/WallLengthOverlay';
 import FloorSelector from '../features/cad/components/FloorSelector';
 import LayerManager from '../features/cad/components/LayerManager';
 import ThermalLegend from '../features/cad/components/ThermalLegend';
+import HelpCenter from '../features/cad/components/HelpCenter';
 import { useAutoSave } from '../features/cad/hooks/useAutoSave';
 import Mason from '../components/Mason';
 import ErrorBoundary from '../components/ErrorBoundary';
@@ -16,6 +17,7 @@ import { useProjectStore } from '../stores/useProjectStore';
 export default function CadWorkspace() {
   // Auto-save drawing to D1 / localStorage
   useAutoSave();
+  const [helpOpen, setHelpOpen] = useState(false);
 
   // Hydrate the active project store from the route param
   const { id } = useParams<{ id: string }>();
@@ -39,7 +41,7 @@ export default function CadWorkspace() {
 
       {/* Global header overlaid on canvas (contains 3D Viewer + PDF export) */}
       <ErrorBoundary label="Navigation">
-        <TopNavigationBar />
+        <TopNavigationBar onHelpOpen={() => setHelpOpen(true)} />
       </ErrorBoundary>
 
       {/* Multi-floor selector (below header) */}
@@ -62,6 +64,9 @@ export default function CadWorkspace() {
 
       {/* Mason — AI HVAC Assistant (complete help & docs built in) */}
       <Mason context="cad" position="bottom-left" />
+
+      {/* Help Center modal */}
+      <HelpCenter isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
 
     </div>
   );

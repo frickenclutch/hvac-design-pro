@@ -1,5 +1,5 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { ArrowLeft, Save, Undo2, Redo2, Download, Zap, Box, Search, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, Save, Undo2, Redo2, Download, Zap, Box, Search, ChevronDown, ChevronUp, HelpCircle } from 'lucide-react';
 import AssetSearch from './AssetSearch';
 import ErrorBoundary from '../../../components/ErrorBoundary';
 import { Link, useParams } from 'react-router-dom';
@@ -10,7 +10,7 @@ import { useProjectStore } from '../../../stores/useProjectStore';
 // Lazy-load heavy dependencies (Three.js ~1.2MB, jsPDF ~200KB)
 const Viewer3D = lazy(() => import('./Viewer3D'));
 
-export default function TopNavigationBar() {
+export default function TopNavigationBar({ onHelpOpen }: { onHelpOpen?: () => void }) {
   const { id } = useParams();
   const { canvas, undo, redo, isDirty, isSaving, lastSavedAt, saveError, panelNavBar, setPanelNavBar } = useCadStore();
   const [show3D, setShow3D] = useState(false);
@@ -163,6 +163,7 @@ export default function TopNavigationBar() {
           <ActionButton icon={<Zap className="w-4 h-4" />} tooltip="Auto-Calculate Load" highlight />
           <div className="w-px h-4 bg-slate-700/60 mx-2" />
           <ActionButton icon={<Search className="w-4 h-4" />} tooltip="Search (Ctrl+K)" onClick={() => setShowSearch(true)} />
+          <ActionButton icon={<HelpCircle className="w-4 h-4" />} tooltip="Help Center" onClick={onHelpOpen} />
         </div>
 
         {/* Right Side */}

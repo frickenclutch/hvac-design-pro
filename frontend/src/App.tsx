@@ -1,6 +1,6 @@
 import { useState, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
-import { Home, Compass, Settings, Users, LogOut, Thermometer, PenTool, Menu, X, Search } from 'lucide-react';
+import { Home, Compass, Settings, Users, LogOut, Thermometer, PenTool, Menu, X, Search, BookOpen } from 'lucide-react';
 import LandingPage from './pages/LandingPage';
 import OnboardingPage from './pages/OnboardingPage';
 import AuthPage from './pages/AuthPage';
@@ -11,6 +11,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const CadWorkspace = lazy(() => import('./pages/CadWorkspace'));
 const ManualJCalculator = lazy(() => import('./pages/ManualJCalculator'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const UserGuidePage = lazy(() => import('./pages/UserGuidePage'));
 import { useAuthStore } from './features/auth/store/useAuthStore';
 import { usePreferencesStore } from './stores/usePreferencesStore';
 import SpotlightSearch, { SpotlightTrigger } from './features/spotlight/SpotlightSearch';
@@ -75,6 +76,7 @@ function AppLayout() {
             <div className="h-px bg-slate-800/60 my-2" />
             <MobileNavLink to="/team" icon={<Users className="w-5 h-5" />} label="Team" onClick={() => setMobileNavOpen(false)} />
             <MobileNavLink to="/settings" icon={<Settings className="w-5 h-5" />} label="Settings" onClick={() => setMobileNavOpen(false)} />
+            <MobileNavLink to="/guide" icon={<BookOpen className="w-5 h-5" />} label="Guide" onClick={() => setMobileNavOpen(false)} />
             <div className="h-px bg-slate-800/60 my-2" />
             <button onClick={() => { logout(); setMobileNavOpen(false); }}
               className="flex w-full items-center gap-3 p-3 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors min-h-[44px]">
@@ -110,6 +112,7 @@ function AppLayout() {
 
               <NavigationLink to="/team" icon={<Users className="w-5 h-5" />} label="Team" collapsed={sidebarCollapsed} />
               <NavigationLink to="/settings" icon={<Settings className="w-5 h-5" />} label="Settings" collapsed={sidebarCollapsed} />
+              <NavigationLink to="/guide" icon={<BookOpen className="w-5 h-5" />} label="Guide" collapsed={sidebarCollapsed} />
             </div>
           </div>
 
@@ -159,6 +162,7 @@ function AppLayout() {
           <Route path="/dashboard" element={isAuthenticated ? <Dashboard /> : <Navigate to="/" />} />
           <Route path="/calculator" element={isAuthenticated ? <ManualJCalculator /> : <Navigate to="/" />} />
           <Route path="/settings" element={isAuthenticated ? <SettingsPage /> : <Navigate to="/" />} />
+          <Route path="/guide" element={isAuthenticated ? <UserGuidePage /> : <Navigate to="/" />} />
           <Route path="/cad" element={isAuthenticated ? <CadWorkspace /> : <Navigate to="/" />} />
           <Route path="/project/:id/cad" element={isAuthenticated ? <CadWorkspace /> : <Navigate to="/" />} />
 
