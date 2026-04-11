@@ -68,7 +68,13 @@ function loadPersistedSession(): { token: string; user: User; org: Organisation 
 // ── API ────────────────────────────────────────────────────────────────────────
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
+/** True when we have a real backend URL configured (not just the static Pages origin). */
+const HAS_BACKEND = !!import.meta.env.VITE_API_BASE_URL;
+
 async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<{ data?: T; error?: string; status: number }> {
+  // If no backend is configured, skip the request entirely
+  if (!HAS_BACKEND) return { error: '__no_backend__', status: 0 };
+
   try {
     const token = localStorage.getItem(TOKEN_KEY);
     const headers: Record<string, string> = {
@@ -82,8 +88,13 @@ async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<{ data
     if (!res.ok) return { error: (body as { error?: string }).error || `HTTP ${res.status}`, status: res.status };
     return { data: body as T, status: res.status };
   } catch {
-    return { error: 'Network error — backend may be offline', status: 0 };
+    return { error: '__no_backend__', status: 0 };
   }
+}
+
+/** Check whether an error means "backend not available" (vs a real server error like 409 duplicate email). */
+function isBackendUnavailable(error: string | undefined): boolean {
+  return !error || error === '__no_backend__' || error.startsWith('Network error');
 }
 
 // ── Guest fallback ────────────────────────────────────────────────────────────
@@ -147,7 +158,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     if (error || !data) {
       // Fallback for offline/dev: if backend is unreachable, allow demo login
-      if (error === 'Network error — backend may be offline') {
+      if (isBackendUnavailable(error)) {
         const devUser: User = { id: 'user-dev', email, role: 'admin', firstName: email.split('@')[0], lastName: '', isVerified: true };
         persistSession('dev-token', devUser, guestOrg);
         set({ user: devUser, organisation: guestOrg, token: 'dev-token', isAuthenticated: true, authLoading: false, authError: null });
@@ -189,7 +200,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     if (error || !resp) {
       // Fallback for offline/dev
-      if (error === 'Network error — backend may be offline') {
+      if (isBackendUnavailable(error)) {
         const newUser: User = { id: 'user-new', email: data.email, role: 'admin', firstName: data.firstName, lastName: data.lastName, isVerified: true };
         const newOrg: Organisation = { id: 'org-new', name: data.orgName || `${data.firstName}'s Workspace`, type: data.orgType || 'individual', slug: data.firstName.toLowerCase(), regionCode: data.regionCode || 'NA_ASHRAE' };
         persistSession('dev-token', newUser, newOrg);
@@ -232,7 +243,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const { data, error } = await apiFetch<{ user: User; organisation: Organisation }>('/api/auth/me');
     if (error || !data) {
       // Token expired or invalid — but don't log out if it's just a network error
-      if (error !== 'Network error — backend may be offline') {
+      if (!isBackendUnavailable(error)) {
         clearPersistedSession();
         set({ user: null, organisation: null, token: null, isAuthenticated: false });
       }

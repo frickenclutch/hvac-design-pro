@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import CadCanvas from '../features/cad/components/CadCanvas';
 import Toolbox from '../features/cad/components/Toolbox';
@@ -9,7 +9,8 @@ import FloorSelector from '../features/cad/components/FloorSelector';
 import LayerManager from '../features/cad/components/LayerManager';
 import ThermalLegend from '../features/cad/components/ThermalLegend';
 import HelpCenter from '../features/cad/components/HelpCenter';
-import { useAutoSave } from '../features/cad/hooks/useAutoSave';
+import { useAutoSave, loadDrawing } from '../features/cad/hooks/useAutoSave';
+import { useCadStore } from '../features/cad/store/useCadStore';
 import Mason from '../components/Mason';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { useProjectStore } from '../stores/useProjectStore';
@@ -23,6 +24,7 @@ export default function CadWorkspace() {
   const { id } = useParams<{ id: string }>();
   const setActiveProject = useProjectStore((s) => s.setActiveProject);
   const clearActiveProject = useProjectStore((s) => s.clearActiveProject);
+  const loadedProjectRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -30,6 +32,29 @@ export default function CadWorkspace() {
     }
     return () => clearActiveProject();
   }, [id, setActiveProject, clearActiveProject]);
+
+  // ── Load saved CAD drawing data when entering a project ──────────────
+  useEffect(() => {
+    const projectId = id ?? useProjectStore.getState().activeProjectId;
+    // Skip if we already loaded this project (avoids re-loading on every render)
+    if (loadedProjectRef.current === (projectId ?? '__draft__')) return;
+    loadedProjectRef.current = projectId ?? '__draft__';
+
+    const store = useCadStore.getState();
+
+    if (projectId) {
+      // Set the projectId on the CAD store so auto-save targets the right key
+      store.setProjectId(projectId);
+
+      // Load saved drawing from localStorage / D1
+      loadDrawing(projectId).then((saved) => {
+        if (saved?.canvasJson) {
+          useCadStore.getState().loadDrawing(saved.canvasJson);
+          if (saved.id) useCadStore.getState().setDrawingId(saved.id);
+        }
+      });
+    }
+  }, [id]);
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950 font-sans text-slate-100 overflow-hidden">

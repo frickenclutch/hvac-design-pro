@@ -2,10 +2,10 @@ import { useState } from 'react';
 import {
   BookOpen, ChevronRight, GraduationCap, Zap,
   Home, PenTool, Thermometer, Box, Layers, Building2,
-  Keyboard, FileText, Settings, Compass, Search,
-  MousePointer, Move, Plus, Trash2, Eye, Lock,
-  Download, Upload, Printer, MessageSquarePlus,
-  ArrowRightLeft, Ruler, Wind, SquarePen,
+  Keyboard, FileText, Settings, Compass,
+  Eye, Lock,
+  Printer, MessageSquarePlus,
+  Wind, SquarePen,
 } from 'lucide-react';
 
 type GuideMode = 'easy' | 'advanced';

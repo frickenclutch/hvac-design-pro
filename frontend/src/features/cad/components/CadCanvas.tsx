@@ -593,6 +593,19 @@ export default function CadCanvas() {
       }
     }
 
+    // Restore previous selection if the selected object was recreated
+    const prevSelected = state.selectedObject;
+    if (prevSelected) {
+      const prevName = (prevSelected as any).name as string | undefined;
+      if (prevName) {
+        const restored = canvas.getObjects().find(o => (o as any).name === prevName);
+        if (restored) {
+          canvas.setActiveObject(restored);
+          useCadStore.getState().setSelectedObject(restored);
+        }
+      }
+    }
+
     canvas.requestRenderAll();
   }, [createWallLine, createOpeningShape, createHvacShape, createPipeLine, createAnnotationShape]);
 

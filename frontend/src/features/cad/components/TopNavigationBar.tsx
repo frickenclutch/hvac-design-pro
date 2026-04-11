@@ -1,8 +1,8 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { ArrowLeft, Save, Undo2, Redo2, Download, Zap, Box, Search, ChevronDown, ChevronUp, HelpCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import { ArrowLeft, Save, Undo2, Redo2, Download, Zap, Box, Search, ChevronDown, ChevronUp, HelpCircle, Pencil, X, ArrowRight, Building2, Home, MapPin, Briefcase, Check } from 'lucide-react';
 import AssetSearch from './AssetSearch';
 import ErrorBoundary from '../../../components/ErrorBoundary';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useCadStore } from '../store/useCadStore';
 import { useAuthStore } from '../../auth/store/useAuthStore';
 import { useProjectStore } from '../../../stores/useProjectStore';
@@ -12,11 +12,25 @@ const Viewer3D = lazy(() => import('./Viewer3D'));
 
 export default function TopNavigationBar({ onHelpOpen }: { onHelpOpen?: () => void }) {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { canvas, undo, redo, isDirty, isSaving, lastSavedAt, saveError, panelNavBar, setPanelNavBar } = useCadStore();
   const [show3D, setShow3D] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const { user, organisation } = useAuthStore();
-  const { activeProjectName, activeProjectType, activeProjectAddress } = useProjectStore();
+  const { activeProjectName, activeProjectType, activeProjectAddress, renameProject, createProject, activeProjectId } = useProjectStore();
+
+  // ── Inline title editing ────────────────────────────────────────────────
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const titleInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Save-as-project modal for drafts ────────────────────────────────────
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveStep, setSaveStep] = useState(1);
+  const [saveName, setSaveName] = useState('');
+  const [saveType, setSaveType] = useState('Residential');
+  const [saveAddress, setSaveAddress] = useState('');
+  const [saveCity, setSaveCity] = useState('');
 
   // Derive display name — fall back gracefully when no project route
   const displayName = activeProjectName ?? (id ? `Project ${id}` : 'CAD Workspace');
@@ -33,21 +47,88 @@ export default function TopNavigationBar({ onHelpOpen }: { onHelpOpen?: () => vo
     return () => window.removeEventListener('keydown', handleKey);
   }, []);
 
+  // Focus the title input when entering edit mode
+  useEffect(() => {
+    if (isEditingTitle) {
+      titleInputRef.current?.focus();
+      titleInputRef.current?.select();
+    }
+  }, [isEditingTitle]);
+
   const saveStatusText = saveError ? 'Save error' : isSaving ? 'Saving...' : isDirty ? 'Unsaved' : lastSavedAt ? 'Saved' : 'Draft';
   const saveStatusColor = saveError ? 'text-red-400 border-red-500/20 bg-red-500/10' : isSaving ? 'text-amber-400 border-amber-500/20 bg-amber-500/10' : isDirty ? 'text-slate-400 border-slate-500/20 bg-slate-500/10' : 'text-emerald-400 border-emerald-500/20 bg-emerald-500/10';
 
+  const titleCommittedRef = useRef(false);
+
+  const handleTitleDoubleClick = () => {
+    titleCommittedRef.current = false;
+    setTitleDraft(activeProjectName || '');
+    setIsEditingTitle(true);
+  };
+
+  const commitTitleEdit = () => {
+    // Guard against double-fire (Enter keydown + blur on unmount)
+    if (titleCommittedRef.current) return;
+    titleCommittedRef.current = true;
+    const trimmed = titleDraft.trim();
+    if (trimmed && trimmed !== activeProjectName) {
+      renameProject(trimmed);
+    }
+    setIsEditingTitle(false);
+  };
+
+  const cancelTitleEdit = () => {
+    titleCommittedRef.current = true;
+    setIsEditingTitle(false);
+  };
+
+  // ── Save handler ──────────────────────────────────────────────────────────
+  const isDraft = !activeProjectId;
+
   const handleSave = () => {
-    const data = useCadStore.getState().serializeDrawing();
-    const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `hvac-project-${id || 'draft'}-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    if (isDraft) {
+      // No project exists yet — open the save-as modal
+      setSaveName('');
+      setSaveType('Residential');
+      setSaveAddress('');
+      setSaveCity('');
+      setSaveStep(1);
+      setShowSaveModal(true);
+      return;
+    }
+
+    // Immediate save to localStorage + trigger auto-save
+    const store = useCadStore.getState();
+    try {
+      const data = store.serializeDrawing();
+      localStorage.setItem(`hvac_cad_${activeProjectId}`, JSON.stringify(data));
+      store.markSaved(store.drawingId || 'local');
+    } catch {
+      store.markDirty();
+    }
+  };
+
+  const handleSaveModalSubmit = () => {
+    if (!saveName.trim()) return;
+    const newId = createProject({ name: saveName.trim(), type: saveType, address: saveAddress, city: saveCity });
+    setShowSaveModal(false);
+
+    // Update the CAD store's projectId so auto-save targets this project
+    const store = useCadStore.getState();
+    store.setProjectId(newId);
+
+    // Immediately persist current drawing to localStorage under the new project key
+    try {
+      const data = store.serializeDrawing();
+      localStorage.setItem(`hvac_cad_${newId}`, JSON.stringify(data));
+      store.markSaved(store.drawingId || 'local');
+    } catch {
+      store.markDirty();
+    }
+
+    // Navigate to the project-specific CAD route.
+    // The layout route in App.tsx keeps CadWorkspace mounted (no canvas destruction).
+    navigate(`/project/${newId}/cad`, { replace: true });
   };
 
   const handleExport = async () => {
@@ -62,7 +143,7 @@ export default function TopNavigationBar({ onHelpOpen }: { onHelpOpen?: () => vo
       organisationName: organisation?.name || 'HVAC Design Pro',
       date: new Date().toLocaleDateString(),
       region: organisation?.regionCode || 'NA_ASHRAE',
-      projectId: id || 'DRAFT',
+      projectId: activeProjectId || id || 'DRAFT',
     };
 
     const storeFloors = useCadStore.getState().floors;
@@ -143,14 +224,35 @@ export default function TopNavigationBar({ onHelpOpen }: { onHelpOpen?: () => vo
 
           <div className="flex flex-col">
             <div className="flex items-center gap-3">
-              <h2 className="text-lg font-bold text-slate-100 tracking-wide drop-shadow-md">{displayName}</h2>
-              {activeProjectType && (
+              {isEditingTitle ? (
+                <div className="flex items-center gap-2" onMouseDown={e => e.stopPropagation()}>
+                  <input
+                    ref={titleInputRef}
+                    value={titleDraft}
+                    onChange={e => setTitleDraft(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); commitTitleEdit(); } if (e.key === 'Escape') cancelTitleEdit(); }}
+                    onBlur={commitTitleEdit}
+                    className="text-lg font-bold text-white bg-slate-800/80 border border-emerald-500/50 rounded-lg px-3 py-0.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 w-64"
+                    placeholder="Project name"
+                  />
+                </div>
+              ) : (
+                <h2
+                  className="text-lg font-bold text-slate-100 tracking-wide drop-shadow-md cursor-pointer hover:text-emerald-300 transition-colors group flex items-center gap-2"
+                  onDoubleClick={handleTitleDoubleClick}
+                  title="Double-click to rename"
+                >
+                  {displayName}
+                  <Pencil className="w-3 h-3 text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </h2>
+              )}
+              {!isEditingTitle && activeProjectType && (
                 <span className="text-[10px] text-violet-400 bg-violet-500/10 border border-violet-500/20 px-2 py-0.5 rounded font-mono uppercase tracking-widest">{activeProjectType}</span>
               )}
               <span className={`${saveStatusColor} text-[10px] uppercase font-mono tracking-widest px-2 py-0.5 rounded border`}>{saveStatusText}</span>
             </div>
             <span className="text-xs text-slate-500 font-mono truncate max-w-xs">
-              {activeProjectAddress ?? (id ? `ID: ${id}` : 'No project loaded')}
+              {activeProjectAddress ?? (activeProjectId ? `ID: ${activeProjectId}` : 'No project — save to create one')}
             </span>
           </div>
         </div>
@@ -193,7 +295,7 @@ export default function TopNavigationBar({ onHelpOpen }: { onHelpOpen?: () => vo
              aria-label="Save Project"
              className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-500/20 hover:shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] border border-emerald-500/30 backdrop-blur-md"
            >
-             <Save className="w-4 h-4" /> Save
+             <Save className="w-4 h-4" /> {isDraft ? 'Save Project' : 'Save'}
            </button>
         </div>
 
@@ -204,6 +306,138 @@ export default function TopNavigationBar({ onHelpOpen }: { onHelpOpen?: () => vo
 
       {/* Asset Search Modal */}
       <AssetSearch isOpen={showSearch} onClose={() => setShowSearch(false)} />
+
+      {/* Save-as-Project Modal (shown in draft mode) */}
+      {showSaveModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 pointer-events-auto" onMouseDown={e => e.stopPropagation()}>
+          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setShowSaveModal(false)} />
+          <div className="relative w-full max-w-lg glass-panel rounded-[2.5rem] border border-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-300" onMouseDown={e => e.stopPropagation()}>
+            <button onClick={() => setShowSaveModal(false)} className="absolute top-6 right-6 p-2 rounded-full bg-slate-900 border border-slate-800 text-slate-500 hover:text-white transition-colors z-50">
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="p-10">
+              <div className="mb-8">
+                <div className="flex gap-1.5 mb-6">
+                  {[1, 2].map(s => (
+                    <div key={s} className={`h-1.5 flex-1 rounded-full transition-all ${saveStep >= s ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.3)]' : 'bg-slate-800'}`} />
+                  ))}
+                </div>
+                <h2 className="text-3xl font-extrabold text-white tracking-tight">
+                  {saveStep === 1 ? 'Save as New Project' : 'Project Location'}
+                </h2>
+                <p className="text-slate-400 font-medium mt-1">
+                  {saveStep === 1
+                    ? 'Create a workspace to save your drawing.'
+                    : 'Optional — add a location for this project.'}
+                </p>
+              </div>
+
+              <div className="space-y-6">
+                {saveStep === 1 && (
+                  <div className="animate-in slide-in-from-right-4 fade-in duration-500">
+                    <div className="mb-6">
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Project Name</label>
+                      <div className="relative">
+                        <Briefcase className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                        <input
+                          value={saveName}
+                          onChange={e => setSaveName(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter' && saveName.trim()) setSaveStep(2); }}
+                          placeholder="e.g. Henderson Office HVAC"
+                          className="w-full bg-slate-900/80 border border-slate-700/50 rounded-2xl py-3.5 pl-12 pr-4 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all font-medium"
+                          autoFocus
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <button
+                        onClick={() => setSaveType('Residential')}
+                        className={`p-5 rounded-2xl border transition-all flex flex-col items-center gap-2 ${saveType === 'Residential' ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-700'}`}
+                      >
+                        <Home className="w-5 h-5" />
+                        <span className="font-bold text-sm">Residential</span>
+                      </button>
+                      <button
+                        onClick={() => setSaveType('Commercial')}
+                        className={`p-5 rounded-2xl border transition-all flex flex-col items-center gap-2 ${saveType === 'Commercial' ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-700'}`}
+                      >
+                        <Building2 className="w-5 h-5" />
+                        <span className="font-bold text-sm">Commercial</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {saveStep === 2 && (
+                  <div className="animate-in slide-in-from-right-4 fade-in duration-500 space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Street Address</label>
+                      <div className="relative">
+                        <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                        <input
+                          value={saveAddress}
+                          onChange={e => setSaveAddress(e.target.value)}
+                          placeholder="Main St"
+                          className="w-full bg-slate-900/80 border border-slate-700/50 rounded-2xl py-3.5 pl-12 pr-4 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all font-medium"
+                          autoFocus
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">City</label>
+                      <input
+                        value={saveCity}
+                        onChange={e => setSaveCity(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') handleSaveModalSubmit(); }}
+                        placeholder="Chicago"
+                        className="w-full bg-slate-900/80 border border-slate-700/50 rounded-2xl py-3.5 px-4 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all font-medium"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-10 flex justify-between gap-4">
+                {saveStep > 1 ? (
+                  <button
+                    onClick={() => setSaveStep(s => s - 1)}
+                    className="flex-1 py-4 rounded-2xl bg-slate-900 text-slate-400 font-bold hover:text-white transition-all flex items-center justify-center gap-2"
+                  >
+                    Back
+                  </button>
+                ) : (
+                  <Link
+                    to="/dashboard"
+                    onClick={() => setShowSaveModal(false)}
+                    className="flex-1 py-4 rounded-2xl bg-slate-900 text-slate-400 font-bold hover:text-white transition-all flex items-center justify-center gap-2"
+                  >
+                    Go to Projects
+                  </Link>
+                )}
+
+                {saveStep < 2 ? (
+                  <button
+                    disabled={!saveName.trim()}
+                    onClick={() => setSaveStep(2)}
+                    className="flex-[2] py-4 rounded-2xl bg-slate-100 text-slate-950 font-bold hover:shadow-[0_0_20px_rgba(255,255,255,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+                  >
+                    Continue <ArrowRight className="w-5 h-5" />
+                  </button>
+                ) : (
+                  <button
+                    disabled={!saveName.trim()}
+                    onClick={handleSaveModalSubmit}
+                    className="flex-[2] py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+                  >
+                    <Check className="w-5 h-5" /> Create &amp; Save
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

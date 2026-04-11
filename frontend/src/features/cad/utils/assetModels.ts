@@ -894,7 +894,7 @@ export function createPipeModel(
   const wf = showWireframe;
   const radius = (diameterIn / 2) / 12; // inches to feet
 
-  let color = Colors.pvcWhite;
+  let color: number = Colors.pvcWhite;
   let metalness = 0.1;
   let roughness = 0.5;
 

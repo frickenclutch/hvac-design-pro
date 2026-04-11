@@ -10,7 +10,7 @@ import {
   calculateWholeHouse, tonnageFromBtu, createDefaultRoom, createDefaultConditions, GLASS_PRESETS,
 } from '../engines/manualJ';
 import { lookupByZip } from '../engines/ashraeWeather';
-import { convertCadRoomsToManualJ, convertAllFloorsToManualJ } from '../engines/cadToManualJ';
+import { convertAllFloorsToManualJ } from '../engines/cadToManualJ';
 import { generateCadFloorFromManualJ, type LayoutAlgorithm } from '../engines/manualJToCad';
 import { useCadStore } from '../features/cad/store/useCadStore';
 import RetailerFinderPanel from '../features/retailer/components/RetailerFinderPanel';

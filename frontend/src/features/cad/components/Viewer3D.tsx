@@ -8,7 +8,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { X, RotateCcw, Grid3x3, Sun, Eye, EyeOff, Download, Upload, Thermometer } from 'lucide-react';
 import { useCadStore } from '../store/useCadStore';
 import { useProjectStore } from '../../../stores/useProjectStore';
-import type { WallSegment, PipeSegment } from '../store/useCadStore';
+import type { WallSegment } from '../store/useCadStore';
 import { fmtLength, fmtArea } from '../../../utils/units';
 import {
   createDoorModel,
