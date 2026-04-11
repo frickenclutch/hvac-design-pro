@@ -347,8 +347,8 @@ interface CadState {
   isSaving: boolean;
   saveError: string | null;
 
-  setProjectId: (id: string) => void;
-  setDrawingId: (id: string) => void;
+  setProjectId: (id: string | null) => void;
+  setDrawingId: (id: string | null) => void;
   markDirty: () => void;
   markSaved: (drawingId: string) => void;
   setSaving: (saving: boolean) => void;

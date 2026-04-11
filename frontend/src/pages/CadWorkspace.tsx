@@ -42,12 +42,17 @@ export default function CadWorkspace() {
 
     const store = useCadStore.getState();
 
-    if (projectId) {
-      // Set the projectId on the CAD store so auto-save targets the right key
-      store.setProjectId(projectId);
+    // Reset to a clean slate FIRST — prevents data from a previous project
+    // bleeding into this one. Each project is its own entity.
+    store.loadDrawing({});
+    store.setProjectId(projectId || null);
+    store.setDrawingId(null);
 
-      // Load saved drawing from localStorage / D1
+    if (projectId) {
+      // Load this project's saved drawing from localStorage / D1
       loadDrawing(projectId).then((saved) => {
+        // Guard: only apply if we're still on the same project
+        if (loadedProjectRef.current !== (projectId ?? '__draft__')) return;
         if (saved?.canvasJson) {
           useCadStore.getState().loadDrawing(saved.canvasJson);
           if (saved.id) useCadStore.getState().setDrawingId(saved.id);
