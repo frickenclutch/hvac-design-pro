@@ -28,8 +28,8 @@ export function useAutoSave() {
         localStorage.setItem(`hvac_cad_${projectId || 'draft'}`, JSON.stringify(data));
       } catch {}
 
-      // Save to D1 if we have a project
-      if (!projectId) {
+      // Save to D1 if we have a project AND a real backend URL
+      if (!projectId || !import.meta.env.VITE_API_BASE_URL) {
         markSaved(drawingId || 'local');
         return;
       }
@@ -70,15 +70,19 @@ export function useAutoSave() {
 }
 
 export async function loadDrawing(projectId: string): Promise<any | null> {
-  // Try D1 first
-  try {
-    const { drawings } = await api.listDrawings(projectId);
-    if (drawings.length > 0) {
-      const drawing = await api.getDrawing(drawings[0].id);
-      return drawing;
+  // Only attempt D1 API when a real backend URL is configured.
+  // Without it, api.ts falls back to a hardcoded Workers URL that may
+  // return 401 and trigger a hard redirect to /login — breaking navigation.
+  if (import.meta.env.VITE_API_BASE_URL) {
+    try {
+      const { drawings } = await api.listDrawings(projectId);
+      if (drawings.length > 0) {
+        const drawing = await api.getDrawing(drawings[0].id);
+        return drawing;
+      }
+    } catch (err) {
+      console.warn('D1 load failed, trying localStorage:', err);
     }
-  } catch (err) {
-    console.warn('D1 load failed, trying localStorage:', err);
   }
 
   // Fall back to localStorage

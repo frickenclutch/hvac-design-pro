@@ -41,7 +41,6 @@ class ApiClient {
 
     if (res.status === 401) {
       this.setToken(null);
-      window.location.href = '/login';
       throw new Error('Session expired');
     }
 
