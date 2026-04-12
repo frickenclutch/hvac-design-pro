@@ -5,16 +5,23 @@ export type UIDensity = 'compact' | 'comfortable' | 'spacious';
 export type UnitSystem = 'imperial' | 'metric';
 export type AccentColor = 'emerald' | 'sky' | 'violet' | 'amber' | 'rose';
 
+export interface ToolboxPosition {
+  x: number;   // px from left edge of viewport
+  y: number;   // px from top edge of viewport
+}
+
 export interface PanelSizes {
   propertiesWidth: number;   // px — right-side property inspector
   layersWidth: number;       // px — bottom-right layer manager
   toolboxScale: number;      // 0.75–1.25 scale factor for tool buttons
+  toolboxPos: ToolboxPosition; // last floating position of the toolbox
 }
 
 export const DEFAULT_PANEL_SIZES: PanelSizes = {
   propertiesWidth: 320,
   layersWidth: 320,
   toolboxScale: 1,
+  toolboxPos: { x: 24, y: -1 },  // y=-1 signals "auto-center vertically"
 };
 
 export interface UserPreferences {
@@ -84,7 +91,11 @@ const defaults: UserPreferences = {
 function load(): UserPreferences {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? { ...defaults, ...JSON.parse(raw) } : defaults;
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw);
+    // Deep-merge panelSizes so new fields (e.g. toolboxPos) get defaults
+    const panelSizes = { ...DEFAULT_PANEL_SIZES, ...(parsed.panelSizes ?? {}) };
+    return { ...defaults, ...parsed, panelSizes };
   } catch {
     return defaults;
   }
