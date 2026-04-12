@@ -1,4 +1,6 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://hvac-api.c4-parent-account.workers.dev';
+// API base URL — set VITE_API_BASE_URL in environment (Cloudflare Pages / .env.local)
+// When unset, API calls go to same origin (Pages functions or local dev proxy)
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
 class ApiClient {
   private token: string | null = null;
@@ -6,15 +8,15 @@ class ApiClient {
   setToken(token: string | null) {
     this.token = token;
     if (token) {
-      localStorage.setItem('hvac_auth_token', token);
+      localStorage.setItem('hvac_session_token', token);
     } else {
-      localStorage.removeItem('hvac_auth_token');
+      localStorage.removeItem('hvac_session_token');
     }
   }
 
   getToken(): string | null {
     if (!this.token) {
-      this.token = localStorage.getItem('hvac_auth_token');
+      this.token = localStorage.getItem('hvac_session_token');
     }
     return this.token;
   }

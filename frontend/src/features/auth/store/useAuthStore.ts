@@ -68,13 +68,7 @@ function loadPersistedSession(): { token: string; user: User; org: Organisation 
 // ── API ────────────────────────────────────────────────────────────────────────
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
-/** True when we have a real backend URL configured (not just the static Pages origin). */
-const HAS_BACKEND = !!import.meta.env.VITE_API_BASE_URL;
-
 async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<{ data?: T; error?: string; status: number }> {
-  // If no backend is configured, skip the request entirely
-  if (!HAS_BACKEND) return { error: '__no_backend__', status: 0 };
-
   try {
     const token = localStorage.getItem(TOKEN_KEY);
     const headers: Record<string, string> = {
@@ -88,32 +82,9 @@ async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<{ data
     if (!res.ok) return { error: (body as { error?: string }).error || `HTTP ${res.status}`, status: res.status };
     return { data: body as T, status: res.status };
   } catch {
-    return { error: '__no_backend__', status: 0 };
+    return { error: 'Unable to reach server. Please check your connection and try again.', status: 0 };
   }
 }
-
-/** Check whether an error means "backend not available" (vs a real server error like 409 duplicate email). */
-function isBackendUnavailable(error: string | undefined): boolean {
-  return !error || error === '__no_backend__' || error.startsWith('Network error');
-}
-
-// ── Guest fallback ────────────────────────────────────────────────────────────
-const guestUser: User = {
-  id: 'guest',
-  email: 'guest@designpro.app',
-  role: 'admin',
-  firstName: 'Guest',
-  lastName: 'User',
-  isVerified: true,
-};
-
-const guestOrg: Organisation = {
-  id: 'org-default',
-  name: 'DesignPro',
-  type: 'individual',
-  slug: 'designpro',
-  regionCode: 'NA_ASHRAE',
-};
 
 // ── Store ──────────────────────────────────────────────────────────────────────
 interface AuthState {
@@ -127,7 +98,6 @@ interface AuthState {
 
   // Actions
   login: (email: string, password: string) => Promise<void>;
-  loginAsGuest: () => void;
   register: (data: { email: string; password: string; firstName: string; lastName: string; orgName?: string; orgType?: OrgType; regionCode?: RegionCode }) => Promise<void>;
   logout: () => void;
   setAuthenticated: (isAuthenticated: boolean) => void;
@@ -157,14 +127,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
 
     if (error || !data) {
-      // Fallback for offline/dev: if backend is unreachable, allow demo login
-      if (isBackendUnavailable(error)) {
-        const devUser: User = { id: 'user-dev', email, role: 'admin', firstName: email.split('@')[0], lastName: '', isVerified: true };
-        persistSession('dev-token', devUser, guestOrg);
-        set({ user: devUser, organisation: guestOrg, token: 'dev-token', isAuthenticated: true, authLoading: false, authError: null });
-        return;
-      }
-      set({ authLoading: false, authError: error || 'Login failed' });
+      set({ authLoading: false, authError: error || 'Login failed. Please try again.' });
       return;
     }
 
@@ -179,17 +142,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
   },
 
-  loginAsGuest: () => {
-    persistSession('guest-token', guestUser, guestOrg);
-    set({
-      user: guestUser,
-      organisation: guestOrg,
-      token: 'guest-token',
-      isAuthenticated: true,
-      authError: null,
-    });
-  },
-
   register: async (data) => {
     set({ authLoading: true, authError: null });
 
@@ -199,15 +151,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
 
     if (error || !resp) {
-      // Fallback for offline/dev
-      if (isBackendUnavailable(error)) {
-        const newUser: User = { id: 'user-new', email: data.email, role: 'admin', firstName: data.firstName, lastName: data.lastName, isVerified: true };
-        const newOrg: Organisation = { id: 'org-new', name: data.orgName || `${data.firstName}'s Workspace`, type: data.orgType || 'individual', slug: data.firstName.toLowerCase(), regionCode: data.regionCode || 'NA_ASHRAE' };
-        persistSession('dev-token', newUser, newOrg);
-        set({ user: newUser, organisation: newOrg, token: 'dev-token', isAuthenticated: true, authLoading: false, authError: null });
-        return;
-      }
-      set({ authLoading: false, authError: error || 'Registration failed' });
+      set({ authLoading: false, authError: error || 'Registration failed. Please try again.' });
       return;
     }
 
@@ -224,7 +168,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: () => {
     const token = get().token;
-    if (token && token !== 'guest-token' && token !== 'dev-token') {
+    if (token) {
       apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     }
     clearPersistedSession();
@@ -242,8 +186,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // Validate token with backend
     const { data, error } = await apiFetch<{ user: User; organisation: Organisation }>('/api/auth/me');
     if (error || !data) {
-      // Token expired or invalid — but don't log out if it's just a network error
-      if (!isBackendUnavailable(error)) {
+      // Token expired or server error → clear session and require re-login
+      // Network errors: keep session alive (offline-capable PWA)
+      if (error && !error.includes('Unable to reach server')) {
         clearPersistedSession();
         set({ user: null, organisation: null, token: null, isAuthenticated: false });
       }

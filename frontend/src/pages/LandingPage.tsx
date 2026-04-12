@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import {
   Compass, ArrowRight, Zap, Shield, Building2, Globe,
   PenTool, FileText, Wifi, WifiOff, Smartphone,
-  LayoutGrid, Calculator, Layers
+  LayoutGrid, Calculator, Layers, Play
 } from 'lucide-react';
 
 export default function LandingPage() {
@@ -58,10 +58,10 @@ export default function LandingPage() {
                 Start Free <ArrowRight className="w-4 h-4" />
               </Link>
               <Link
-                to="/login"
-                className="px-7 py-3.5 rounded-full font-bold text-slate-300 border border-slate-700 hover:border-slate-500 hover:text-white transition-all"
+                to="/demo"
+                className="flex items-center gap-2 px-7 py-3.5 rounded-full font-bold text-emerald-400 border border-emerald-500/30 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all"
               >
-                Sign In
+                <Play className="w-4 h-4 fill-current" /> Watch Demo
               </Link>
             </div>
           </div>

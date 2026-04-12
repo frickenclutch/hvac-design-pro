@@ -12,7 +12,7 @@ export const uploadRoutes = new Hono<{ Bindings: Env }>();
 uploadRoutes.post('/', async (c) => {
   const user = c.get('user');
   const formData = await c.req.formData();
-  const file = formData.get('file') as File;
+  const file = formData.get('file') as unknown as File;
   const purpose = (formData.get('purpose') as string) || 'attachment';
   const projectId = formData.get('projectId') as string | null;
 
@@ -84,7 +84,7 @@ uploadRoutes.delete('/:id', async (c) => {
 
   // Delete from R2 and D1
   await c.env.STORAGE.delete(record.r2_key as string);
-  await c.env.DB.prepare('DELETE FROM file_uploads WHERE id = ?').bind(id).run();
+  await c.env.DB.prepare('DELETE FROM file_uploads WHERE id = ? AND org_id = ?').bind(id, user.orgId).run();
 
   return c.json({ ok: true });
 });

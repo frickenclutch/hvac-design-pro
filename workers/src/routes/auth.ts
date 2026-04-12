@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { generateId } from '../utils/id';
+import { hashPassword, verifyPassword, isLegacyHash } from '../utils/crypto';
 
 interface Env {
   DB: D1Database;
@@ -8,7 +9,7 @@ interface Env {
 
 export const authRoutes = new Hono<{ Bindings: Env }>();
 
-// Register new user + org
+// ── Register new user + org ──────────────────────────────────────────────────
 authRoutes.post('/register', async (c) => {
   const body = await c.req.json();
   const { email, password, firstName, lastName, orgName, orgType, regionCode } = body;
@@ -17,10 +18,20 @@ authRoutes.post('/register', async (c) => {
     return c.json({ error: 'Missing required fields' }, 400);
   }
 
+  // Password strength: minimum 8 chars
+  if (password.length < 8) {
+    return c.json({ error: 'Password must be at least 8 characters' }, 400);
+  }
+
+  // Email format validation
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return c.json({ error: 'Invalid email format' }, 400);
+  }
+
   const db = c.env.DB;
 
   // Check if email already exists
-  const existing = await db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
+  const existing = await db.prepare('SELECT id FROM users WHERE email = ?').bind(email.toLowerCase().trim()).first();
   if (existing) {
     return c.json({ error: 'Email already registered' }, 409);
   }
@@ -29,12 +40,8 @@ authRoutes.post('/register', async (c) => {
   const userId = generateId();
   const slug = (orgName || `${firstName}-${lastName}`).toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50);
 
-  // Hash password (using Web Crypto API available in Workers)
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const passwordHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  // Hash password with PBKDF2 (salted, 100K iterations)
+  const passwordHash = await hashPassword(password);
 
   // Create org + user in a batch
   const batch = [
@@ -45,7 +52,7 @@ authRoutes.post('/register', async (c) => {
     db.prepare(
       `INSERT INTO users (id, org_id, email, password_hash, role, first_name, last_name, is_verified)
        VALUES (?, ?, ?, ?, 'admin', ?, ?, 1)`
-    ).bind(userId, orgId, email, passwordHash, firstName, lastName),
+    ).bind(userId, orgId, email.toLowerCase().trim(), passwordHash, firstName, lastName),
   ];
 
   await db.batch(batch);
@@ -61,32 +68,40 @@ authRoutes.post('/register', async (c) => {
 
   return c.json({
     token,
-    user: { id: userId, email, firstName, lastName, role: 'admin', isVerified: true },
+    user: { id: userId, email: email.toLowerCase().trim(), firstName, lastName, role: 'admin', isVerified: true },
     organisation: { id: orgId, name: orgName || `${firstName}'s Workspace`, type: orgType || 'individual', slug, regionCode: regionCode || 'NA_ASHRAE' }
   }, 201);
 });
 
-// Login
+// ── Login ────────────────────────────────────────────────────────────────────
 authRoutes.post('/login', async (c) => {
   const { email, password } = await c.req.json();
   if (!email || !password) return c.json({ error: 'Email and password required' }, 400);
 
   const db = c.env.DB;
+  const normalizedEmail = email.toLowerCase().trim();
 
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const passwordHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
+  // Fetch user with password hash (we verify in app, not in SQL)
   const user = await db.prepare(
     `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.org_id,
+            u.password_hash,
             o.name as org_name, o.org_type, o.slug, o.region_code
      FROM users u JOIN organisations o ON o.id = u.org_id
-     WHERE u.email = ? AND u.password_hash = ?`
-  ).bind(email, passwordHash).first();
+     WHERE u.email = ?`
+  ).bind(normalizedEmail).first();
 
-  if (!user) return c.json({ error: 'Invalid credentials' }, 401);
+  if (!user || !user.password_hash) return c.json({ error: 'Invalid credentials' }, 401);
+
+  // Verify password (supports both PBKDF2 and legacy SHA-256)
+  const valid = await verifyPassword(password, user.password_hash as string);
+  if (!valid) return c.json({ error: 'Invalid credentials' }, 401);
+
+  // If using legacy hash, upgrade to PBKDF2 transparently
+  if (isLegacyHash(user.password_hash as string)) {
+    const upgraded = await hashPassword(password);
+    await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+      .bind(upgraded, user.id).run();
+  }
 
   // Create session
   const token = generateId() + '-' + generateId();
@@ -110,7 +125,7 @@ authRoutes.post('/login', async (c) => {
   });
 });
 
-// Logout
+// ── Logout ───────────────────────────────────────────────────────────────────
 authRoutes.post('/logout', async (c) => {
   const authHeader = c.req.header('Authorization');
   if (authHeader?.startsWith('Bearer ')) {
@@ -120,7 +135,7 @@ authRoutes.post('/logout', async (c) => {
   return c.json({ ok: true });
 });
 
-// Get current session user
+// ── Get current session user ─────────────────────────────────────────────────
 authRoutes.get('/me', async (c) => {
   const authHeader = c.req.header('Authorization');
   if (!authHeader?.startsWith('Bearer ')) return c.json({ error: 'Unauthorized' }, 401);

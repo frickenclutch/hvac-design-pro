@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { SecurityBadge } from '../features/auth/components/SecurityComponents';
-import { Compass, Mail, Lock, ArrowRight, Eye, EyeOff, AlertCircle } from 'lucide-react';
+import { Compass, Mail, Lock, ArrowRight, Eye, EyeOff, AlertCircle, Play } from 'lucide-react';
 
 export default function AuthPage() {
-  const { login, loginAsGuest, authError, authLoading, clearError } = useAuthStore();
+  const { login, authError, authLoading, clearError } = useAuthStore();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -18,11 +18,6 @@ export default function AuthPage() {
     if (useAuthStore.getState().isAuthenticated) {
       navigate('/dashboard');
     }
-  };
-
-  const handleGuest = () => {
-    loginAsGuest();
-    navigate('/dashboard');
   };
 
   return (
@@ -141,12 +136,13 @@ export default function AuthPage() {
           </div>
 
           <div className="pt-10 mt-10 border-t border-slate-800 space-y-4">
-            <button
-              onClick={handleGuest}
-              className="w-full py-3.5 rounded-2xl border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 hover:bg-slate-800/50 transition-all font-bold text-sm tracking-tight"
+            <Link
+              to="/demo"
+              className="flex w-full items-center justify-center gap-2 py-3.5 rounded-2xl border border-emerald-500/30 text-emerald-400 hover:text-emerald-300 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all font-bold text-sm tracking-tight"
             >
-              Skip — explore tools without signing in
-            </button>
+              <Play className="w-4 h-4 fill-current" />
+              Watch Demo — See what DesignPro can do
+            </Link>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <span className="text-slate-500 text-sm font-medium">New to DesignPro?</span>
               <Link to="/onboarding" className="text-emerald-400 hover:text-emerald-300 font-bold text-sm tracking-tight border-b-2 border-emerald-500/20 hover:border-emerald-500 pb-0.5 transition-all">

@@ -5,6 +5,7 @@ import LandingPage from './pages/LandingPage';
 import OnboardingPage from './pages/OnboardingPage';
 import AuthPage from './pages/AuthPage';
 import TermsPage from './pages/TermsPage';
+import DemoPage from './pages/DemoPage';
 
 // Lazy-load heavy pages (Three.js, jsPDF, Fabric.js stay out of initial bundle)
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -43,7 +44,7 @@ function AppLayout() {
   const showSidebar = isAuthenticated && !isCadRoute;
 
   // Public pages that need full-page scroll (not locked in app shell)
-  const isPublicScrollPage = ['/', '/terms', '/login', '/onboarding', '/landing'].includes(location.pathname);
+  const isPublicScrollPage = ['/', '/terms', '/login', '/onboarding', '/landing', '/demo'].includes(location.pathname);
 
   return (
     <div className="flex flex-col md:flex-row bg-slate-950 text-slate-100 font-sans min-h-screen md:h-screen md:overflow-hidden">
@@ -154,10 +155,11 @@ function AppLayout() {
       <main id="main-content" role="main" className={`flex-1 relative overflow-y-auto ${isPublicScrollPage ? '' : 'md:overflow-hidden'} bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black`}>
         <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" /></div>}>
         <Routes>
-          {/* Sign-in landing — skip button available */}
+          {/* Public routes — authentication required to proceed past sign-in */}
           <Route path="/" element={isAuthenticated ? <Navigate to="/dashboard" /> : <AuthPage />} />
           <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" /> : <AuthPage />} />
           <Route path="/landing" element={<LandingPage />} />
+          <Route path="/demo" element={<DemoPage />} />
           <Route path="/onboarding" element={<OnboardingPage />} />
           <Route path="/terms" element={<TermsPage />} />
 
