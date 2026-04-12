@@ -28,8 +28,11 @@ export function useAutoSave() {
         localStorage.setItem(`hvac_cad_${projectId || 'draft'}`, JSON.stringify(data));
       } catch {}
 
-      // Save to D1 if we have a project AND a real backend URL
-      if (!projectId || !import.meta.env.VITE_API_BASE_URL) {
+      // Save to D1 if we have a project backed by the database.
+      // Locally-created projects (proj-*) only exist in localStorage — skip D1
+      // to avoid foreign-key violations in cad_drawings → projects.
+      const isLocalOnly = !projectId || projectId.startsWith('proj-') || !import.meta.env.VITE_API_BASE_URL;
+      if (isLocalOnly) {
         markSaved(drawingId || 'local');
         return;
       }
@@ -54,12 +57,10 @@ export function useAutoSave() {
           markSaved(result.id);
         }
       } catch (err: any) {
-        console.error('Auto-save failed:', err);
-        setSaveError(err.message || 'Save failed');
-        // Still mark as saved locally so we don't retry in a loop
-        // The local storage backup is our safety net
-      } finally {
-        setSaving(false);
+        console.warn('Auto-save D1 sync failed (localStorage backup is safe):', err.message);
+        // D1 save failed but localStorage already has the data — mark as saved
+        // so we don't show an error or retry in an infinite loop.
+        markSaved(drawingId || 'local');
       }
     }, 3000);
 
