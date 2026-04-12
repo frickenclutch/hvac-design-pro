@@ -1,0 +1,10 @@
+{
+  "name": "hvac-design-pro",
+  "private": true,
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

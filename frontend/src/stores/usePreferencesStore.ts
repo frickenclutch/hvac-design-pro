@@ -5,6 +5,18 @@ export type UIDensity = 'compact' | 'comfortable' | 'spacious';
 export type UnitSystem = 'imperial' | 'metric';
 export type AccentColor = 'emerald' | 'sky' | 'violet' | 'amber' | 'rose';
 
+export interface PanelSizes {
+  propertiesWidth: number;   // px — right-side property inspector
+  layersWidth: number;       // px — bottom-right layer manager
+  toolboxScale: number;      // 0.75–1.25 scale factor for tool buttons
+}
+
+export const DEFAULT_PANEL_SIZES: PanelSizes = {
+  propertiesWidth: 320,
+  layersWidth: 320,
+  toolboxScale: 1,
+};
+
 export interface UserPreferences {
   theme: ThemeMode;
   density: UIDensity;
@@ -19,6 +31,9 @@ export interface UserPreferences {
   showTooltips: boolean;
   autosave: boolean;
   animationsEnabled: boolean;
+
+  // CAD panel sizing
+  panelSizes: PanelSizes;
 
   // PDF & Print Customization
   pdfIncludeDrawing: boolean;
@@ -52,6 +67,7 @@ const defaults: UserPreferences = {
   showTooltips: true,
   autosave: true,
   animationsEnabled: true,
+  panelSizes: { ...DEFAULT_PANEL_SIZES },
   pdfIncludeDrawing: true,
   pdfIncludeRoomSchedule: true,
   pdfIncludeOpeningSchedule: true,

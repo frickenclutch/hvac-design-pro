@@ -1,15 +1,24 @@
 import React, { useRef, useState } from 'react';
-import { MousePointer2, Hand, SquarePen, LayoutGrid, DoorOpen, Wind, Ruler, Type, ScanLine, ImagePlus, Package, Thermometer, ChevronLeft, ChevronRight, Cylinder, GitBranch, Diamond } from 'lucide-react';
+import { MousePointer2, Hand, SquarePen, LayoutGrid, DoorOpen, Wind, Ruler, Type, ScanLine, ImagePlus, Package, Thermometer, ChevronLeft, ChevronRight, Cylinder, GitBranch, Diamond, Minus, Plus } from 'lucide-react';
 import { useCadStore } from '../store/useCadStore';
 import type { ToolType, UnderlayImage } from '../store/useCadStore';
+import { usePreferencesStore } from '../../../stores/usePreferencesStore';
 import AssetLibrary from './AssetLibrary';
 import BuildingScience from './BuildingScience';
 
 export default function Toolbox() {
   const { activeTool, setActiveTool, panelToolbox, setPanelToolbox, thermalOverlayEnabled, setThermalOverlayEnabled } = useCadStore();
+  const toolboxScale = usePreferencesStore(s => s.panelSizes.toolboxScale);
+  const updatePrefs = usePreferencesStore(s => s.update);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showAssetLibrary, setShowAssetLibrary] = useState(false);
   const [showBuildingScience, setShowBuildingScience] = useState(false);
+
+  const adjustScale = (delta: number) => {
+    const ps = usePreferencesStore.getState().panelSizes;
+    const next = Math.round(Math.min(1.25, Math.max(0.7, ps.toolboxScale + delta)) * 100) / 100;
+    updatePrefs({ panelSizes: { ...ps, toolboxScale: next } });
+  };
 
   const handleImportImage = () => {
     fileInputRef.current?.click();
@@ -105,7 +114,7 @@ export default function Toolbox() {
   }
 
   return (
-    <div className="absolute left-6 top-1/2 -translate-y-1/2 z-10">
+    <div className="absolute left-6 top-1/2 -translate-y-1/2 z-10" style={{ transform: `translateY(-50%) scale(${toolboxScale})`, transformOrigin: 'left center' }}>
       <div className="glass-panel rounded-2xl flex flex-col items-center py-4 gap-2 shadow-[0_0_40px_rgba(0,0,0,0.8)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/60 transition-all duration-300">
 
         {/* Collapse button */}
@@ -284,6 +293,25 @@ export default function Toolbox() {
           onChange={handleFileChange}
           className="hidden"
         />
+
+        {/* Toolbox size controls */}
+        <div className="w-8 h-px bg-slate-700/60 my-1 rounded-full" />
+        <div className="flex items-center gap-0.5 mx-2">
+          <button
+            onClick={() => adjustScale(-0.1)}
+            className="p-1 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800/80 transition-colors"
+            title="Shrink toolbox"
+          >
+            <Minus className="w-3 h-3" />
+          </button>
+          <button
+            onClick={() => adjustScale(0.1)}
+            className="p-1 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800/80 transition-colors"
+            title="Grow toolbox"
+          >
+            <Plus className="w-3 h-3" />
+          </button>
+        </div>
 
       </div>
 

@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useCadStore } from '../store/useCadStore';
 import { Eye, EyeOff, Lock, Unlock, Layers, Target, Circle, CheckCircle2 } from 'lucide-react';
+import { usePreferencesStore } from '../../../stores/usePreferencesStore';
+import PanelResizeHandle from './PanelResizeHandle';
 
 export default function LayerManager() {
   const [open, setOpen] = useState(true);
@@ -28,10 +30,17 @@ export default function LayerManager() {
     );
   }
 
+  const panelWidth = usePreferencesStore(s => s.panelSizes.layersWidth);
+  const updatePrefs = usePreferencesStore(s => s.update);
+  const handleResize = useCallback((w: number) => {
+    updatePrefs({ panelSizes: { ...usePreferencesStore.getState().panelSizes, layersWidth: w } });
+  }, [updatePrefs]);
+
   // ---- Expanded panel ----
   return (
-    <div className="absolute right-6 bottom-6 w-80 z-10 pointer-events-auto">
-      <div className="glass-panel rounded-2xl flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.6)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/70 overflow-hidden transition-all duration-500">
+    <div className="absolute right-6 bottom-6 z-10 pointer-events-auto" style={{ width: panelWidth }}>
+      <div className="glass-panel rounded-2xl flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.6)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/70 overflow-hidden transition-[background,border,shadow] duration-500 relative">
+        <PanelResizeHandle edge="left" currentWidth={panelWidth} onResize={handleResize} minWidth={220} maxWidth={520} />
 
         {/* Header */}
         <div className="px-4 py-3 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between">

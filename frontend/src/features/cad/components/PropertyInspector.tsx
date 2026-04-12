@@ -1,8 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useCadStore } from '../store/useCadStore';
 import type { WallMaterial, Opening, HvacUnit, PipeSegment, PipeMaterial, DetectedRoom, UnderlayImage, Annotation, DuctSegment, DuctFitting, DuctShape, DuctMaterial, DuctSide, DuctRole, FittingType } from '../store/useCadStore';
 import { fmtLength, fmtArea, fmtTemp, smallLengthUnit } from '../../../utils/units';
 import { Settings2, Layers, Ruler, Triangle, Wind, DoorOpen, LayoutGrid, ScanLine, ImageIcon, Lock, Unlock, Trash2, Type, RotateCcw, Bold, Italic, AlignLeft, AlignCenter, AlignRight, ChevronLeft, ChevronRight, GitBranch, Diamond } from 'lucide-react';
+import { usePreferencesStore } from '../../../stores/usePreferencesStore';
+import PanelResizeHandle from './PanelResizeHandle';
 
 /** Extract name from a Fabric object (all CAD objects carry a .name string). */
 function fabricName(obj: unknown): string | undefined {
@@ -92,6 +94,12 @@ export default function PropertyInspector() {
     return (floor.ductFittings ?? []).find(f => f.id === id) ?? null;
   }, [selectedObject, floor]);
 
+  const panelWidth = usePreferencesStore(s => s.panelSizes.propertiesWidth);
+  const updatePrefs = usePreferencesStore(s => s.update);
+  const handleResize = useCallback((w: number) => {
+    updatePrefs({ panelSizes: { ...usePreferencesStore.getState().panelSizes, propertiesWidth: w } });
+  }, [updatePrefs]);
+
   const headerText = selectedWall ? 'Wall Selected' : selectedOpening ? 'Opening Selected' : selectedHvac ? 'HVAC Unit Selected' : selectedPipe ? 'Pipe Selected' : selectedDuct ? 'Duct Segment Selected' : selectedFitting ? 'Duct Fitting Selected' : selectedUnderlay ? 'Underlay Selected' : selectedAnnotation ? 'Label Selected' : selectedObject ? 'Object Selected' : 'Canvas Settings';
 
   if (!panelProperties) {
@@ -109,8 +117,9 @@ export default function PropertyInspector() {
   }
 
   return (
-    <div className="absolute right-6 top-24 bottom-6 w-80 z-10 pointer-events-none">
-      <div className="h-full glass-panel rounded-2xl flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.6)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/70 overflow-hidden pointer-events-auto transition-all duration-500 transform origin-right">
+    <div className="absolute right-6 top-24 bottom-6 z-10 pointer-events-none" style={{ width: panelWidth }}>
+      <div className="h-full glass-panel rounded-2xl flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.6)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/70 overflow-hidden pointer-events-auto transition-[background,border,shadow] duration-500 transform origin-right relative">
+        <PanelResizeHandle edge="left" currentWidth={panelWidth} onResize={handleResize} minWidth={220} maxWidth={520} />
 
         {/* Header */}
         <div className="p-5 border-b border-slate-800 bg-slate-900/50">
