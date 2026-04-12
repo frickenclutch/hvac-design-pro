@@ -14,8 +14,19 @@ export default function LayerManager() {
     toggleLayerVisibility,
     toggleLayerLock,
     setLayerOpacity,
-    soloLayer
+    soloLayer,
+    is3DViewOpen,
   } = useCadStore();
+
+  // Hooks must be called unconditionally (React Rules of Hooks)
+  const panelWidth = usePreferencesStore(s => s.panelSizes?.layersWidth ?? 320);
+  const updatePrefs = usePreferencesStore(s => s.update);
+  const handleResize = useCallback((w: number) => {
+    updatePrefs({ panelSizes: { ...usePreferencesStore.getState().panelSizes, layersWidth: w } });
+  }, [updatePrefs]);
+
+  // ---- Hidden in 3D view ----
+  if (is3DViewOpen) return null;
 
   // ---- Collapsed toggle button ----
   if (!open) {
@@ -29,12 +40,6 @@ export default function LayerManager() {
       </button>
     );
   }
-
-  const panelWidth = usePreferencesStore(s => s.panelSizes.layersWidth);
-  const updatePrefs = usePreferencesStore(s => s.update);
-  const handleResize = useCallback((w: number) => {
-    updatePrefs({ panelSizes: { ...usePreferencesStore.getState().panelSizes, layersWidth: w } });
-  }, [updatePrefs]);
 
   // ---- Expanded panel ----
   return (

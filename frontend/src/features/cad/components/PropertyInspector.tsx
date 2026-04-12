@@ -30,7 +30,7 @@ const HVAC_TYPE_LABELS: Record<string, string> = {
 const uFactor = (r: number) => (r > 0 ? (1 / r).toFixed(4) : '—');
 
 export default function PropertyInspector() {
-  const { selectedObject, selectedWallId, setSelectedWallId, setSelectedObject, canvas, walls, updateWall, removeWall, updateOpening, removeOpening, updateHvacUnit, removeHvacUnit, removePipe, updateUnderlay, removeUnderlay, updateAnnotation, removeAnnotation, markDirty, floors, activeFloorId, panelProperties, setPanelProperties } = useCadStore();
+  const { selectedObject, selectedWallId, setSelectedWallId, setSelectedObject, canvas, walls, updateWall, removeWall, updateOpening, removeOpening, updateHvacUnit, removeHvacUnit, removePipe, updateUnderlay, removeUnderlay, updateAnnotation, removeAnnotation, markDirty, floors, activeFloorId, panelProperties, setPanelProperties, is3DViewOpen } = useCadStore();
 
   const floor = floors.find(f => f.id === activeFloorId);
 
@@ -101,6 +101,9 @@ export default function PropertyInspector() {
   }, [updatePrefs]);
 
   const headerText = selectedWall ? 'Wall Selected' : selectedOpening ? 'Opening Selected' : selectedHvac ? 'HVAC Unit Selected' : selectedPipe ? 'Pipe Selected' : selectedDuct ? 'Duct Segment Selected' : selectedFitting ? 'Duct Fitting Selected' : selectedUnderlay ? 'Underlay Selected' : selectedAnnotation ? 'Label Selected' : selectedObject ? 'Object Selected' : 'Canvas Settings';
+
+  // Hidden in 3D view
+  if (is3DViewOpen) return null;
 
   if (!panelProperties) {
     return (

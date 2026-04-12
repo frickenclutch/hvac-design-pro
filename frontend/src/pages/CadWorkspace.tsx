@@ -81,10 +81,14 @@ export default function CadWorkspace() {
       <Toolbox />
 
       {/* Right side floating properties panel */}
-      <PropertyInspector />
+      <ErrorBoundary label="Property Inspector">
+        <PropertyInspector />
+      </ErrorBoundary>
 
       {/* Layer visibility controls */}
-      <LayerManager />
+      <ErrorBoundary label="Layer Manager">
+        <LayerManager />
+      </ErrorBoundary>
 
       {/* Live wall length / selection HUD overlay */}
       <WallLengthOverlay />
