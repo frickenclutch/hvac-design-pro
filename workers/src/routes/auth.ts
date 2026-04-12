@@ -1,10 +1,12 @@
 import { Hono } from 'hono';
 import { generateId } from '../utils/id';
 import { hashPassword, verifyPassword, isLegacyHash } from '../utils/crypto';
+import { sendEmail, buildWelcomeEmail } from '../utils/email';
 
 interface Env {
   DB: D1Database;
   STORAGE: R2Bucket;
+  RESEND_API_KEY?: string;
 }
 
 export const authRoutes = new Hono<{ Bindings: Env }>();
@@ -65,6 +67,13 @@ authRoutes.post('/register', async (c) => {
   await db.prepare(
     'INSERT INTO sessions (id, user_id, org_id, token, expires_at) VALUES (?, ?, ?, ?, ?)'
   ).bind(sessionId, userId, orgId, token, expiresAt).run();
+
+  // Send welcome email (fire-and-forget — don't block the registration response)
+  const welcomeEmail = buildWelcomeEmail(firstName);
+  welcomeEmail.to = email.toLowerCase().trim();
+  c.executionCtx.waitUntil(
+    sendEmail(c.env.RESEND_API_KEY, welcomeEmail)
+  );
 
   return c.json({
     token,

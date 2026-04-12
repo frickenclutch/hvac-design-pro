@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { ArrowLeft, Save, Undo2, Redo2, Download, Zap, Box, Search, ChevronDown, ChevronUp, HelpCircle, Pencil, X, ArrowRight, Building2, Home, MapPin, Briefcase, Check } from 'lucide-react';
 import AssetSearch from './AssetSearch';
 import ErrorBoundary from '../../../components/ErrorBoundary';
+import UserAvatarMenu from '../../../components/UserAvatarMenu';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useCadStore } from '../store/useCadStore';
 import { useAuthStore } from '../../auth/store/useAuthStore';
@@ -270,6 +271,7 @@ export default function TopNavigationBar({ onHelpOpen }: { onHelpOpen?: () => vo
 
         {/* Right Side */}
         <div className="flex items-center gap-3">
+           <UserAvatarMenu size={34} compact />
            <button
              onClick={() => setPanelNavBar(false)}
              className="p-2 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800/80 transition-colors"

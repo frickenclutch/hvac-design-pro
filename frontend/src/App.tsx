@@ -6,6 +6,7 @@ import OnboardingPage from './pages/OnboardingPage';
 import AuthPage from './pages/AuthPage';
 import TermsPage from './pages/TermsPage';
 import DemoPage from './pages/DemoPage';
+import UserAvatarMenu from './components/UserAvatarMenu';
 
 // Lazy-load heavy pages (Three.js, jsPDF, Fabric.js stay out of initial bundle)
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -61,6 +62,7 @@ function AppLayout() {
               className="p-2.5 rounded-xl hover:bg-slate-800/50 text-slate-400 hover:text-emerald-400 min-w-[44px] min-h-[44px] flex items-center justify-center">
               <Search className="w-5 h-5" />
             </button>
+            <UserAvatarMenu size={32} compact />
             <button onClick={() => setMobileNavOpen(!mobileNavOpen)}
               className="p-2.5 rounded-xl hover:bg-slate-800/50 text-slate-400 min-w-[44px] min-h-[44px] flex items-center justify-center">
               {mobileNavOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -136,13 +138,14 @@ function AppLayout() {
                 </kbd>
               )}
             </button>
-            <button
-              onClick={logout}
-              className="flex w-full items-center gap-2.5 p-3 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors group min-h-[44px]"
-            >
-              <LogOut className="w-5 h-5 flex-shrink-0 group-hover:scale-110 transition-transform" />
-              {!sidebarCollapsed && <span className="font-medium text-sm">Sign Out</span>}
-            </button>
+            <div className={`flex ${sidebarCollapsed ? 'justify-center' : 'px-1.5'} py-1`}>
+              <UserAvatarMenu
+                size={sidebarCollapsed ? 34 : 32}
+                showName={!sidebarCollapsed}
+                compact={sidebarCollapsed}
+                dropUp
+              />
+            </div>
           </div>
         </nav>
       )}

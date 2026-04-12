@@ -11,6 +11,7 @@ export interface Env {
   DB: D1Database;
   STORAGE: R2Bucket;
   ENVIRONMENT: string;
+  RESEND_API_KEY?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
