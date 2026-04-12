@@ -144,6 +144,7 @@ function AppLayout() {
                 showName={!sidebarCollapsed}
                 compact={sidebarCollapsed}
                 dropUp
+                align="left"
               />
             </div>
           </div>

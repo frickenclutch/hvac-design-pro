@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { Settings, LogOut, ChevronDown } from 'lucide-react';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
@@ -12,6 +13,8 @@ interface UserAvatarMenuProps {
   compact?: boolean;
   /** Dropdown opens upward (for sidebar bottom placement) */
   dropUp?: boolean;
+  /** Horizontal alignment of dropdown relative to trigger */
+  align?: 'left' | 'right';
   /** Additional CSS classes on the wrapper */
   className?: string;
 }
@@ -21,17 +24,82 @@ export default function UserAvatarMenu({
   showName = false,
   compact = false,
   dropUp = false,
+  align = 'right',
   className = '',
 }: UserAvatarMenuProps) {
   const { user, organisation, logout } = useAuthStore();
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+
+  // Calculate dropdown position relative to trigger
+  const updatePosition = useCallback(() => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const dropdownWidth = 256; // w-64
+    const gap = 8;
+
+    let top: number;
+    if (dropUp) {
+      // Position above the trigger; we'll adjust after measuring the dropdown
+      top = rect.top - gap;
+    } else {
+      top = rect.bottom + gap;
+    }
+
+    let left: number;
+    if (align === 'left') {
+      left = rect.left;
+    } else {
+      left = rect.right - dropdownWidth;
+    }
+
+    // Clamp horizontal: don't overflow left edge
+    if (left < 8) left = 8;
+    // Don't overflow right edge
+    if (left + dropdownWidth > window.innerWidth - 8) {
+      left = window.innerWidth - dropdownWidth - 8;
+    }
+
+    setPos({ top, left });
+  }, [dropUp, align]);
+
+  // Recalc on open and on scroll/resize
+  useEffect(() => {
+    if (!open) return;
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [open, updatePosition]);
+
+  // After dropdown renders, adjust if dropUp so it sits above trigger
+  useEffect(() => {
+    if (!open || !dropUp || !dropdownRef.current || !triggerRef.current) return;
+    const dropdownHeight = dropdownRef.current.offsetHeight;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const gap = 8;
+    let top = rect.top - dropdownHeight - gap;
+    // Clamp: don't go above viewport
+    if (top < 8) top = 8;
+    setPos((prev) => ({ ...prev, top }));
+  }, [open, dropUp]);
 
   // Close on outside click
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (
+        triggerRef.current && !triggerRef.current.contains(target) &&
+        dropdownRef.current && !dropdownRef.current.contains(target)
+      ) {
+        setOpen(false);
+      }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -50,35 +118,18 @@ export default function UserAvatarMenu({
   const initials = `${user.firstName?.[0] ?? ''}${user.lastName?.[0] ?? ''}`.toUpperCase() || '?';
   const fullName = `${user.firstName} ${user.lastName}`.trim();
 
-  return (
-    <div ref={ref} className={`relative ${className}`}>
-      {/* Trigger */}
-      <button
-        onClick={() => setOpen(!open)}
-        className={`flex items-center gap-2 rounded-full transition-all hover:ring-2 hover:ring-emerald-500/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 ${open ? 'ring-2 ring-emerald-500/50' : ''}`}
-        aria-label="User menu"
-        title={compact ? fullName : undefined}
-      >
+  const dropdown = open
+    ? createPortal(
         <div
-          className="flex items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400 font-bold select-none border border-emerald-500/30 flex-shrink-0"
-          style={{ width: size, height: size, fontSize: size * 0.38 }}
-        >
-          {initials}
-        </div>
-        {showName && (
-          <>
-            <span className="text-sm font-medium text-slate-200 truncate max-w-[120px]">{user.firstName}</span>
-            <ChevronDown className={`w-3.5 h-3.5 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`} />
-          </>
-        )}
-      </button>
-
-      {/* Dropdown */}
-      {open && (
-        <div
-          className={`absolute z-[200] w-64 glass-panel rounded-xl border border-slate-700/60 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 ${
-            dropUp ? 'bottom-full mb-2' : 'top-full mt-2'
-          } right-0`}
+          ref={dropdownRef}
+          className="fixed z-[9999] w-64 rounded-xl border border-slate-700/60 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+          style={{
+            top: pos.top,
+            left: pos.left,
+            background: 'rgba(15, 23, 42, 0.95)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+          }}
         >
           {/* User info header */}
           <div className="px-4 py-3 border-b border-slate-800/60">
@@ -107,8 +158,36 @@ export default function UserAvatarMenu({
               <span className="font-medium">Sign Out</span>
             </button>
           </div>
+        </div>,
+        document.body
+      )
+    : null;
+
+  return (
+    <div className={`relative ${className}`}>
+      {/* Trigger */}
+      <button
+        ref={triggerRef}
+        onClick={() => setOpen(!open)}
+        className={`flex items-center gap-2 rounded-full transition-all hover:ring-2 hover:ring-emerald-500/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 ${open ? 'ring-2 ring-emerald-500/50' : ''}`}
+        aria-label="User menu"
+        title={compact ? fullName : undefined}
+      >
+        <div
+          className="flex items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400 font-bold select-none border border-emerald-500/30 flex-shrink-0"
+          style={{ width: size, height: size, fontSize: size * 0.38 }}
+        >
+          {initials}
         </div>
-      )}
+        {showName && (
+          <>
+            <span className="text-sm font-medium text-slate-200 truncate max-w-[120px]">{user.firstName}</span>
+            <ChevronDown className={`w-3.5 h-3.5 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+          </>
+        )}
+      </button>
+
+      {dropdown}
     </div>
   );
 }
