@@ -454,6 +454,7 @@ export const useCadStore = create<CadState>((set, get) => {
       set({
         floors: [...state.floors, newFloor],
         activeFloorId: newFloor.id,
+        isDirty: true,
       });
     },
 
@@ -469,6 +470,7 @@ export const useCadStore = create<CadState>((set, get) => {
           activeFloorId: activeStillExists
             ? s.activeFloorId
             : filtered[0].id,
+          isDirty: true,
         };
       }),
 
@@ -477,6 +479,7 @@ export const useCadStore = create<CadState>((set, get) => {
     updateFloor: (id, patch) =>
       set((s) => ({
         floors: s.floors.map((f) => (f.id === id ? { ...f, ...patch } : f)),
+        isDirty: true,
       })),
 
     // ── Backwards-compat wall accessors ───────────────────────────────────────
