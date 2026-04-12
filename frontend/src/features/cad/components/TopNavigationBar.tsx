@@ -14,8 +14,9 @@ const Viewer3D = lazy(() => import('./Viewer3D'));
 export default function TopNavigationBar({ onHelpOpen }: { onHelpOpen?: () => void }) {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { canvas, undo, redo, isDirty, isSaving, lastSavedAt, saveError, panelNavBar, setPanelNavBar } = useCadStore();
-  const [show3D, setShow3D] = useState(false);
+  const { canvas, undo, redo, isDirty, isSaving, lastSavedAt, saveError, panelNavBar, setPanelNavBar, setIs3DViewOpen } = useCadStore();
+  const [show3D, setShow3DLocal] = useState(false);
+  const setShow3D = (v: boolean) => { setShow3DLocal(v); setIs3DViewOpen(v); };
   const [showSearch, setShowSearch] = useState(false);
   const { user, organisation } = useAuthStore();
   const { activeProjectName, activeProjectType, activeProjectAddress, renameProject, createProject, activeProjectId } = useProjectStore();

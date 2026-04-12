@@ -10,7 +10,7 @@ import BuildingScience from './BuildingScience';
 const EDGE_MARGIN = 8;
 
 export default function Toolbox() {
-  const { activeTool, setActiveTool, panelToolbox, setPanelToolbox, thermalOverlayEnabled, setThermalOverlayEnabled } = useCadStore();
+  const { activeTool, setActiveTool, panelToolbox, setPanelToolbox, thermalOverlayEnabled, setThermalOverlayEnabled, is3DViewOpen } = useCadStore();
   const toolboxScale = usePreferencesStore(s => s.panelSizes.toolboxScale ?? 1);
   const savedPos = usePreferencesStore(s => s.panelSizes.toolboxPos ?? { x: 24, y: -1 });
   const updatePrefs = usePreferencesStore(s => s.update);
@@ -164,6 +164,11 @@ export default function Toolbox() {
     };
     reader.readAsDataURL(file);
   };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // HIDDEN when 3D viewer is open — toolbox only applies to 2D canvas
+  // ═══════════════════════════════════════════════════════════════════════════
+  if (is3DViewOpen) return null;
 
   // ═══════════════════════════════════════════════════════════════════════════
   // COLLAPSED STATE — slim pill snapped to far left edge of browser

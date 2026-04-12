@@ -353,6 +353,8 @@ interface CadState {
   panelProperties: boolean;
   panelFloors: boolean;
   panelNavBar: boolean;
+  is3DViewOpen: boolean;
+  setIs3DViewOpen: (open: boolean) => void;
   setPanelToolbox: (show: boolean) => void;
   setPanelProperties: (show: boolean) => void;
   setPanelFloors: (show: boolean) => void;
@@ -521,6 +523,8 @@ export const useCadStore = create<CadState>((set, get) => {
     panelProperties: true,
     panelFloors: true,
     panelNavBar: true,
+    is3DViewOpen: false,
+    setIs3DViewOpen: (open) => set({ is3DViewOpen: open }),
     setPanelToolbox: (show) => set({ panelToolbox: show }),
     setPanelProperties: (show) => set({ panelProperties: show }),
     setPanelFloors: (show) => set({ panelFloors: show }),

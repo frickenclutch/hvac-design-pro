@@ -85,8 +85,8 @@ export default function Viewer3D({ isOpen, onClose }: Viewer3DProps) {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [thermalMode, setThermalMode] = useState(false);
-  const [roofStyle, setRoofStyle] = useState<'none' | 'flat' | 'gable' | 'hip'>('none');
-  const [roofPitch, setRoofPitch] = useState<number>(4);
+  // Roof options removed — reserved for future iteration
+  const roofStyle = 'none' as const;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importedGroupsRef = useRef<THREE.Group[]>([]);
 
@@ -512,104 +512,14 @@ export default function Viewer3D({ isOpen, onClose }: Viewer3DProps) {
         scene.add(group);
       });
 
-      // ── Procedural Roof ──────────────────────────────────────────────────────────
-      if (roofStyle !== 'none' && isFinite(minX) && floorsToShow.length > 0) {
-        const maxFloor = floorsToShow.reduce((prev, current) => (prev.index > current.index) ? prev : current, floorsToShow[0]);
-        const roofBaseY = (maxFloor.index + 1) * maxFloor.heightFt;
-        const roofW = maxX - minX + 2; // 1ft overhang each side
-        const roofD = maxZ - minZ + 2;
-        const cx = (minX + maxX) / 2;
-        const cz = (minZ + maxZ) / 2;
-
-        const roofGroup = new THREE.Group();
-        const roofMat = new THREE.MeshStandardMaterial({
-          color: 0x475569, // Slate 600
-          roughness: 0.9,
-          wireframe: showWireframe,
-        });
-
-        if (roofStyle === 'flat') {
-          const rMesh = new THREE.Mesh(new THREE.BoxGeometry(roofW, 0.5, roofD), roofMat);
-          rMesh.position.set(cx, roofBaseY + 0.25, cz);
-          rMesh.castShadow = showShadows;
-          rMesh.receiveShadow = showShadows;
-          roofGroup.add(rMesh);
-        } else if (roofStyle === 'gable') {
-          const roofHeight = (roofW / 2) * (roofPitch / 12);
-          const shape = new THREE.Shape();
-          shape.moveTo(-roofW / 2, 0);
-          shape.lineTo(0, roofHeight);
-          shape.lineTo(roofW / 2, 0);
-          shape.lineTo(-roofW / 2, 0);
-          const extrudeSettings = { depth: roofD, bevelEnabled: false };
-          const rGeo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-          const rMesh = new THREE.Mesh(rGeo, roofMat);
-          rMesh.position.set(cx, roofBaseY, cz - roofD / 2);
-          rMesh.castShadow = showShadows;
-          rMesh.receiveShadow = showShadows;
-          roofGroup.add(rMesh);
-        } else if (roofStyle === 'hip') {
-          const roofHeight = (Math.min(roofW, roofD) / 2) * (roofPitch / 12);
-          const rGeo = new THREE.BufferGeometry();
-          const ridgeLen = Math.max(0, roofW - roofD);
-          if (roofW >= roofD) {
-            const ridgeX1 = -ridgeLen / 2;
-            const ridgeX2 = ridgeLen / 2;
-            const vertices = new Float32Array([
-              -roofW/2, 0, -roofD/2,  roofW/2, 0, -roofD/2,
-              roofW/2, 0, roofD/2,   -roofW/2, 0, roofD/2,
-              ridgeX1, roofHeight, 0, ridgeX2, roofHeight, 0,
-            ]);
-            // CCW triangles
-            const indices = [
-              0, 5, 1,  0, 4, 5,
-              1, 5, 2,
-              2, 5, 4,  2, 4, 3,
-              3, 4, 0,
-              0, 1, 2,  0, 2, 3
-            ];
-            rGeo.setIndex(indices);
-            rGeo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-            rGeo.computeVertexNormals();
-            const rMesh = new THREE.Mesh(rGeo, roofMat);
-            rMesh.position.set(cx, roofBaseY, cz);
-            rMesh.castShadow = showShadows;
-            rMesh.receiveShadow = showShadows;
-            roofGroup.add(rMesh);
-          } else {
-            const ridgeZ1 = -Math.max(0, roofD - roofW) / 2;
-            const ridgeZ2 = Math.max(0, roofD - roofW) / 2;
-            const vertices = new Float32Array([
-              -roofW/2, 0, -roofD/2,  roofW/2, 0, -roofD/2,
-              roofW/2, 0, roofD/2,   -roofW/2, 0, roofD/2,
-              0, roofHeight, ridgeZ1, 0, roofHeight, ridgeZ2,
-            ]);
-            const indices = [
-              0, 4, 1,
-              1, 4, 5, 1, 5, 2,
-              2, 5, 3,
-              3, 5, 4, 3, 4, 0,
-              0, 1, 2, 0, 2, 3
-            ];
-            rGeo.setIndex(indices);
-            rGeo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-            rGeo.computeVertexNormals();
-            const rMesh = new THREE.Mesh(rGeo, roofMat);
-            rMesh.position.set(cx, roofBaseY, cz);
-            rMesh.castShadow = showShadows;
-            rMesh.receiveShadow = showShadows;
-            roofGroup.add(rMesh);
-          }
-        }
-        scene.add(roofGroup);
-      }
+      // Roof rendering removed — reserved for future iteration
 
       dirtyRef.current = true;
       return { minX, maxX, minZ, maxZ };
     },
     // Stabilize visibleFloors Set by converting to sorted string key
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [floors, pxPerFt, showWireframe, showShadows, showAllFloors, [...visibleFloors].sort().join(','), thermalMode, roofStyle, roofPitch],
+    [floors, pxPerFt, showWireframe, showShadows, showAllFloors, [...visibleFloors].sort().join(','), thermalMode, roofStyle],
   );
 
   // ── Init Three.js ────────────────────────────────────────────────────────────
@@ -1043,32 +953,7 @@ export default function Viewer3D({ isOpen, onClose }: Viewer3DProps) {
               </button>
             ))}
 
-            <div className="flex flex-col gap-1.5 mt-3 pt-3 border-t border-slate-700/50">
-              <h3 className="text-xs font-semibold text-slate-400 mb-1 uppercase tracking-wider">Roof Model</h3>
-              <select
-                className="bg-slate-800 text-xs text-slate-200 rounded-lg px-2 py-1.5 border border-slate-700 outline-none focus:border-sky-500"
-                value={roofStyle}
-                onChange={(e) => setRoofStyle(e.target.value as any)}
-              >
-                <option value="none">No Roof</option>
-                <option value="flat">Flat Roof</option>
-                <option value="gable">Gable Roof</option>
-                <option value="hip">Hip Roof</option>
-              </select>
-              {roofStyle !== 'none' && roofStyle !== 'flat' && (
-                <div className="flex gap-2 items-center mt-1 px-1">
-                  <span className="text-xs text-slate-400">Pitch:</span>
-                  <input
-                    type="number"
-                    min="1" max="18"
-                    className="bg-slate-800 text-xs text-slate-200 rounded-md w-14 px-2 py-1 border border-slate-700 outline-none"
-                    value={roofPitch}
-                    onChange={(e) => setRoofPitch(Number(e.target.value) || 4)}
-                  />
-                  <span className="text-xs text-slate-500">/12</span>
-                </div>
-              )}
-            </div>
+            {/* Roof options removed — future iteration */}
           </div>
         </div>
       </div>
