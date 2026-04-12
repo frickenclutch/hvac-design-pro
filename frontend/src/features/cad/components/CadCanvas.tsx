@@ -262,7 +262,59 @@ export default function CadCanvas() {
     }
 
     if (o.type === 'door' || o.type === 'sliding_door') {
-      const group = new fabric.Group([], {
+      // Door gap (break in wall) — drawn directly on canvas, not in a group
+      const gap = new fabric.Rect({
+        left: cx,
+        top: cy,
+        width: widthPx,
+        height: 12,
+        fill: '#0f172a',
+        stroke: 'transparent',
+        originX: 'center',
+        originY: 'center',
+        angle,
+        selectable: false,
+        evented: false,
+        name: `${PREFIX.opening}${o.id}-gap`,
+      });
+
+      // Build arc + door leaf as an SVG path (avoids Fabric.js Group bounds issues)
+      const r = widthPx;
+      const isRight = o.swingDirection === 'right';
+      // Hinge at one edge, arc sweeps perpendicular to wall
+      // In local space: wall runs along X, perpendicular is +Y
+      const hx = isRight ? widthPx / 2 : -widthPx / 2;
+      const tipX = isRight ? hx : hx;
+      const tipY = r;
+      // SVG path: arc from closed-door tip to open-door tip + door-leaf line
+      // We only draw arc + door-leaf line (no filled area)
+      const sweep = isRight ? 1 : 0;
+      const pathData = [
+        // Arc from closed-door tip to open-door tip
+        `M ${isRight ? hx - r : hx + r} 0`,
+        `A ${r} ${r} 0 0 ${sweep} ${tipX} ${tipY}`,
+        // Door leaf line from hinge to open tip
+        `M ${hx} 0 L ${tipX} ${tipY}`,
+      ].join(' ');
+
+      const doorPath = new fabric.Path(pathData, {
+        left: cx,
+        top: cy,
+        originX: 'center',
+        originY: 'center',
+        angle,
+        fill: 'transparent',
+        stroke: '#fb923c',
+        strokeWidth: 1.5,
+        strokeDashArray: [4, 3],
+        selectable: true,
+        evented: true,
+        name: `${PREFIX.opening}${o.id}`,
+        hasControls: false,
+      });
+
+      // Add gap behind the door path (gap is non-interactive overlay)
+      const doorGroup = new fabric.Group([gap, doorPath], {
         left: cx,
         top: cy,
         originX: 'center',
@@ -273,33 +325,10 @@ export default function CadCanvas() {
         // @ts-ignore
         name: `${PREFIX.opening}${o.id}`,
         hasControls: false,
+        subTargetCheck: false,
       });
 
-      // Door gap (break in wall)
-      const gap = new fabric.Rect({
-        left: -widthPx / 2,
-        top: -5,
-        width: widthPx,
-        height: 10,
-        fill: '#0f172a',
-        stroke: 'transparent',
-      });
-
-      // Arc swing indicator
-      const arc = new fabric.Circle({
-        left: o.swingDirection === 'right' ? 0 : -widthPx,
-        top: -widthPx,
-        radius: widthPx,
-        startAngle: o.swingDirection === 'right' ? 0 : 270,
-        endAngle: o.swingDirection === 'right' ? 90 : 360,
-        fill: 'transparent',
-        stroke: '#fb923c',
-        strokeWidth: 1.5,
-        strokeDashArray: [4, 3],
-      });
-
-      group.add(gap, arc);
-      return group;
+      return doorGroup;
     }
 
     return null;
