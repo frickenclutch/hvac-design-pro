@@ -24,14 +24,11 @@ import {
   frictionRate,
   roundDuctDiameter,
   rectDuctSize,
-  rectEquivalentDiameter,
   ductVelocity,
   ductArea,
-  ductPressureDrop,
   getRoughness,
   getVelocityLimits,
   type DuctMaterialType,
-  type DuctShapeType,
 } from './ductSizing';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -290,7 +287,7 @@ export const FITTING_EQUIV_LENGTHS: Record<FittingType, FittingEquivLengthEntry>
 /**
  * Get the size category for a given duct diameter.
  */
-function getSizeCategory(diameterIn: number): 'small' | 'medium' | 'large' {
+export function getSizeCategory(diameterIn: number): 'small' | 'medium' | 'large' {
   if (diameterIn <= 8) return 'small';
   if (diameterIn <= 16) return 'medium';
   return 'large';
@@ -418,7 +415,8 @@ export function calculateManualD(input: ManualDSystemInput): ManualDResult {
   // ── Step 2: Initial duct sizing estimate (for fitting EL lookup) ───────
   // Use a moderate initial friction rate to get approximate duct sizes
   const initialFrictionRate = 0.08; // inwg/100ft — typical residential starting point
-  const defaultRoughness = getRoughness(ductMaterial as DuctMaterialType);
+  // Default roughness for the system-level material (individual rooms may override)
+  void getRoughness(ductMaterial as DuctMaterialType);
 
   interface RunIntermediate {
     room: ManualDRoomInput;

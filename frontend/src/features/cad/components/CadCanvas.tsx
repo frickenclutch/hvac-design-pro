@@ -49,7 +49,9 @@ const PIPE_COLORS: Record<PipeMaterial, string> = {
 const DUCT_SUPPLY_COLOR = '#3b82f6';
 const DUCT_RETURN_COLOR = '#ef4444';
 const DUCT_FITTING_COLOR = '#8b5cf6';
-const DUCT_RADIANT_COLOR = '#f97316';
+// Radiant system color — used when radiant tools are added
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const DUCT_RADIANT_COLOR = '#f97316';
 
 const DUCT_ROLE_DASH: Record<DuctRole, number[] | undefined> = {
   trunk: undefined,

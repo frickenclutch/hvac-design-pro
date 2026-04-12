@@ -727,6 +727,16 @@ const QUICK_TOPICS: Record<MasonContext, string[]> = {
     'Appearance & colors',
     'Auto-save & undo',
   ],
+  'manual-d': [
+    'Duct sizing basics',
+    'Friction rate method',
+    'Equal friction design',
+    'Fitting equivalent lengths',
+    'Supply vs return sizing',
+    'Trunk & branch layout',
+    'Velocity limits',
+    'Static pressure budget',
+  ],
 };
 
 // ── Props ───────────────────────────────────────────────────────────────────

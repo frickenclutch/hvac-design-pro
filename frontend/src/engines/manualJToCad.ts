@@ -21,6 +21,10 @@ export function generateCadFloorFromManualJ(
     rooms: [],
     hvacUnits: [],
     pipes: [],
+    ductSegments: [],
+    ductFittings: [],
+    ductSystems: [],
+    radiantZones: [],
     annotations: [],
     underlays: [],
   };

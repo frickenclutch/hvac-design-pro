@@ -404,7 +404,6 @@ function colebrookFrictionFactor(
   // Iterate Colebrook equation (typically converges in 3-5 iterations)
   for (let i = 0; i < 20; i++) {
     const sqrtF = Math.sqrt(f);
-    const lhs = 1 / sqrtF;
     const rhs = -2 * Math.log10(A + B / sqrtF);
     const fNew = 1 / (rhs * rhs);
 
