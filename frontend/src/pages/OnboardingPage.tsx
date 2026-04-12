@@ -40,6 +40,12 @@ export default function OnboardingPage() {
       orgName,
       orgType: role,
       regionCode: region,
+      addressLine1: orgAddress.line1 || undefined,
+      city: orgAddress.city || undefined,
+      state: orgAddress.state || undefined,
+      zip: orgAddress.zip || undefined,
+      country: orgAddress.country || undefined,
+      phone: orgPhone || undefined,
     });
 
     // Check if registration succeeded

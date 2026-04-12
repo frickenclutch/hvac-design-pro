@@ -98,7 +98,7 @@ interface AuthState {
 
   // Actions
   login: (email: string, password: string) => Promise<void>;
-  register: (data: { email: string; password: string; firstName: string; lastName: string; orgName?: string; orgType?: OrgType; regionCode?: RegionCode }) => Promise<void>;
+  register: (data: { email: string; password: string; firstName: string; lastName: string; orgName?: string; orgType?: OrgType; regionCode?: RegionCode; addressLine1?: string; city?: string; state?: string; zip?: string; country?: string; phone?: string }) => Promise<void>;
   logout: () => void;
   setAuthenticated: (isAuthenticated: boolean) => void;
   setOnboarding: (isOnboarding: boolean) => void;

@@ -8,7 +8,7 @@ import { useCadStore } from '../features/cad/store/useCadStore';
 // Unified across CAD workspace and Manual J Calculator.
 
 // ── Context mode determines which knowledge is prioritized ─────────────────────
-export type MasonContext = 'cad' | 'manualj';
+export type MasonContext = 'cad' | 'manualj' | 'manual-d';
 
 // ── Knowledge base ─────────────────────────────────────────────────────────────
 interface KBEntry {

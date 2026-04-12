@@ -5,6 +5,7 @@ import { projectRoutes } from './routes/projects';
 import { calcRoutes } from './routes/calculations';
 import { uploadRoutes } from './routes/uploads';
 import { cadRoutes } from './routes/cad';
+import { orgRoutes } from './routes/org';
 import { authMiddleware } from './middleware/auth';
 
 export interface Env {
@@ -32,6 +33,7 @@ app.route('/api/auth', authRoutes);
 
 // Protected routes
 app.use('/api/*', authMiddleware);
+app.route('/api/org', orgRoutes);
 app.route('/api/projects', projectRoutes);
 app.route('/api/calculations', calcRoutes);
 app.route('/api/uploads', uploadRoutes);

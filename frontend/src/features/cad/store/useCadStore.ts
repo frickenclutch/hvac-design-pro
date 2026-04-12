@@ -12,7 +12,10 @@ export type ToolType =
   | 'add_dimension'
   | 'add_label'
   | 'room_detect'
-  | 'draw_pipe';
+  | 'draw_pipe'
+  | 'draw_duct'
+  | 'place_fitting'
+  | 'draw_radiant';
 
 // ── Wall ────────────────────────────────────────────────────────────────────────
 export type WallMaterial = 'insulated_stud' | 'cmu' | 'concrete';
@@ -78,6 +81,86 @@ export interface PipeSegment {
   fabricId: string;
 }
 
+// ── Duct Types ─────────────────────────────────────────────────────────────────
+export type DuctShape = 'round' | 'rectangular' | 'oval';
+export type DuctMaterial = 'sheet_metal' | 'flex_r4' | 'flex_r6' | 'flex_r8' | 'spiral' | 'fiberglass_board' | 'fabric' | 'pvc';
+export type DuctSide = 'supply' | 'return';
+export type DuctRole = 'trunk' | 'branch' | 'plenum' | 'takeoff' | 'runout';
+export type FittingType = 'elbow_90' | 'elbow_45' | 'elbow_radius' | 'tee_branch' | 'tee_straight' | 'wye' | 'reducer' | 'transition_rect_round' | 'end_cap' | 'register_boot' | 'return_boot' | 'takeoff_round' | 'takeoff_rect' | 'damper_manual' | 'damper_motorized' | 'splitter' | 'turning_vanes';
+
+export interface DuctSegment {
+  id: string;
+  x1: number; y1: number;
+  x2: number; y2: number;
+  shape: DuctShape;
+  material: DuctMaterial;
+  side: DuctSide;
+  role: DuctRole;
+  diameterIn?: number;
+  widthIn?: number;
+  heightIn?: number;
+  cfm?: number;
+  velocityFpm?: number;
+  pressureDropInwg?: number;
+  frictionRateInwg100?: number;
+  systemId?: string;
+  parentSegmentId?: string;
+  roomId?: string;
+  fabricId: string;
+}
+
+export interface DuctFitting {
+  id: string;
+  type: FittingType;
+  x: number; y: number;
+  rotation: number;
+  shape: DuctShape;
+  inletSegmentId?: string;
+  outletSegmentIds?: string[];
+  equivLengthFt: number;
+  pressureDropInwg?: number;
+  diameterIn?: number;
+  widthIn?: number;
+  heightIn?: number;
+  fabricId: string;
+}
+
+export interface DuctSystem {
+  id: string;
+  name: string;
+  side: DuctSide;
+  equipmentId?: string;
+  designCfm?: number;
+  availableSpInwg?: number;
+  frictionRateInwg100?: number;
+  totalEquivLengthFt?: number;
+}
+
+// ── Radiant Types ──────────────────────────────────────────────────────────────
+export type RadiantType = 'hydronic_floor' | 'hydronic_ceiling' | 'hydronic_wall' | 'electric_floor' | 'electric_ceiling' | 'radiant_panel';
+export type RadiantFluidType = 'water' | 'glycol_20' | 'glycol_50';
+
+export interface RadiantZone {
+  id: string;
+  type: RadiantType;
+  x: number; y: number;
+  width: number; height: number;
+  rotation: number;
+  roomId?: string;
+  tubeSpacingIn?: number;
+  tubeDiameterIn?: number;
+  fluidType?: RadiantFluidType;
+  supplyTempF?: number;
+  returnTempF?: number;
+  flowGpm?: number;
+  loopLengthFt?: number;
+  wattsPerSqFt?: number;
+  voltage?: number;
+  outputBtuPerSqFt?: number;
+  floorCovering?: string;
+  fabricId: string;
+}
+
 // ── Room Detection ──────────────────────────────────────────────────────────────
 export interface DetectedRoom {
   id: string;
@@ -138,6 +221,10 @@ export interface Floor {
   rooms: DetectedRoom[];
   hvacUnits: HvacUnit[];
   pipes: PipeSegment[];
+  ductSegments: DuctSegment[];
+  ductFittings: DuctFitting[];
+  ductSystems: DuctSystem[];
+  radiantZones: RadiantZone[];
   annotations: Annotation[];
   underlays: UnderlayImage[];
 }
@@ -179,6 +266,9 @@ const DEFAULT_LAYERS: Layer[] = [
   { id: 'openings', name: 'Openings', visible: true, locked: false, color: '#38bdf8', opacity: 1 },
   { id: 'hvac', name: 'HVAC', visible: true, locked: false, color: '#a78bfa', opacity: 1 },
   { id: 'piping', name: 'Piping', visible: true, locked: false, color: '#ec4899', opacity: 1 },
+  { id: 'ducts_supply', name: 'Ducts (Supply)', visible: true, locked: false, color: '#3b82f6', opacity: 1 },
+  { id: 'ducts_return', name: 'Ducts (Return)', visible: true, locked: false, color: '#ef4444', opacity: 1 },
+  { id: 'radiant', name: 'Radiant Systems', visible: true, locked: false, color: '#f97316', opacity: 1 },
   { id: 'annotations', name: 'Annotations', visible: true, locked: false, color: '#f59e0b', opacity: 1 },
   { id: 'underlay', name: 'Underlay', visible: true, locked: true, color: '#64748b', opacity: 0.3 },
 ];
@@ -195,6 +285,10 @@ const createDefaultFloor = (): Floor => ({
   rooms: [],
   hvacUnits: [],
   pipes: [],
+  ductSegments: [],
+  ductFittings: [],
+  ductSystems: [],
+  radiantZones: [],
   annotations: [],
   underlays: [],
 });
@@ -332,6 +426,26 @@ interface CadState {
   updatePipe: (id: string, patch: Partial<PipeSegment>) => void;
   removePipe: (id: string) => void;
 
+  // ── Duct Segments ──────────────────────────────────────────────────────────
+  addDuctSegment: (segment: DuctSegment) => void;
+  updateDuctSegment: (id: string, patch: Partial<DuctSegment>) => void;
+  removeDuctSegment: (id: string) => void;
+
+  // ── Duct Fittings ─────────────────────────────────────────────────────────
+  addDuctFitting: (fitting: DuctFitting) => void;
+  updateDuctFitting: (id: string, patch: Partial<DuctFitting>) => void;
+  removeDuctFitting: (id: string) => void;
+
+  // ── Duct Systems ──────────────────────────────────────────────────────────
+  addDuctSystem: (system: DuctSystem) => void;
+  updateDuctSystem: (id: string, patch: Partial<DuctSystem>) => void;
+  removeDuctSystem: (id: string) => void;
+
+  // ── Radiant Zones ─────────────────────────────────────────────────────────
+  addRadiantZone: (zone: RadiantZone) => void;
+  updateRadiantZone: (id: string, patch: Partial<RadiantZone>) => void;
+  removeRadiantZone: (id: string) => void;
+
   // ── Undo / Redo ─────────────────────────────────────────────────────────────
   undoStack: HistoryEntry[];
   redoStack: HistoryEntry[];
@@ -448,6 +562,10 @@ export const useCadStore = create<CadState>((set, get) => {
         rooms: [],
         hvacUnits: [],
         pipes: [],
+        ductSegments: [],
+        ductFittings: [],
+        ductSystems: [],
+        radiantZones: [],
         annotations: [],
         underlays: [],
       };
@@ -699,6 +817,126 @@ export const useCadStore = create<CadState>((set, get) => {
         })),
       })),
 
+    // ── Duct Segments ────────────────────────────────────────────────────────
+    addDuctSegment: (segment) =>
+      set((s) => ({
+        ...updateActiveFloor(s, (f) => ({
+          ...f,
+          ductSegments: [...(f.ductSegments ?? []), segment],
+        })),
+        isDirty: true,
+      })),
+
+    updateDuctSegment: (id, patch) =>
+      set((s) => ({
+        ...updateActiveFloor(s, (f) => ({
+          ...f,
+          ductSegments: (f.ductSegments ?? []).map((d) =>
+            d.id === id ? { ...d, ...patch } : d,
+          ),
+        })),
+        isDirty: true,
+      })),
+
+    removeDuctSegment: (id) =>
+      set((s) => ({
+        ...updateActiveFloor(s, (f) => ({
+          ...f,
+          ductSegments: (f.ductSegments ?? []).filter((d) => d.id !== id),
+        })),
+        isDirty: true,
+      })),
+
+    // ── Duct Fittings ────────────────────────────────────────────────────────
+    addDuctFitting: (fitting) =>
+      set((s) => ({
+        ...updateActiveFloor(s, (f) => ({
+          ...f,
+          ductFittings: [...(f.ductFittings ?? []), fitting],
+        })),
+        isDirty: true,
+      })),
+
+    updateDuctFitting: (id, patch) =>
+      set((s) => ({
+        ...updateActiveFloor(s, (f) => ({
+          ...f,
+          ductFittings: (f.ductFittings ?? []).map((d) =>
+            d.id === id ? { ...d, ...patch } : d,
+          ),
+        })),
+        isDirty: true,
+      })),
+
+    removeDuctFitting: (id) =>
+      set((s) => ({
+        ...updateActiveFloor(s, (f) => ({
+          ...f,
+          ductFittings: (f.ductFittings ?? []).filter((d) => d.id !== id),
+        })),
+        isDirty: true,
+      })),
+
+    // ── Duct Systems ─────────────────────────────────────────────────────────
+    addDuctSystem: (system) =>
+      set((s) => ({
+        ...updateActiveFloor(s, (f) => ({
+          ...f,
+          ductSystems: [...(f.ductSystems ?? []), system],
+        })),
+        isDirty: true,
+      })),
+
+    updateDuctSystem: (id, patch) =>
+      set((s) => ({
+        ...updateActiveFloor(s, (f) => ({
+          ...f,
+          ductSystems: (f.ductSystems ?? []).map((d) =>
+            d.id === id ? { ...d, ...patch } : d,
+          ),
+        })),
+        isDirty: true,
+      })),
+
+    removeDuctSystem: (id) =>
+      set((s) => ({
+        ...updateActiveFloor(s, (f) => ({
+          ...f,
+          ductSystems: (f.ductSystems ?? []).filter((d) => d.id !== id),
+        })),
+        isDirty: true,
+      })),
+
+    // ── Radiant Zones ────────────────────────────────────────────────────────
+    addRadiantZone: (zone) =>
+      set((s) => ({
+        ...updateActiveFloor(s, (f) => ({
+          ...f,
+          radiantZones: [...(f.radiantZones ?? []), zone],
+        })),
+        isDirty: true,
+      })),
+
+    updateRadiantZone: (id, patch) =>
+      set((s) => ({
+        ...updateActiveFloor(s, (f) => ({
+          ...f,
+          radiantZones: (f.radiantZones ?? []).map((r) =>
+            r.id === id ? { ...r, ...patch } : r,
+          ),
+        })),
+        isDirty: true,
+      })),
+
+    removeRadiantZone: (id) =>
+      set((s) => ({
+        ...updateActiveFloor(s, (f) => ({
+          ...f,
+          radiantZones: (f.radiantZones ?? []).filter((r) => r.id !== id),
+        })),
+        isDirty: true,
+      })),
+
     // ── Undo / Redo ───────────────────────────────────────────────────────────
     undoStack: [],
     redoStack: [],
@@ -792,10 +1030,14 @@ export const useCadStore = create<CadState>((set, get) => {
 
     loadDrawing: (data: any) => {
       if (!data) return;
-      // Ensure all floors have an underlays array (backwards compat)
+      // Ensure all floors have required arrays (backwards compat)
       const floors = (data.floors ?? [createDefaultFloor()]).map((f: any) => ({
         ...f,
         underlays: f.underlays ?? [],
+        ductSegments: f.ductSegments ?? [],
+        ductFittings: f.ductFittings ?? [],
+        ductSystems: f.ductSystems ?? [],
+        radiantZones: f.radiantZones ?? [],
       }));
       set({
         floors,

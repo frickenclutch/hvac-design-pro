@@ -1,10 +1,14 @@
-import { useRef } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { usePreferencesStore, type ThemeMode, type UIDensity, type UnitSystem } from '../stores/usePreferencesStore';
-import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image } from 'lucide-react';
+import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save } from 'lucide-react';
 import A11yPanel from '../components/accessibility/A11yPanel';
+import { useAuthStore } from '../features/auth/store/useAuthStore';
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
 export default function SettingsPage() {
   const prefs = usePreferencesStore();
+  const { user, organisation, token } = useAuthStore();
 
   return (
     <div className="h-full overflow-y-auto">
@@ -20,6 +24,12 @@ export default function SettingsPage() {
         </header>
 
         <div className="space-y-8">
+          {/* Organisation Profile */}
+          <OrgProfileSection token={token} orgId={organisation?.id} />
+
+          {/* User Profile */}
+          <UserProfileSection token={token} user={user} />
+
           {/* Appearance */}
           <Section icon={<Palette className="w-5 h-5 text-violet-400" />} title="Appearance">
             <OptionGroup label="Theme">
@@ -357,5 +367,153 @@ function NumberOption({ label, suffix, value, onChange, step = 1 }: { label: str
         {suffix && <span className="text-xs text-slate-500 font-mono w-8">{suffix}</span>}
       </div>
     </div>
+  );
+}
+
+function ProfileInput({ label, value, onChange, placeholder, readOnly }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; readOnly?: boolean }) {
+  return (
+    <div>
+      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">{label}</label>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        readOnly={readOnly}
+        className={`w-full bg-slate-900/80 border border-slate-700/50 rounded-xl px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 ${readOnly ? 'opacity-60 cursor-not-allowed' : ''}`}
+      />
+    </div>
+  );
+}
+
+function OrgProfileSection({ token, orgId }: { token: string | null; orgId?: string }) {
+  const [orgData, setOrgData] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!token || !orgId) return;
+    fetch(`${API_BASE}/api/org`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(data => {
+        if (data.organisation) {
+          setOrgData(data.organisation);
+          setLoaded(true);
+        }
+      })
+      .catch(() => {});
+  }, [token, orgId]);
+
+  const saveOrg = async () => {
+    if (!token) return;
+    setSaving(true);
+    try {
+      await fetch(`${API_BASE}/api/org`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(orgData),
+      });
+    } catch { /* */ }
+    setSaving(false);
+  };
+
+  const update = (key: string, value: string) => setOrgData(prev => ({ ...prev, [key]: value }));
+
+  if (!loaded) return null;
+
+  return (
+    <Section icon={<Building2 className="w-5 h-5 text-emerald-400" />} title="Organisation Profile">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <ProfileInput label="Organisation Name" value={orgData.name || ''} onChange={v => update('name', v)} />
+        <div>
+          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Type</label>
+          <select
+            value={orgData.orgType || 'individual'}
+            onChange={e => update('orgType', e.target.value)}
+            className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+          >
+            <option value="individual">Individual</option>
+            <option value="company">Company</option>
+            <option value="municipality">Municipality</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Region / Standard</label>
+          <select
+            value={orgData.regionCode || 'NA_ASHRAE'}
+            onChange={e => update('regionCode', e.target.value)}
+            className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+          >
+            <option value="NA_ASHRAE">North America (ACCA/ASHRAE)</option>
+            <option value="EU_EN">Europe (EN 12831)</option>
+            <option value="UK_CIBSE">UK (CIBSE)</option>
+            <option value="CA_CSA">Canada (CSA F280)</option>
+            <option value="AU_NZS">Australia/NZ (AS/NZS)</option>
+          </select>
+        </div>
+        <ProfileInput label="Phone" value={orgData.phone || ''} onChange={v => update('phone', v)} placeholder="(555) 123-4567" />
+      </div>
+      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <ProfileInput label="Address" value={orgData.addressLine1 || ''} onChange={v => update('addressLine1', v)} placeholder="123 Main St" />
+        <ProfileInput label="City" value={orgData.city || ''} onChange={v => update('city', v)} placeholder="Chicago" />
+        <ProfileInput label="State" value={orgData.state || ''} onChange={v => update('state', v)} placeholder="IL" />
+        <ProfileInput label="ZIP" value={orgData.zip || ''} onChange={v => update('zip', v)} placeholder="60601" />
+      </div>
+      <div className="mt-5 flex justify-end">
+        <button onClick={saveOrg} disabled={saving}
+          className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-emerald-500/20 transition-all disabled:opacity-50">
+          <Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save Organisation'}
+        </button>
+      </div>
+    </Section>
+  );
+}
+
+function UserProfileSection({ token, user }: { token: string | null; user: { id: string; firstName: string; lastName: string; email: string } | null }) {
+  const [profile, setProfile] = useState({ firstName: user?.firstName || '', lastName: user?.lastName || '', phone: '' });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!token) return;
+    fetch(`${API_BASE}/api/org/profile`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(data => {
+        if (data.user) {
+          setProfile({ firstName: data.user.firstName || '', lastName: data.user.lastName || '', phone: data.user.phone || '' });
+        }
+      })
+      .catch(() => {});
+  }, [token]);
+
+  const saveProfile = async () => {
+    if (!token) return;
+    setSaving(true);
+    try {
+      await fetch(`${API_BASE}/api/org/profile`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(profile),
+      });
+    } catch { /* */ }
+    setSaving(false);
+  };
+
+  if (!user) return null;
+
+  return (
+    <Section icon={<User className="w-5 h-5 text-sky-400" />} title="User Profile">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <ProfileInput label="First Name" value={profile.firstName} onChange={v => setProfile(p => ({ ...p, firstName: v }))} />
+        <ProfileInput label="Last Name" value={profile.lastName} onChange={v => setProfile(p => ({ ...p, lastName: v }))} />
+        <ProfileInput label="Email" value={user.email} onChange={() => {}} readOnly />
+        <ProfileInput label="Phone" value={profile.phone} onChange={v => setProfile(p => ({ ...p, phone: v }))} placeholder="(555) 123-4567" />
+      </div>
+      <div className="mt-5 flex justify-end">
+        <button onClick={saveProfile} disabled={saving}
+          className="flex items-center gap-2 bg-sky-500/10 text-sky-400 border border-sky-500/30 px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-sky-500/20 transition-all disabled:opacity-50">
+          <Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save Profile'}
+        </button>
+      </div>
+    </Section>
   );
 }

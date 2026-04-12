@@ -14,7 +14,8 @@ export const authRoutes = new Hono<{ Bindings: Env }>();
 // ── Register new user + org ──────────────────────────────────────────────────
 authRoutes.post('/register', async (c) => {
   const body = await c.req.json();
-  const { email, password, firstName, lastName, orgName, orgType, regionCode } = body;
+  const { email, password, firstName, lastName, orgName, orgType, regionCode,
+          addressLine1, city, state, zip, country, phone } = body;
 
   if (!email || !password || !firstName || !lastName) {
     return c.json({ error: 'Missing required fields' }, 400);
@@ -48,8 +49,10 @@ authRoutes.post('/register', async (c) => {
   // Create org + user in a batch
   const batch = [
     db.prepare(
-      `INSERT INTO organisations (id, slug, name, org_type, region_code) VALUES (?, ?, ?, ?, ?)`
-    ).bind(orgId, slug, orgName || `${firstName}'s Workspace`, orgType || 'individual', regionCode || 'NA_ASHRAE'),
+      `INSERT INTO organisations (id, slug, name, org_type, region_code, address_line1, city, state, zip, country, phone)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(orgId, slug, orgName || `${firstName}'s Workspace`, orgType || 'individual', regionCode || 'NA_ASHRAE',
+           addressLine1 || null, city || null, state || null, zip || null, country || 'US', phone || null),
 
     db.prepare(
       `INSERT INTO users (id, org_id, email, password_hash, role, first_name, last_name, is_verified)
