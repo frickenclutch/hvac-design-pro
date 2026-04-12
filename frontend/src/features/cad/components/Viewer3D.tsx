@@ -8,7 +8,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { X, RotateCcw, Grid3x3, Sun, Eye, EyeOff, Download, Upload, Thermometer } from 'lucide-react';
 import { useCadStore } from '../store/useCadStore';
 import { useProjectStore } from '../../../stores/useProjectStore';
-import type { WallSegment } from '../store/useCadStore';
+import type { WallSegment, DuctSegment, DuctFitting } from '../store/useCadStore';
 import { fmtLength, fmtArea } from '../../../utils/units';
 import {
   createDoorModel,
@@ -20,6 +20,8 @@ import {
   createThermostatModel,
   createDuctRunModel,
   createPipeModel,
+  createDuctSegmentModel,
+  createDuctFittingModel,
 } from '../utils/assetModels';
 import { exportSceneAsSTL, exportSceneAsOBJ } from '../utils/stlExporter';
 
@@ -402,6 +404,93 @@ export default function Viewer3D({ isOpen, onClose }: Viewer3DProps) {
               }
             });
             group.add(pipeGroup);
+          });
+        }
+
+        // ── Duct Segments ────────────────────────────────────────────────
+        const ductsSupplyLayer = useCadStore.getState().layers.find(l => l.id === 'ducts_supply');
+        const ductsReturnLayer = useCadStore.getState().layers.find(l => l.id === 'ducts_return');
+        if (floor.ductSegments) {
+          floor.ductSegments.forEach((duct: DuctSegment) => {
+            const ductLayer = duct.side === 'supply' ? ductsSupplyLayer : ductsReturnLayer;
+            if (!ductLayer?.visible) return;
+
+            const len = wallLength(duct as any, pxPerFt);
+            if (len < 0.01) return;
+            const angle = wallAngle(duct as any);
+            const [cx, cz] = wallCenter(duct as any, pxPerFt);
+
+            // Ducts are hung near ceiling
+            const y = floorOffset + floor.heightFt - 1.5;
+
+            const ductGroup = createDuctSegmentModel(
+              len,
+              duct.shape,
+              duct.side,
+              duct.material,
+              duct.diameterIn ?? 12,
+              duct.widthIn ?? 12,
+              duct.heightIn ?? 8,
+              showWireframe,
+            );
+            ductGroup.position.set(cx - (len / 2 * Math.cos(angle)), y, cz - (len / 2 * Math.sin(angle)));
+            ductGroup.rotation.y = -angle;
+
+            const ud = {
+              id: duct.id,
+              objectType: 'duct_segment',
+              side: duct.side,
+              role: duct.role,
+              cfm: duct.cfm,
+              shape: duct.shape,
+              material: duct.material,
+              diameter: duct.diameterIn,
+              length: len.toFixed(1),
+            };
+            ductGroup.userData = ud;
+            ductGroup.traverse((child) => {
+              if (child instanceof THREE.Mesh) {
+                child.castShadow = showShadows;
+                child.receiveShadow = showShadows;
+                child.userData = { ...ud };
+                meshesRef.current.push(child);
+              }
+            });
+            group.add(ductGroup);
+          });
+        }
+
+        // ── Duct Fittings ─────────────────────────────────────────────────
+        if (floor.ductFittings) {
+          floor.ductFittings.forEach((fitting: DuctFitting) => {
+            const fx = fitting.x / pxPerFt;
+            const fz = fitting.y / pxPerFt;
+            const y = floorOffset + floor.heightFt - 1.5;
+
+            const fittingGroup = createDuctFittingModel(
+              fitting.type,
+              fitting.diameterIn ?? 12,
+              showWireframe,
+            );
+            fittingGroup.position.set(fx, y, fz);
+            fittingGroup.rotation.y = -(fitting.rotation * Math.PI / 180);
+
+            const ud = {
+              id: fitting.id,
+              objectType: 'duct_fitting',
+              fittingType: fitting.type,
+              equivLength: fitting.equivLengthFt,
+            };
+            fittingGroup.userData = ud;
+            fittingGroup.traverse((child) => {
+              if (child instanceof THREE.Mesh) {
+                child.castShadow = showShadows;
+                child.receiveShadow = showShadows;
+                child.userData = { ...ud };
+                meshesRef.current.push(child);
+              }
+            });
+            group.add(fittingGroup);
           });
         }
 

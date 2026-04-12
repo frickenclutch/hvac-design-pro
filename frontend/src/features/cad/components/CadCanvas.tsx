@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import * as fabric from 'fabric';
 import { useCadStore } from '../store/useCadStore';
-import type { WallMaterial, WallSegment, Opening, HvacUnit, PipeMaterial, PipeSegment, Annotation, UnderlayImage } from '../store/useCadStore';
+import type { WallMaterial, WallSegment, Opening, HvacUnit, PipeMaterial, PipeSegment, Annotation, UnderlayImage, DuctSegment, DuctFitting, DuctShape, DuctMaterial, DuctSide, DuctRole, FittingType } from '../store/useCadStore';
 import { showSnapPulse, showPlacementConfirm, triggerHapticVibration } from '../utils/haptics';
 
 // ── Drawing state machine ──────────────────────────────────────────────────────
@@ -18,6 +18,9 @@ const PREFIX = {
   opening: 'opening-',
   hvac: 'hvac-',
   pipe: 'pipe-',
+  duct: 'duct-',
+  fitting: 'fitting-',
+  radiant: 'radiant-',
   annotation: 'ann-',
   room: 'room-',
   ghost: '__ghost_',
@@ -40,6 +43,20 @@ const PIPE_COLORS: Record<PipeMaterial, string> = {
   copper_suction: '#ef4444',
   pvc_condensate: '#ffffff',
   gas_black_iron: '#64748b',
+};
+
+// Duct colors by side
+const DUCT_SUPPLY_COLOR = '#3b82f6';
+const DUCT_RETURN_COLOR = '#ef4444';
+const DUCT_FITTING_COLOR = '#8b5cf6';
+const DUCT_RADIANT_COLOR = '#f97316';
+
+const DUCT_ROLE_DASH: Record<DuctRole, number[] | undefined> = {
+  trunk: undefined,
+  branch: undefined,
+  plenum: [12, 4],
+  takeoff: [6, 4],
+  runout: [4, 2],
 };
 
 export default function CadCanvas() {
@@ -406,6 +423,121 @@ export default function CadCanvas() {
     });
   }, []);
 
+  const createDuctLine = useCallback((d: DuctSegment): fabric.Object => {
+    const color = d.side === 'supply' ? DUCT_SUPPLY_COLOR : DUCT_RETURN_COLOR;
+    const strokeW = d.shape === 'round'
+      ? Math.max(6, (d.diameterIn ?? 12) * 0.6)
+      : Math.max(6, ((d.widthIn ?? 12) + (d.heightIn ?? 8)) * 0.3);
+    const dashArray = DUCT_ROLE_DASH[d.role];
+
+    const line = new fabric.Line([d.x1, d.y1, d.x2, d.y2], {
+      stroke: color,
+      strokeWidth: strokeW,
+      strokeLineCap: d.shape === 'rectangular' ? 'butt' : 'round',
+      selectable: true,
+      evented: true,
+      name: `${PREFIX.duct}${d.id}`,
+      hasControls: false,
+      hasBorders: false,
+      lockMovementX: true,
+      lockMovementY: true,
+    });
+    if (dashArray) line.set({ strokeDashArray: dashArray });
+
+    return line;
+  }, []);
+
+  const createDuctFittingShape = useCallback((f: DuctFitting): fabric.Object => {
+    const size = Math.max(16, (f.diameterIn ?? 12) * 1.2);
+    const isTee = f.type.startsWith('tee_') || f.type === 'wye' || f.type === 'splitter';
+    const isElbow = f.type.startsWith('elbow_');
+
+    if (isElbow) {
+      const arc = new fabric.Circle({
+        left: f.x - size / 2,
+        top: f.y - size / 2,
+        radius: size / 2,
+        startAngle: 0,
+        endAngle: f.type === 'elbow_45' ? 45 : 90,
+        fill: 'transparent',
+        stroke: DUCT_FITTING_COLOR,
+        strokeWidth: 3,
+        angle: f.rotation,
+        originX: 'center',
+        originY: 'center',
+      });
+      const dot = new fabric.Circle({
+        left: f.x - 4,
+        top: f.y - 4,
+        radius: 4,
+        fill: DUCT_FITTING_COLOR,
+      });
+      return new fabric.Group([arc, dot], {
+        left: f.x,
+        top: f.y,
+        originX: 'center',
+        originY: 'center',
+        selectable: true,
+        evented: true,
+        // @ts-ignore
+        name: `${PREFIX.fitting}${f.id}`,
+        hasControls: false,
+      });
+    }
+
+    if (isTee) {
+      const h = size * 0.8;
+      const main = new fabric.Line([-h, 0, h, 0], { stroke: DUCT_FITTING_COLOR, strokeWidth: 3 });
+      const branch = new fabric.Line([0, 0, 0, -h], { stroke: DUCT_FITTING_COLOR, strokeWidth: 3 });
+      const dot = new fabric.Circle({ left: -4, top: -4, radius: 4, fill: DUCT_FITTING_COLOR });
+      return new fabric.Group([main, branch, dot], {
+        left: f.x,
+        top: f.y,
+        originX: 'center',
+        originY: 'center',
+        angle: f.rotation,
+        selectable: true,
+        evented: true,
+        // @ts-ignore
+        name: `${PREFIX.fitting}${f.id}`,
+        hasControls: false,
+      });
+    }
+
+    // Default: diamond marker
+    const diamond = new fabric.Rect({
+      left: f.x - size / 2,
+      top: f.y - size / 2,
+      width: size,
+      height: size,
+      fill: `${DUCT_FITTING_COLOR}25`,
+      stroke: DUCT_FITTING_COLOR,
+      strokeWidth: 2,
+      angle: 45,
+      originX: 'center',
+      originY: 'center',
+    });
+    const label = new fabric.FabricText(f.type.replace(/_/g, ' ').slice(0, 6), {
+      left: f.x,
+      top: f.y + size / 2 + 4,
+      fontSize: 9,
+      fill: DUCT_FITTING_COLOR,
+      originX: 'center',
+      textAlign: 'center',
+    });
+    return new fabric.Group([diamond, label], {
+      left: f.x,
+      top: f.y,
+      originX: 'center',
+      originY: 'center',
+      selectable: true,
+      evented: true,
+      // @ts-ignore
+      name: `${PREFIX.fitting}${f.id}`,
+      hasControls: false,
+    });
+  }, []);
+
   const createAnnotationShape = useCallback((ann: Annotation): fabric.Object => {
     if (ann.type === 'dimension') {
       return new fabric.FabricText(ann.text, {
@@ -462,7 +594,8 @@ export default function CadCanvas() {
       if (!n) return false;
       return n.startsWith(PREFIX.wall) || n.startsWith(PREFIX.opening) ||
              n.startsWith(PREFIX.hvac) || n.startsWith(PREFIX.pipe) ||
-             n.startsWith(PREFIX.annotation) ||
+             n.startsWith(PREFIX.duct) || n.startsWith(PREFIX.fitting) ||
+             n.startsWith(PREFIX.radiant) || n.startsWith(PREFIX.annotation) ||
              n.startsWith(PREFIX.room) || n.startsWith(PREFIX.underlay);
     });
     toRemove.forEach(obj => canvas.remove(obj));
@@ -562,6 +695,42 @@ export default function CadCanvas() {
       }
     }
 
+    // Duct Segments (supply)
+    const ductsSupplyLayer = state.layers.find(l => l.id === 'ducts_supply');
+    if (ductsSupplyLayer?.visible) {
+      for (const d of (floor.ductSegments ?? [])) {
+        if (d.side !== 'supply') continue;
+        const shape = createDuctLine(d);
+        shape.set({ opacity: ductsSupplyLayer.opacity });
+        if (ductsSupplyLayer.locked) shape.set({ selectable: false, evented: false });
+        canvas.add(shape);
+      }
+    }
+
+    // Duct Segments (return)
+    const ductsReturnLayer = state.layers.find(l => l.id === 'ducts_return');
+    if (ductsReturnLayer?.visible) {
+      for (const d of (floor.ductSegments ?? [])) {
+        if (d.side !== 'return') continue;
+        const shape = createDuctLine(d);
+        shape.set({ opacity: ductsReturnLayer.opacity });
+        if (ductsReturnLayer.locked) shape.set({ selectable: false, evented: false });
+        canvas.add(shape);
+      }
+    }
+
+    // Duct Fittings
+    for (const f of (floor.ductFittings ?? [])) {
+      const fittingShape = createDuctFittingShape(f);
+      // Use supply layer visibility for fittings since they connect supply-side mostly
+      const ductLayer = ductsSupplyLayer?.visible ? ductsSupplyLayer : ductsReturnLayer;
+      if (ductLayer) {
+        fittingShape.set({ opacity: ductLayer.opacity });
+        if (ductLayer.locked) fittingShape.set({ selectable: false, evented: false });
+      }
+      canvas.add(fittingShape);
+    }
+
     // Annotations
     if (annotationsLayer?.visible) {
       for (const a of floor.annotations) {
@@ -607,7 +776,7 @@ export default function CadCanvas() {
     }
 
     canvas.requestRenderAll();
-  }, [createWallLine, createOpeningShape, createHvacShape, createPipeLine, createAnnotationShape]);
+  }, [createWallLine, createOpeningShape, createHvacShape, createPipeLine, createDuctLine, createDuctFittingShape, createAnnotationShape]);
 
   // Keep ref in sync for image import handlers
   syncRef.current = syncFloorToCanvas;
@@ -872,7 +1041,7 @@ export default function CadCanvas() {
 
       // ─ Right-click ends wall/pipe chain or cancels placement ───────
       if (evt.button === 2) {
-        if ((tool === 'draw_wall' || tool === 'draw_pipe') && drawing.active) {
+        if ((tool === 'draw_wall' || tool === 'draw_pipe' || tool === 'draw_duct') && drawing.active) {
           // End chain, return to select
           if (drawing.ghostLine) canvas.remove(drawing.ghostLine);
           drawing.ghostLine = null;
@@ -1005,6 +1174,105 @@ export default function CadCanvas() {
 
           canvas.requestRenderAll();
         }
+        return;
+      }
+
+      // ─ Duct draw mode ──────────────────────────────────────────────
+      if (tool === 'draw_duct' && evt.button === 0) {
+        if (!drawing.active) {
+          drawing.active = true;
+          drawing.startX = snapped.x;
+          drawing.startY = snapped.y;
+          drawing.ghostLine = createGhostLine(snapped.x, snapped.y);
+          drawing.ghostLine.set({ stroke: DUCT_SUPPLY_COLOR, strokeWidth: 6, strokeDashArray: [8, 4] });
+        } else {
+          const { startX, startY } = drawing;
+          const endX = snapped.x;
+          const endY = snapped.y;
+
+          if (drawing.ghostLine) canvas.remove(drawing.ghostLine);
+          drawing.ghostLine = null;
+
+          const lengthFt = computeLengthFt(startX, startY, endX, endY);
+
+          if (lengthFt >= 0.1) {
+            const ductId = `duct-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+            const newDuct: DuctSegment = {
+              id: ductId,
+              x1: startX,
+              y1: startY,
+              x2: endX,
+              y2: endY,
+              shape: 'round' as DuctShape,
+              material: 'sheet_metal' as DuctMaterial,
+              side: 'supply' as DuctSide,
+              role: 'trunk' as DuctRole,
+              diameterIn: 12,
+              cfm: 400,
+              fabricId: `${PREFIX.duct}${ductId}`,
+            };
+
+            state.addDuctSegment(newDuct);
+            state.markDirty();
+            syncFloorToCanvas(canvas);
+
+            // Haptic feedback
+            {
+              const zoom = canvas.getZoom();
+              const vpt = canvas.viewportTransform!;
+              const sx = endX * zoom + vpt[4];
+              const sy = endY * zoom + vpt[5];
+              const container = canvas.getSelectionElement()?.parentElement;
+              if (container) showPlacementConfirm(sx, sy, container);
+              triggerHapticVibration('place');
+            }
+
+            // Chain mode
+            drawing.startX = endX;
+            drawing.startY = endY;
+            drawing.ghostLine = createGhostLine(endX, endY);
+            drawing.ghostLine.set({ stroke: DUCT_SUPPLY_COLOR, strokeWidth: 6, strokeDashArray: [8, 4] });
+          } else {
+            drawing.active = false;
+            state.setDrawingInfo(null);
+          }
+
+          canvas.requestRenderAll();
+        }
+        return;
+      }
+
+      // ─ Fitting placement (place one, return to select) ────────────
+      if (tool === 'place_fitting' && evt.button === 0) {
+        const fittingId = `fitting-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const fitting: DuctFitting = {
+          id: fittingId,
+          type: 'elbow_90' as FittingType,
+          x: snapped.x,
+          y: snapped.y,
+          rotation: 0,
+          shape: 'round' as DuctShape,
+          equivLengthFt: 10,
+          diameterIn: 12,
+          fabricId: `${PREFIX.fitting}${fittingId}`,
+        };
+        state.addDuctFitting(fitting);
+        state.markDirty();
+        syncFloorToCanvas(canvas);
+
+        // Haptic feedback
+        {
+          const zoom = canvas.getZoom();
+          const vpt = canvas.viewportTransform!;
+          const sx = snapped.x * zoom + vpt[4];
+          const sy = snapped.y * zoom + vpt[5];
+          const container = canvas.getSelectionElement()?.parentElement;
+          if (container) showPlacementConfirm(sx, sy, container);
+          triggerHapticVibration('place');
+        }
+
+        state.setActiveTool('select');
         return;
       }
 
@@ -1227,8 +1495,8 @@ export default function CadCanvas() {
       const ptr = canvas.getScenePoint(evt);
       const snapped = snapToGrid(ptr.x, ptr.y);
 
-      // Ghost line update for wall draw, pipe draw, and dimension
-      if ((tool === 'draw_wall' || tool === 'draw_pipe' || tool === 'add_dimension') && drawing.active && drawing.ghostLine) {
+      // Ghost line update for wall draw, pipe draw, duct draw, and dimension
+      if ((tool === 'draw_wall' || tool === 'draw_pipe' || tool === 'draw_duct' || tool === 'add_dimension') && drawing.active && drawing.ghostLine) {
         drawing.ghostLine.set({ x2: snapped.x, y2: snapped.y });
         canvas.requestRenderAll();
 
@@ -1269,6 +1537,31 @@ export default function CadCanvas() {
         }
       }
 
+      // Placement ghost for fitting
+      if (tool === 'place_fitting') {
+        if (placementGhostRef.current) {
+          canvas.remove(placementGhostRef.current);
+          placementGhostRef.current = null;
+        }
+        const ghost = new fabric.Rect({
+          left: snapped.x - 10,
+          top: snapped.y - 10,
+          width: 20,
+          height: 20,
+          fill: `${DUCT_FITTING_COLOR}30`,
+          stroke: DUCT_FITTING_COLOR,
+          strokeWidth: 2,
+          angle: 45,
+          originX: 'center',
+          originY: 'center',
+          selectable: false,
+          evented: false,
+        });
+        canvas.add(ghost);
+        placementGhostRef.current = ghost;
+        canvas.requestRenderAll();
+      }
+
       // Placement ghost for HVAC
       if (tool === 'place_hvac') {
         if (placementGhostRef.current) {
@@ -1299,7 +1592,7 @@ export default function CadCanvas() {
     canvas.on('mouse:dblclick', (opt) => {
       const state = useCadStore.getState();
       const tool = state.activeTool;
-      if ((tool === 'draw_wall' || tool === 'draw_pipe') && drawing.active) {
+      if ((tool === 'draw_wall' || tool === 'draw_pipe' || tool === 'draw_duct') && drawing.active) {
         // Commit current ghost as final segment, then end chain
         const evt = opt.e as MouseEvent;
         const ptr = canvas.getScenePoint(evt);
@@ -1317,7 +1610,7 @@ export default function CadCanvas() {
               material: 'insulated_stud' as WallMaterial,
               fabricId: wallId,
             });
-          } else {
+          } else if (tool === 'draw_pipe') {
             const pipeId = `pipe-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
             state.addPipe({
               id: pipeId,
@@ -1326,6 +1619,20 @@ export default function CadCanvas() {
               diameterIn: 0.75,
               material: 'copper_liquid',
               fabricId: pipeId,
+            });
+          } else if (tool === 'draw_duct') {
+            const ductId = `duct-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+            state.addDuctSegment({
+              id: ductId,
+              x1: drawing.startX, y1: drawing.startY,
+              x2: snapped.x, y2: snapped.y,
+              shape: 'round' as DuctShape,
+              material: 'sheet_metal' as DuctMaterial,
+              side: 'supply' as DuctSide,
+              role: 'trunk' as DuctRole,
+              diameterIn: 12,
+              cfm: 400,
+              fabricId: `${PREFIX.duct}${ductId}`,
             });
           }
           state.markDirty();
@@ -1445,6 +1752,12 @@ export default function CadCanvas() {
           } else if (name.startsWith(PREFIX.annotation)) {
             const id = name.slice(PREFIX.annotation.length);
             state.removeAnnotation(id);
+          } else if (name.startsWith(PREFIX.duct)) {
+            const id = name.slice(PREFIX.duct.length);
+            state.removeDuctSegment(id);
+          } else if (name.startsWith(PREFIX.fitting)) {
+            const id = name.slice(PREFIX.fitting.length);
+            state.removeDuctFitting(id);
           } else if (name.startsWith(PREFIX.underlay)) {
             const id = name.slice(PREFIX.underlay.length);
             state.removeUnderlay(id);
@@ -1475,6 +1788,8 @@ export default function CadCanvas() {
         else if (key === 'o') state.setActiveTool('place_door');
         else if (key === 'i') state.setActiveTool('place_window');
         else if (key === 'u') state.setActiveTool('place_hvac');
+        else if (key === 'x') state.setActiveTool('draw_duct');
+        else if (key === 'j') state.setActiveTool('place_fitting');
         // Panel toggles
         else if (key === 't') state.togglePanel('toolbox');
         else if (key === 'p') state.togglePanel('properties');
@@ -1546,7 +1861,7 @@ export default function CadCanvas() {
     const drawing = drawingRef.current;
     if (!cvs) return;
 
-    if (activeTool !== 'draw_wall' && activeTool !== 'draw_pipe' && activeTool !== 'add_dimension' && drawing.active) {
+    if (activeTool !== 'draw_wall' && activeTool !== 'draw_pipe' && activeTool !== 'draw_duct' && activeTool !== 'add_dimension' && drawing.active) {
       if (drawing.ghostLine) {
         cvs.remove(drawing.ghostLine);
         drawing.ghostLine = null;
@@ -1565,10 +1880,10 @@ export default function CadCanvas() {
     if (activeTool === 'pan') {
       cvs.defaultCursor = 'grab';
       cvs.selection = false;
-    } else if (activeTool === 'draw_wall' || activeTool === 'add_dimension') {
+    } else if (activeTool === 'draw_wall' || activeTool === 'draw_duct' || activeTool === 'add_dimension') {
       cvs.defaultCursor = 'crosshair';
       cvs.selection = false;
-    } else if (activeTool === 'place_window' || activeTool === 'place_door' || activeTool === 'place_hvac') {
+    } else if (activeTool === 'place_window' || activeTool === 'place_door' || activeTool === 'place_hvac' || activeTool === 'place_fitting') {
       cvs.defaultCursor = 'crosshair';
       cvs.selection = false;
     } else if (activeTool === 'room_detect') {

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { PipeMaterial } from '../store/useCadStore';
+import type { PipeMaterial, DuctShape, DuctMaterial, DuctSide, FittingType } from '../store/useCadStore';
 
 // ── Color Palette ─────────────────────────────────────────────────────────────
 const Colors = {
@@ -930,6 +930,138 @@ export function createPipeModel(
     insulMesh.rotation.z = Math.PI / 2;
     insulMesh.position.set(lengthFt / 2, 0, 0);
     group.add(insulMesh);
+  }
+
+  return group;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 10. Duct Segment Model (parametric — sized to actual dimensions)
+// ═══════════════════════════════════════════════════════════════════════════════
+const DUCT_SIDE_COLORS: Record<DuctSide, number> = {
+  supply: 0x3b82f6,
+  return: 0xef4444,
+};
+
+const DUCT_MATERIAL_METALNESS: Record<DuctMaterial, number> = {
+  sheet_metal: 0.5,
+  flex_r4: 0.1,
+  flex_r6: 0.1,
+  flex_r8: 0.1,
+  spiral: 0.55,
+  fiberglass_board: 0.05,
+  fabric: 0.0,
+  pvc: 0.2,
+};
+
+export function createDuctSegmentModel(
+  lengthFt: number,
+  shape: DuctShape,
+  side: DuctSide,
+  material: DuctMaterial,
+  diameterIn: number,
+  widthIn: number,
+  heightIn: number,
+  showWireframe: boolean = false,
+): THREE.Group {
+  const group = new THREE.Group();
+  const wf = showWireframe;
+  const color = DUCT_SIDE_COLORS[side];
+  const metalness = DUCT_MATERIAL_METALNESS[material] ?? 0.3;
+
+  const mat = makeMat(color, { wireframe: wf, metalness, roughness: 0.45, opacity: 0.85, transparent: true });
+
+  if (shape === 'round') {
+    const radius = (diameterIn / 2) / 12; // inches to feet
+    const geo = new THREE.CylinderGeometry(radius, radius, lengthFt, 16);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.z = Math.PI / 2;
+    group.add(mesh);
+
+    // Spiral seam rings for sheet metal / spiral
+    if (material === 'sheet_metal' || material === 'spiral') {
+      const seamMat = makeMat(Colors.ductFlange, { wireframe: wf, metalness: 0.6, roughness: 0.4 });
+      const ringCount = Math.max(2, Math.floor(lengthFt / 0.3));
+      const spacing = lengthFt / ringCount;
+      for (let i = 0; i < ringCount; i++) {
+        const ring = new THREE.Mesh(
+          new THREE.TorusGeometry(radius + 0.005, 0.006, 6, 16),
+          seamMat,
+        );
+        ring.rotation.y = Math.PI / 2;
+        ring.position.set(-lengthFt / 2 + spacing * i + spacing / 2, 0, 0);
+        group.add(ring);
+      }
+    }
+
+    // End collars
+    const collarMat = makeMat(Colors.ductSilver, { wireframe: wf, metalness: 0.45, roughness: 0.35 });
+    for (const s of [-1, 1]) {
+      const collar = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius + 0.01, radius + 0.01, 0.06, 16),
+        collarMat,
+      );
+      collar.rotation.z = Math.PI / 2;
+      collar.position.set(s * (lengthFt / 2), 0, 0);
+      group.add(collar);
+    }
+  } else {
+    // Rectangular or oval
+    const wFt = widthIn / 12;
+    const hFt = heightIn / 12;
+    const geo = new THREE.BoxGeometry(lengthFt, hFt, wFt);
+    const mesh = new THREE.Mesh(geo, mat);
+    group.add(mesh);
+
+    // Edge highlight
+    const edges = new THREE.EdgesGeometry(geo);
+    const edgeMat = new THREE.LineBasicMaterial({ color, linewidth: 1, transparent: true, opacity: 0.5 });
+    const edgeLine = new THREE.LineSegments(edges, edgeMat);
+    group.add(edgeLine);
+  }
+
+  return group;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 11. Duct Fitting Model (generic node marker)
+// ═══════════════════════════════════════════════════════════════════════════════
+export function createDuctFittingModel(
+  type: FittingType,
+  diameterIn: number,
+  showWireframe: boolean = false,
+): THREE.Group {
+  const group = new THREE.Group();
+  const wf = showWireframe;
+  const radius = (diameterIn / 2) / 12;
+  const fittingColor = 0x8b5cf6;
+
+  if (type.startsWith('elbow_')) {
+    // Torus section for elbow
+    const angle = type === 'elbow_45' ? Math.PI / 4 : Math.PI / 2;
+    const torusRadius = radius * 2;
+    const geo = new THREE.TorusGeometry(torusRadius, radius, 12, 16, angle);
+    const mat = makeMat(fittingColor, { wireframe: wf, metalness: 0.45, roughness: 0.4, opacity: 0.85, transparent: true });
+    const mesh = new THREE.Mesh(geo, mat);
+    group.add(mesh);
+  } else if (type.startsWith('tee_') || type === 'wye' || type === 'splitter') {
+    // Cross-shaped marker
+    const mat = makeMat(fittingColor, { wireframe: wf, metalness: 0.4, roughness: 0.45, opacity: 0.85, transparent: true });
+    const mainGeo = new THREE.CylinderGeometry(radius, radius, radius * 4, 12);
+    const main = new THREE.Mesh(mainGeo, mat);
+    main.rotation.z = Math.PI / 2;
+    group.add(main);
+
+    const branchGeo = new THREE.CylinderGeometry(radius * 0.8, radius * 0.8, radius * 3, 12);
+    const branch = new THREE.Mesh(branchGeo, mat);
+    branch.position.set(0, radius * 1.5, 0);
+    group.add(branch);
+  } else {
+    // Generic sphere marker for other fittings
+    const mat = makeMat(fittingColor, { wireframe: wf, metalness: 0.3, roughness: 0.5, opacity: 0.8, transparent: true });
+    const geo = new THREE.SphereGeometry(radius * 1.2, 12, 12);
+    const mesh = new THREE.Mesh(geo, mat);
+    group.add(mesh);
   }
 
   return group;

@@ -1,8 +1,8 @@
 import { useState, useMemo } from 'react';
 import { useCadStore } from '../store/useCadStore';
-import type { WallMaterial, Opening, HvacUnit, PipeSegment, PipeMaterial, DetectedRoom, UnderlayImage, Annotation } from '../store/useCadStore';
+import type { WallMaterial, Opening, HvacUnit, PipeSegment, PipeMaterial, DetectedRoom, UnderlayImage, Annotation, DuctSegment, DuctFitting, DuctShape, DuctMaterial, DuctSide, DuctRole, FittingType } from '../store/useCadStore';
 import { fmtLength, fmtArea, fmtTemp, smallLengthUnit } from '../../../utils/units';
-import { Settings2, Layers, Ruler, Triangle, Wind, DoorOpen, LayoutGrid, ScanLine, ImageIcon, Lock, Unlock, Trash2, Type, RotateCcw, Bold, Italic, AlignLeft, AlignCenter, AlignRight, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Settings2, Layers, Ruler, Triangle, Wind, DoorOpen, LayoutGrid, ScanLine, ImageIcon, Lock, Unlock, Trash2, Type, RotateCcw, Bold, Italic, AlignLeft, AlignCenter, AlignRight, ChevronLeft, ChevronRight, GitBranch, Diamond } from 'lucide-react';
 
 /** Extract name from a Fabric object (all CAD objects carry a .name string). */
 function fabricName(obj: unknown): string | undefined {
@@ -76,7 +76,23 @@ export default function PropertyInspector() {
     return (floor.pipes ?? []).find(p => p.id === id) ?? null;
   }, [selectedObject, floor]);
 
-  const headerText = selectedWall ? 'Wall Selected' : selectedOpening ? 'Opening Selected' : selectedHvac ? 'HVAC Unit Selected' : selectedPipe ? 'Pipe Selected' : selectedUnderlay ? 'Underlay Selected' : selectedAnnotation ? 'Label Selected' : selectedObject ? 'Object Selected' : 'Canvas Settings';
+  const selectedDuct = useMemo(() => {
+    if (!selectedObject || !floor) return null;
+    const name = fabricName(selectedObject);
+    if (!name?.startsWith('duct-')) return null;
+    const id = name.replace('duct-', '');
+    return (floor.ductSegments ?? []).find(d => d.id === id) ?? null;
+  }, [selectedObject, floor]);
+
+  const selectedFitting = useMemo(() => {
+    if (!selectedObject || !floor) return null;
+    const name = fabricName(selectedObject);
+    if (!name?.startsWith('fitting-')) return null;
+    const id = name.replace('fitting-', '');
+    return (floor.ductFittings ?? []).find(f => f.id === id) ?? null;
+  }, [selectedObject, floor]);
+
+  const headerText = selectedWall ? 'Wall Selected' : selectedOpening ? 'Opening Selected' : selectedHvac ? 'HVAC Unit Selected' : selectedPipe ? 'Pipe Selected' : selectedDuct ? 'Duct Segment Selected' : selectedFitting ? 'Duct Fitting Selected' : selectedUnderlay ? 'Underlay Selected' : selectedAnnotation ? 'Label Selected' : selectedObject ? 'Object Selected' : 'Canvas Settings';
 
   if (!panelProperties) {
     return (
@@ -133,6 +149,12 @@ export default function PropertyInspector() {
           ) : selectedPipe ? (
             <PipePanel pipe={selectedPipe} onUpdate={(patch) => useCadStore.getState().updatePipe(selectedPipe.id, patch)} />
 
+          ) : selectedDuct ? (
+            <DuctSegmentPanel duct={selectedDuct} onUpdate={(patch) => { useCadStore.getState().updateDuctSegment(selectedDuct.id, patch); useCadStore.getState().markDirty(); }} />
+
+          ) : selectedFitting ? (
+            <DuctFittingPanel fitting={selectedFitting} onUpdate={(patch) => { useCadStore.getState().updateDuctFitting(selectedFitting.id, patch); useCadStore.getState().markDirty(); }} />
+
           ) : selectedUnderlay ? (
             <UnderlayPanel
               underlay={selectedUnderlay}
@@ -180,7 +202,7 @@ export default function PropertyInspector() {
           )}
 
           {/* ── Delete Action (shown for any selected entity) ── */}
-          {(selectedWall || selectedOpening || selectedHvac || selectedPipe || selectedAnnotation) && (
+          {(selectedWall || selectedOpening || selectedHvac || selectedPipe || selectedDuct || selectedFitting || selectedAnnotation) && (
             <div className="mt-6 pt-4 border-t border-slate-800/50">
               <button
                 onClick={() => {
@@ -193,6 +215,10 @@ export default function PropertyInspector() {
                     removeHvacUnit(selectedHvac.id);
                   } else if (selectedPipe) {
                     removePipe(selectedPipe.id);
+                  } else if (selectedDuct) {
+                    useCadStore.getState().removeDuctSegment(selectedDuct.id);
+                  } else if (selectedFitting) {
+                    useCadStore.getState().removeDuctFitting(selectedFitting.id);
                   } else if (selectedAnnotation) {
                     removeAnnotation(selectedAnnotation.id);
                   }
@@ -574,6 +600,257 @@ function PipePanel({ pipe, onUpdate }: { pipe: PipeSegment; onUpdate: (patch: Pa
 
       <div className="pt-4 border-t border-slate-800">
         <PropertyField label="ID" value={pipe.id.slice(0, 20) + '…'} isReadOnly />
+      </div>
+    </div>
+  );
+}
+
+// ── Duct segment panel ─────────────────────────────────────────────────────
+const DUCT_SHAPE_LABELS: Record<DuctShape, string> = {
+  round: 'Round',
+  rectangular: 'Rectangular',
+  oval: 'Oval',
+};
+
+const DUCT_MATERIAL_LABELS: Record<DuctMaterial, string> = {
+  sheet_metal: 'Sheet Metal',
+  flex_r4: 'Flex Duct (R-4)',
+  flex_r6: 'Flex Duct (R-6)',
+  flex_r8: 'Flex Duct (R-8)',
+  spiral: 'Spiral',
+  fiberglass_board: 'Fiberglass Board',
+  fabric: 'Fabric Duct',
+  pvc: 'PVC',
+};
+
+const DUCT_SIDE_LABELS: Record<DuctSide, string> = {
+  supply: 'Supply',
+  return: 'Return',
+};
+
+const DUCT_ROLE_LABELS: Record<DuctRole, string> = {
+  trunk: 'Trunk',
+  branch: 'Branch',
+  plenum: 'Plenum',
+  takeoff: 'Takeoff',
+  runout: 'Runout',
+};
+
+const FITTING_TYPE_LABELS: Record<FittingType, string> = {
+  elbow_90: '90° Elbow',
+  elbow_45: '45° Elbow',
+  elbow_radius: 'Radius Elbow',
+  tee_branch: 'Tee (Branch)',
+  tee_straight: 'Tee (Straight)',
+  wye: 'Wye',
+  reducer: 'Reducer',
+  transition_rect_round: 'Transition (Rect→Round)',
+  end_cap: 'End Cap',
+  register_boot: 'Register Boot',
+  return_boot: 'Return Boot',
+  takeoff_round: 'Takeoff (Round)',
+  takeoff_rect: 'Takeoff (Rect)',
+  damper_manual: 'Manual Damper',
+  damper_motorized: 'Motorized Damper',
+  splitter: 'Splitter',
+  turning_vanes: 'Turning Vanes',
+};
+
+function DuctSegmentPanel({ duct, onUpdate }: { duct: DuctSegment; onUpdate: (patch: Partial<DuctSegment>) => void }) {
+  const pxPerFt = useCadStore.getState().projectScale.pxPerFt;
+  const dx = duct.x2 - duct.x1;
+  const dy = duct.y2 - duct.y1;
+  const lengthFt = (Math.sqrt(dx * dx + dy * dy) / pxPerFt).toFixed(2);
+
+  const [localDiameter, setLocalDiameter] = useState((duct.diameterIn ?? 12).toString());
+  const [localWidth, setLocalWidth] = useState((duct.widthIn ?? 12).toString());
+  const [localHeight, setLocalHeight] = useState((duct.heightIn ?? 8).toString());
+  const [localCfm, setLocalCfm] = useState((duct.cfm ?? 0).toString());
+
+  return (
+    <div className="space-y-6 animate-in slide-in-from-right-4 duration-300 fade-in">
+      <div>
+        <h4 className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+          <GitBranch className="w-3 h-3" /> Duct Segment
+        </h4>
+        <PropertyField label="Length" value={`${lengthFt} ft`} isReadOnly />
+
+        {/* Side: Supply / Return */}
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Side</label>
+          <div className="flex gap-1">
+            {(['supply', 'return'] as DuctSide[]).map((s) => (
+              <button key={s} onClick={() => onUpdate({ side: s })}
+                className={`flex-1 px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
+                  duct.side === s
+                    ? s === 'supply'
+                      ? 'border-blue-500/50 bg-blue-500/15 text-blue-400'
+                      : 'border-red-500/50 bg-red-500/15 text-red-400'
+                    : 'border-slate-700 bg-slate-950/60 text-slate-500 hover:text-slate-300'
+                }`}>
+                {DUCT_SIDE_LABELS[s]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Role */}
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Role</label>
+          <select value={duct.role} onChange={e => onUpdate({ role: e.target.value as DuctRole })}
+            className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500/50 transition-colors">
+            {(Object.keys(DUCT_ROLE_LABELS) as DuctRole[]).map(r => (
+              <option key={r} value={r}>{DUCT_ROLE_LABELS[r]}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Shape */}
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Shape</label>
+          <div className="flex gap-1">
+            {(['round', 'rectangular', 'oval'] as DuctShape[]).map((s) => (
+              <button key={s} onClick={() => onUpdate({ shape: s })}
+                className={`flex-1 px-2 py-2 rounded-lg border text-[10px] font-semibold transition-all ${
+                  duct.shape === s
+                    ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-400'
+                    : 'border-slate-700 bg-slate-950/60 text-slate-500 hover:text-slate-300'
+                }`}>
+                {DUCT_SHAPE_LABELS[s]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Dimensions */}
+        {duct.shape === 'round' ? (
+          <div className="mb-4">
+            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Diameter (in)</label>
+            <select value={duct.diameterIn ?? 12} onChange={e => onUpdate({ diameterIn: parseFloat(e.target.value) })}
+              className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500/50 transition-colors">
+              {[4,5,6,7,8,9,10,12,14,16,18,20,22,24,26,28,30,32,34,36].map(d => (
+                <option key={d} value={d}>{d}"</option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div className="flex gap-2 mb-4">
+            <div className="flex-1">
+              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Width (in)</label>
+              <input type="number" value={localWidth} onChange={e => setLocalWidth(e.target.value)}
+                onBlur={() => { const v = parseFloat(localWidth); if (!isNaN(v) && v > 0) onUpdate({ widthIn: v }); }}
+                className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 focus:border-emerald-500/50 rounded-lg px-3 py-2.5 text-sm focus:outline-none transition-colors shadow-inner" />
+            </div>
+            <div className="flex-1">
+              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Height (in)</label>
+              <input type="number" value={localHeight} onChange={e => setLocalHeight(e.target.value)}
+                onBlur={() => { const v = parseFloat(localHeight); if (!isNaN(v) && v > 0) onUpdate({ heightIn: v }); }}
+                className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 focus:border-emerald-500/50 rounded-lg px-3 py-2.5 text-sm focus:outline-none transition-colors shadow-inner" />
+            </div>
+          </div>
+        )}
+
+        {/* Material */}
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Material</label>
+          <select value={duct.material} onChange={e => onUpdate({ material: e.target.value as DuctMaterial })}
+            className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500/50 transition-colors">
+            {(Object.keys(DUCT_MATERIAL_LABELS) as DuctMaterial[]).map(m => (
+              <option key={m} value={m}>{DUCT_MATERIAL_LABELS[m]}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Airflow */}
+      <div className="pt-4 border-t border-slate-800">
+        <h4 className="text-xs font-semibold text-cyan-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+          <Wind className="w-3 h-3" /> Airflow
+        </h4>
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">CFM</label>
+          <input type="number" value={localCfm} onChange={e => setLocalCfm(e.target.value)}
+            onBlur={() => { const v = parseFloat(localCfm); if (!isNaN(v) && v >= 0) onUpdate({ cfm: v }); }}
+            className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 focus:border-emerald-500/50 rounded-lg px-3 py-2.5 text-sm focus:outline-none transition-colors shadow-inner" />
+        </div>
+        <PropertyField label="Velocity" value={duct.velocityFpm ? `${duct.velocityFpm.toFixed(0)} fpm` : '—'} isReadOnly />
+        <PropertyField label="Friction Rate" value={duct.frictionRateInwg100 ? `${duct.frictionRateInwg100.toFixed(4)} in.wg/100ft` : '—'} isReadOnly />
+        <PropertyField label="Pressure Drop" value={duct.pressureDropInwg ? `${duct.pressureDropInwg.toFixed(4)} in.wg` : '—'} isReadOnly />
+      </div>
+
+      <div className="pt-4 border-t border-slate-800">
+        <PropertyField label="ID" value={duct.id.slice(0, 20) + '…'} isReadOnly />
+      </div>
+    </div>
+  );
+}
+
+// ── Duct fitting panel ─────────────────────────────────────────────────────
+function DuctFittingPanel({ fitting, onUpdate }: { fitting: DuctFitting; onUpdate: (patch: Partial<DuctFitting>) => void }) {
+  const [localEquivLen, setLocalEquivLen] = useState(fitting.equivLengthFt.toString());
+
+  return (
+    <div className="space-y-6 animate-in slide-in-from-right-4 duration-300 fade-in">
+      <div>
+        <h4 className="text-xs font-semibold text-violet-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+          <Diamond className="w-3 h-3" /> Duct Fitting
+        </h4>
+
+        {/* Type */}
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Fitting Type</label>
+          <select value={fitting.type} onChange={e => onUpdate({ type: e.target.value as FittingType })}
+            className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500/50 transition-colors">
+            {(Object.keys(FITTING_TYPE_LABELS) as FittingType[]).map(t => (
+              <option key={t} value={t}>{FITTING_TYPE_LABELS[t]}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Shape */}
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Shape</label>
+          <div className="flex gap-1">
+            {(['round', 'rectangular'] as DuctShape[]).map((s) => (
+              <button key={s} onClick={() => onUpdate({ shape: s })}
+                className={`flex-1 px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
+                  fitting.shape === s
+                    ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-400'
+                    : 'border-slate-700 bg-slate-950/60 text-slate-500 hover:text-slate-300'
+                }`}>
+                {DUCT_SHAPE_LABELS[s]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Diameter */}
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Diameter (in)</label>
+          <select value={fitting.diameterIn ?? 12} onChange={e => onUpdate({ diameterIn: parseFloat(e.target.value) })}
+            className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500/50 transition-colors">
+            {[4,5,6,7,8,9,10,12,14,16,18,20,22,24,26,28,30,32,34,36].map(d => (
+              <option key={d} value={d}>{d}"</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Equivalent Length */}
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Equivalent Length (ft)</label>
+          <input type="number" value={localEquivLen} onChange={e => setLocalEquivLen(e.target.value)}
+            onBlur={() => { const v = parseFloat(localEquivLen); if (!isNaN(v) && v >= 0) onUpdate({ equivLengthFt: v }); }}
+            step="1"
+            className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 focus:border-emerald-500/50 rounded-lg px-3 py-2.5 text-sm focus:outline-none transition-colors shadow-inner" />
+        </div>
+
+        <PropertyField label="Pressure Drop" value={fitting.pressureDropInwg ? `${fitting.pressureDropInwg.toFixed(4)} in.wg` : '—'} isReadOnly />
+        <PropertyField label="Position" value={`(${fitting.x.toFixed(0)}, ${fitting.y.toFixed(0)})`} isReadOnly />
+        <PropertyField label="Rotation" value={`${fitting.rotation}°`} isReadOnly />
+      </div>
+
+      <div className="pt-4 border-t border-slate-800">
+        <PropertyField label="ID" value={fitting.id.slice(0, 20) + '…'} isReadOnly />
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { MousePointer2, Hand, SquarePen, LayoutGrid, DoorOpen, Wind, Ruler, Type, ScanLine, ImagePlus, Package, Thermometer, ChevronLeft, ChevronRight, Cylinder } from 'lucide-react';
+import { MousePointer2, Hand, SquarePen, LayoutGrid, DoorOpen, Wind, Ruler, Type, ScanLine, ImagePlus, Package, Thermometer, ChevronLeft, ChevronRight, Cylinder, GitBranch, Diamond } from 'lucide-react';
 import { useCadStore } from '../store/useCadStore';
 import type { ToolType, UnderlayImage } from '../store/useCadStore';
 import AssetLibrary from './AssetLibrary';
@@ -179,6 +179,24 @@ export default function Toolbox() {
           label="Pipe Builder"
           active={activeTool === 'draw_pipe'}
           onClick={() => setActiveTool('draw_pipe')}
+          primary
+        />
+
+        <ToolButton
+          id="draw_duct"
+          icon={<GitBranch className="w-5 h-5" />}
+          label="Draw Duct (X)"
+          active={activeTool === 'draw_duct'}
+          onClick={() => setActiveTool('draw_duct')}
+          primary
+        />
+
+        <ToolButton
+          id="place_fitting"
+          icon={<Diamond className="w-5 h-5" />}
+          label="Place Fitting (J)"
+          active={activeTool === 'place_fitting'}
+          onClick={() => setActiveTool('place_fitting')}
           primary
         />
 
