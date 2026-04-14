@@ -7,7 +7,9 @@ import {
 import {
   type RoomInput, type DesignConditions, type WholeHouseResult,
   type GlassType, type DuctLocation, type WallGradeType, type Construction, type DailyRange,
+  type RoomType, type OccupantActivity, type LightingType, type ApplianceEntry,
   calculateWholeHouse, tonnageFromBtu, createDefaultRoom, createDefaultConditions, GLASS_PRESETS,
+  APPLIANCE_LIBRARY, ROOM_TYPE_PRESETS,
 } from '../engines/manualJ';
 import { lookupByZip } from '../engines/ashraeWeather';
 import { convertAllFloorsToManualJ } from '../engines/cadToManualJ';
@@ -906,6 +908,35 @@ function RoomInputCard({ room, index, expanded, onToggle, onChange, onRemove, ca
     onChange({ glassType, windowUValue: preset.u, windowSHGC: preset.shgc });
   };
 
+  const applyRoomTypePreset = (rt: RoomType) => {
+    const preset = ROOM_TYPE_PRESETS[rt];
+    const appliances: ApplianceEntry[] = preset.appliances.map(key => {
+      const lib = APPLIANCE_LIBRARY[key];
+      return lib
+        ? { type: key, label: lib.label, sensibleBtu: lib.sensibleBtu, latentBtu: lib.latentBtu, count: 1 }
+        : { type: key, label: key, sensibleBtu: 0, latentBtu: 0, count: 1 };
+    });
+    onChange({
+      roomType: rt,
+      occupantCount: preset.occupants,
+      occupantActivity: preset.activity,
+      appliances,
+      lightingType: preset.lighting,
+    });
+  };
+
+  const addAppliance = (key: string) => {
+    const lib = APPLIANCE_LIBRARY[key];
+    if (!lib) return;
+    const existing = room.appliances || [];
+    if (existing.some(a => a.type === key)) return; // already added
+    onChange({ appliances: [...existing, { type: key, label: lib.label, sensibleBtu: lib.sensibleBtu, latentBtu: lib.latentBtu, count: 1 }] });
+  };
+
+  const removeAppliance = (type: string) => {
+    onChange({ appliances: (room.appliances || []).filter(a => a.type !== type) });
+  };
+
   return (
     <div className="glass-panel rounded-2xl border border-slate-800/60 overflow-hidden">
       <button onClick={onToggle}
@@ -982,6 +1013,99 @@ function RoomInputCard({ room, index, expanded, onToggle, onChange, onRemove, ca
               options={[['slab', 'Slab on Grade'], ['crawlspace', 'Crawlspace'], ['basement', 'Basement'], ['over_conditioned', 'Over Conditioned']]}
               onChange={v => onChange({ floorType: v as RoomInput['floorType'] })} />
             <NumericField label="Occupants" value={room.occupantCount} onChange={v => onChange({ occupantCount: v })} />
+          </div>
+
+          {/* ── Room Type & Internal Loads ────────────────────────── */}
+          <div className="mt-6 pt-6 border-t border-slate-700/30">
+            <p className="text-xs font-bold text-amber-400 uppercase tracking-wider mb-4">Internal Loads</p>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-4">
+              {/* Room Type */}
+              <SelectField label="Room Type" value={room.roomType || 'custom'}
+                options={[
+                  ['bedroom', 'Bedroom'], ['bathroom', 'Bathroom'], ['kitchen', 'Kitchen'],
+                  ['living', 'Living Room'], ['dining', 'Dining Room'], ['office', 'Office'],
+                  ['laundry', 'Laundry'], ['utility', 'Utility'], ['garage', 'Garage'],
+                  ['fitness', 'Fitness'], ['media', 'Media Room'], ['library', 'Library'],
+                  ['hallway', 'Hallway'], ['custom', 'Custom'],
+                ]}
+                onChange={v => applyRoomTypePreset(v as RoomType)} />
+
+              {/* Activity Level */}
+              <SelectField label="Activity Level" value={room.occupantActivity || 'seated'}
+                options={[
+                  ['sleeping', 'Sleeping (200/150)'],
+                  ['seated', 'Seated (230/190)'],
+                  ['light_work', 'Light Work (300/300)'],
+                  ['moderate_exercise', 'Moderate (500/500)'],
+                  ['heavy_exercise', 'Heavy (700/700)'],
+                ]}
+                onChange={v => onChange({ occupantActivity: v as OccupantActivity })} />
+
+              {/* Lighting */}
+              <SelectField label="Lighting Type" value={room.lightingType || 'led'}
+                options={[
+                  ['led', 'LED (0.5 BTU/sqft)'],
+                  ['fluorescent', 'Fluorescent (1.0)'],
+                  ['incandescent', 'Incandescent (3.0)'],
+                  ['mixed', 'Mixed (1.5)'],
+                ]}
+                onChange={v => onChange({ lightingType: v as LightingType })} />
+            </div>
+
+            {/* Appliances */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Appliances</p>
+                <select
+                  value=""
+                  onChange={e => { if (e.target.value) addAppliance(e.target.value); e.target.value = ''; }}
+                  className="text-[10px] bg-slate-900/80 border border-slate-700/50 rounded-lg px-2 py-1 text-emerald-400 focus:outline-none"
+                >
+                  <option value="">+ Add Appliance...</option>
+                  {Object.entries(APPLIANCE_LIBRARY)
+                    .filter(([key]) => !(room.appliances || []).some(a => a.type === key))
+                    .map(([key, val]) => (
+                      <option key={key} value={key}>{val.label} ({val.sensibleBtu}S / {val.latentBtu}L)</option>
+                    ))}
+                </select>
+              </div>
+              {(room.appliances || []).length > 0 ? (
+                <div className="space-y-1.5">
+                  {(room.appliances || []).map(a => (
+                    <div key={a.type} className="flex items-center gap-2 bg-slate-800/30 rounded-lg px-3 py-1.5">
+                      <span className="text-xs text-slate-300 flex-1">{a.label}</span>
+                      <span className="text-[10px] text-orange-400 font-mono">{a.sensibleBtu}S</span>
+                      {a.latentBtu !== 0 && <span className="text-[10px] text-sky-400 font-mono">{a.latentBtu}L</span>}
+                      <button onClick={() => removeAppliance(a.type)} className="text-[10px] text-slate-600 hover:text-red-400">
+                        &times;
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[10px] text-slate-600 italic">No appliances — add from dropdown above</p>
+              )}
+            </div>
+
+            {/* Miscellaneous Loads */}
+            <div>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Miscellaneous Loads</p>
+              <div className="grid grid-cols-3 gap-3">
+                <NumericField label="Sensible BTU/hr" value={room.miscSensibleBtu || 0} onChange={v => onChange({ miscSensibleBtu: v })} />
+                <NumericField label="Latent BTU/hr" value={room.miscLatentBtu || 0} onChange={v => onChange({ miscLatentBtu: v })} />
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5 sm:mb-2">Description</label>
+                  <input
+                    type="text"
+                    value={room.miscDescription || ''}
+                    onChange={e => onChange({ miscDescription: e.target.value })}
+                    placeholder="e.g., aquarium, server"
+                    className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl py-3.5 px-4 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all min-h-[44px] placeholder:text-slate-600"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

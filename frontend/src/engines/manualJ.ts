@@ -25,6 +25,22 @@ export type WallGradeType = 'above' | 'below_full' | 'below_partial';
 export type Construction = 'tight' | 'average' | 'leaky';
 export type DailyRange = 'low' | 'medium' | 'high';
 
+export type RoomType =
+  | 'bedroom' | 'bathroom' | 'kitchen' | 'living' | 'dining'
+  | 'office' | 'laundry' | 'utility' | 'garage' | 'fitness'
+  | 'media' | 'library' | 'hallway' | 'custom';
+
+export type OccupantActivity = 'sleeping' | 'seated' | 'light_work' | 'moderate_exercise' | 'heavy_exercise';
+export type LightingType = 'led' | 'fluorescent' | 'incandescent' | 'mixed';
+
+export interface ApplianceEntry {
+  type: string;
+  label: string;
+  sensibleBtu: number;
+  latentBtu: number;
+  count: number;
+}
+
 export interface RoomInput {
   id: string;
   name: string;
@@ -54,8 +70,23 @@ export interface RoomInput {
   // Orientation
   exposureDirection: Exposure;
 
+  // Room classification
+  roomType?: RoomType;
+
   // Occupancy
   occupantCount: number;
+  occupantActivity?: OccupantActivity;
+
+  // Appliances (per-room, toggle-based)
+  appliances?: ApplianceEntry[];
+
+  // Lighting
+  lightingType?: LightingType;
+
+  // Miscellaneous internal loads (the "anything goes" field)
+  miscSensibleBtu?: number;
+  miscLatentBtu?: number;
+  miscDescription?: string;
 
   // Floor metadata (populated when linked to CAD)
   floorName?: string;
@@ -108,7 +139,14 @@ export interface RoomResult {
     ventilationSensible: number;
     ventilationLatent: number;
     solarGain: number;
-    internalGain: number;
+    internalGain: number;       // total (people + appliance + lighting + misc)
+    peopleGain: number;         // sensible only
+    peopleLatent: number;
+    applianceGain: number;      // sensible only
+    applianceLatent: number;
+    lightingGain: number;
+    miscGain: number;           // sensible only
+    miscLatent: number;
     ductLoss: number;
   };
 }
@@ -204,12 +242,78 @@ const DAILY_RANGE_CORRECTION: Record<DailyRange, number> = {
   high:   -5,    // dry/arid climates (DR > 25°F)
 };
 
-/** Internal gains per person — sensible + latent (Manual J Table 6) */
-const INTERNAL_GAIN_SENSIBLE_PER_PERSON = 230;  // BTU/hr (seated, light activity)
-const INTERNAL_GAIN_LATENT_PER_PERSON = 190;    // BTU/hr
+/**
+ * Internal gains per person by activity level (Manual J Table 6 + ASHRAE)
+ * Format: [sensible BTU/hr, latent BTU/hr]
+ */
+const ACTIVITY_GAINS: Record<OccupantActivity, [number, number]> = {
+  sleeping:           [200, 150],
+  seated:             [230, 190],
+  light_work:         [300, 300],
+  moderate_exercise:  [500, 500],
+  heavy_exercise:     [700, 700],
+};
 
-/** Appliance + lighting internal gains */
-const APPLIANCE_GAIN_PER_SQFT = 1.0; // BTU/hr per sqft (lights, appliances baseline)
+/** Lighting heat gain by type (BTU/hr per sqft) */
+const LIGHTING_BTU_PER_SQFT: Record<LightingType, number> = {
+  led:           0.5,
+  fluorescent:   1.0,
+  incandescent:  3.0,
+  mixed:         1.5,
+};
+
+/**
+ * Appliance library — standard residential equipment loads.
+ * Values from ACCA Manual J Table 6 and ASHRAE Fundamentals.
+ * Format: { label, sensibleBtu, latentBtu }
+ */
+export const APPLIANCE_LIBRARY: Record<string, { label: string; sensibleBtu: number; latentBtu: number }> = {
+  gas_range:         { label: 'Gas Range/Oven',        sensibleBtu: 2200, latentBtu: 1200 },
+  electric_range:    { label: 'Electric Range/Oven',   sensibleBtu: 1800, latentBtu: 600 },
+  refrigerator:      { label: 'Refrigerator',          sensibleBtu: 400,  latentBtu: 0 },
+  dishwasher:        { label: 'Dishwasher',            sensibleBtu: 600,  latentBtu: 400 },
+  gas_dryer:         { label: 'Clothes Dryer (Gas)',   sensibleBtu: 3000, latentBtu: 500 },
+  electric_dryer:    { label: 'Clothes Dryer (Elec)',  sensibleBtu: 2500, latentBtu: 300 },
+  washer:            { label: 'Clothes Washer',        sensibleBtu: 400,  latentBtu: 200 },
+  desktop_computer:  { label: 'Desktop Computer',      sensibleBtu: 250,  latentBtu: 0 },
+  laptop:            { label: 'Laptop',                sensibleBtu: 100,  latentBtu: 0 },
+  large_tv:          { label: 'Large TV/Display',      sensibleBtu: 300,  latentBtu: 0 },
+  audio_system:      { label: 'Audio/AV System',       sensibleBtu: 200,  latentBtu: 0 },
+  server_rack:       { label: 'Server/Network Rack',   sensibleBtu: 1500, latentBtu: 0 },
+  hot_tub:           { label: 'Hot Tub / Spa (Indoor)',sensibleBtu: 2000, latentBtu: 4000 },
+  aquarium:          { label: 'Aquarium (Large)',      sensibleBtu: 300,  latentBtu: 200 },
+  water_heater_gas:  { label: 'Water Heater (Gas)',    sensibleBtu: 500,  latentBtu: 100 },
+  water_heater_elec: { label: 'Water Heater (Elec)',   sensibleBtu: 300,  latentBtu: 0 },
+  grow_lights:       { label: 'Grow Lights',           sensibleBtu: 1000, latentBtu: 300 },
+  space_heater:      { label: 'Portable Space Heater', sensibleBtu: 3400, latentBtu: 0 },
+  dehumidifier:      { label: 'Dehumidifier',          sensibleBtu: 600,  latentBtu: -400 },
+};
+
+/**
+ * Room type presets — default appliances, occupancy, activity, lighting.
+ * Applied when user selects a room type; all values are overridable.
+ */
+export const ROOM_TYPE_PRESETS: Record<RoomType, {
+  occupants: number;
+  activity: OccupantActivity;
+  appliances: string[];   // keys into APPLIANCE_LIBRARY
+  lighting: LightingType;
+}> = {
+  bedroom:   { occupants: 2, activity: 'sleeping',          appliances: [],                                    lighting: 'led' },
+  bathroom:  { occupants: 1, activity: 'seated',            appliances: [],                                    lighting: 'led' },
+  kitchen:   { occupants: 2, activity: 'light_work',        appliances: ['gas_range', 'refrigerator', 'dishwasher'], lighting: 'led' },
+  living:    { occupants: 3, activity: 'seated',            appliances: ['large_tv'],                          lighting: 'led' },
+  dining:    { occupants: 4, activity: 'seated',            appliances: [],                                    lighting: 'led' },
+  office:    { occupants: 1, activity: 'seated',            appliances: ['desktop_computer'],                   lighting: 'led' },
+  laundry:   { occupants: 1, activity: 'light_work',        appliances: ['washer', 'gas_dryer'],               lighting: 'led' },
+  utility:   { occupants: 0, activity: 'seated',            appliances: ['water_heater_gas'],                  lighting: 'fluorescent' },
+  garage:    { occupants: 1, activity: 'light_work',        appliances: [],                                    lighting: 'fluorescent' },
+  fitness:   { occupants: 2, activity: 'heavy_exercise',    appliances: [],                                    lighting: 'led' },
+  media:     { occupants: 4, activity: 'seated',            appliances: ['large_tv', 'audio_system'],          lighting: 'led' },
+  library:   { occupants: 2, activity: 'seated',            appliances: ['desktop_computer'],                   lighting: 'led' },
+  hallway:   { occupants: 0, activity: 'seated',            appliances: [],                                    lighting: 'led' },
+  custom:    { occupants: 2, activity: 'seated',            appliances: [],                                    lighting: 'led' },
+};
 
 /** Ground temperature approximation for below-grade walls */
 function groundTemp(outdoorHeatingTemp: number, outdoorCoolingTemp: number): number {
@@ -340,20 +444,41 @@ export function calculateRoom(room: RoomInput, conditions: DesignConditions): Ro
   const infiltSensibleC = AIR_HEAT_FACTOR * infiltCFM * adjustedCoolingDT;
   const infiltLatentC = AIR_LATENT_FACTOR * infiltCFM * Math.max(0, deltaGrains);
 
-  // Internal gains — people
-  const peopleSensible = room.occupantCount * INTERNAL_GAIN_SENSIBLE_PER_PERSON;
-  const peopleLatent = room.occupantCount * INTERNAL_GAIN_LATENT_PER_PERSON;
+  // ── INTERNAL GAINS — PEOPLE ────────────────────────────────────────────
+  const activity = room.occupantActivity || 'seated';
+  const [personSensible, personLatent] = ACTIVITY_GAINS[activity] ?? ACTIVITY_GAINS.seated;
+  const peopleSensible = room.occupantCount * personSensible;
+  const peopleLatent = room.occupantCount * personLatent;
 
-  // Internal gains — appliances & lights
-  const applianceGain = floorArea * APPLIANCE_GAIN_PER_SQFT;
+  // ── INTERNAL GAINS — APPLIANCES ──────────────────────────────────────
+  let applianceSensible = 0;
+  let applianceLatent = 0;
+  if (room.appliances && room.appliances.length > 0) {
+    for (const a of room.appliances) {
+      applianceSensible += a.sensibleBtu * a.count;
+      applianceLatent += a.latentBtu * a.count;
+    }
+  }
+
+  // ── INTERNAL GAINS — LIGHTING ────────────────────────────────────────
+  const lightingType = room.lightingType || 'led';
+  const lightingGain = floorArea * (LIGHTING_BTU_PER_SQFT[lightingType] ?? 0.5);
+
+  // ── INTERNAL GAINS — MISCELLANEOUS ───────────────────────────────────
+  const miscSensible = room.miscSensibleBtu || 0;
+  const miscLatent = room.miscLatentBtu || 0;
+
+  // Total internal gains
+  const totalInternalSensible = peopleSensible + applianceSensible + lightingGain + miscSensible;
+  const totalInternalLatent = peopleLatent + applianceLatent + miscLatent;
 
   // Sensible cooling subtotal
   const roomCoolingSensibleRaw =
     wallGainC + windowConductionC + ceilingGainC + floorGainC +
-    solarGain + infiltSensibleC + peopleSensible + applianceGain;
+    solarGain + infiltSensibleC + totalInternalSensible;
 
   // Latent cooling subtotal
-  const roomCoolingLatentRaw = infiltLatentC + peopleLatent;
+  const roomCoolingLatentRaw = infiltLatentC + totalInternalLatent;
 
   return {
     roomId: room.id,
@@ -372,7 +497,14 @@ export function calculateRoom(room: RoomInput, conditions: DesignConditions): Ro
       ventilationSensible: 0,  // filled in at whole-house level
       ventilationLatent: 0,
       solarGain: Math.round(solarGain),
-      internalGain: Math.round(peopleSensible + applianceGain),
+      internalGain: Math.round(totalInternalSensible),
+      peopleGain: Math.round(peopleSensible),
+      peopleLatent: Math.round(peopleLatent),
+      applianceGain: Math.round(applianceSensible),
+      applianceLatent: Math.round(applianceLatent),
+      lightingGain: Math.round(lightingGain),
+      miscGain: Math.round(miscSensible),
+      miscLatent: Math.round(miscLatent),
       ductLoss: 0,  // filled in at whole-house level
     },
   };
@@ -457,7 +589,15 @@ export function tonnageFromBtu(btu: number): string {
 }
 
 /** Default room with ACCA-grade inputs */
-export function createDefaultRoom(index: number): RoomInput {
+export function createDefaultRoom(index: number, roomType?: RoomType): RoomInput {
+  const preset = ROOM_TYPE_PRESETS[roomType || 'custom'];
+  const appliances: ApplianceEntry[] = preset.appliances.map(key => {
+    const lib = APPLIANCE_LIBRARY[key];
+    return lib
+      ? { type: key, label: lib.label, sensibleBtu: lib.sensibleBtu, latentBtu: lib.latentBtu, count: 1 }
+      : { type: key, label: key, sensibleBtu: 0, latentBtu: 0, count: 1 };
+  });
+
   return {
     id: `room-${Date.now()}-${index}`,
     name: `Room ${index + 1}`,
@@ -478,7 +618,14 @@ export function createDefaultRoom(index: number): RoomInput {
     floorRValue: 19,
     floorType: 'crawlspace',
     exposureDirection: 'S',
-    occupantCount: 2,
+    roomType: roomType || 'custom',
+    occupantCount: preset.occupants,
+    occupantActivity: preset.activity,
+    appliances,
+    lightingType: preset.lighting,
+    miscSensibleBtu: 0,
+    miscLatentBtu: 0,
+    miscDescription: '',
   };
 }
 

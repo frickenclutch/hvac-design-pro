@@ -5,6 +5,30 @@
 
 import type { Floor } from '../features/cad/store/useCadStore';
 import type { RoomInput } from './manualJ';
+import { type RoomType, ROOM_TYPE_PRESETS, APPLIANCE_LIBRARY, type ApplianceEntry } from './manualJ';
+
+/**
+ * Guess room type from its name for auto-populating internal load presets.
+ */
+function guessRoomType(name: string): RoomType {
+  const n = name.toLowerCase();
+  if (/kitchen|cook|pantry/.test(n)) return 'kitchen';
+  if (/bed|master|primary\s*bed|sleep|guest\s*suite/.test(n)) return 'bedroom';
+  if (/bath|shower|wc|restroom|powder/.test(n)) return 'bathroom';
+  if (/living|great\s*room|family|den/.test(n)) return 'living';
+  if (/dining|eat/.test(n)) return 'dining';
+  if (/office|study|work/.test(n)) return 'office';
+  if (/laundry|wash/.test(n)) return 'laundry';
+  if (/util|mechanic|furnace|boiler|hvac/.test(n)) return 'utility';
+  if (/garage|carport/.test(n)) return 'garage';
+  if (/gym|fitness|exercise/.test(n)) return 'fitness';
+  if (/media|theater|theatre|cinema/.test(n)) return 'media';
+  if (/library|reading|flex/.test(n)) return 'library';
+  if (/hall|corridor|foyer|entry|lobby|stair|vestibule/.test(n)) return 'hallway';
+  if (/closet|storage|attic/.test(n)) return 'custom';
+  if (/studio/.test(n)) return 'media';
+  return 'custom';
+}
 
 export interface ConvertedRoom extends RoomInput {
   cadRoomId: string; // back-reference to the CAD detected room
@@ -92,7 +116,20 @@ export function convertCadRoomsToManualJ(
       floorRValue: 19,
       floorType: 'crawlspace' as const,
       exposureDirection: 'S' as const,
-      occupantCount: Math.max(1, Math.round(area / 200)), // ~1 person per 200 sq ft
+      // Internal loads from guessed room type
+      roomType: guessRoomType(room.name),
+      occupantCount: Math.max(ROOM_TYPE_PRESETS[guessRoomType(room.name)].occupants, Math.round(area / 200)),
+      occupantActivity: ROOM_TYPE_PRESETS[guessRoomType(room.name)].activity,
+      appliances: ROOM_TYPE_PRESETS[guessRoomType(room.name)].appliances.map(key => {
+        const lib = APPLIANCE_LIBRARY[key];
+        return lib
+          ? { type: key, label: lib.label, sensibleBtu: lib.sensibleBtu, latentBtu: lib.latentBtu, count: 1 }
+          : { type: key, label: key, sensibleBtu: 0, latentBtu: 0, count: 1 } as ApplianceEntry;
+      }),
+      lightingType: ROOM_TYPE_PRESETS[guessRoomType(room.name)].lighting,
+      miscSensibleBtu: 0,
+      miscLatentBtu: 0,
+      miscDescription: '',
     };
   });
 }
