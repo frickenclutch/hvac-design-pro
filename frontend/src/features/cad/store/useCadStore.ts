@@ -1062,3 +1062,35 @@ export const useCadStore = create<CadState>((set, get) => {
     },
   };
 });
+
+// ── LocalStorage Persistence ─────────────────────────────────────────────────
+const CAD_STORAGE_KEY = 'hvac_cad_drawing';
+
+// Load persisted drawing on startup
+try {
+  const saved = localStorage.getItem(CAD_STORAGE_KEY);
+  if (saved) {
+    const data = JSON.parse(saved);
+    // Only restore if there is actual geometry
+    const hasGeometry = data.floors?.some(
+      (f: any) => f.walls?.length > 0 || f.rooms?.length > 0 || f.openings?.length > 0
+    );
+    if (hasGeometry) {
+      useCadStore.getState().loadDrawing(data);
+    }
+  }
+} catch { /* corrupt or missing — start fresh */ }
+
+// Auto-save when floors change (debounced)
+let _cadSaveTimer: ReturnType<typeof setTimeout> | null = null;
+useCadStore.subscribe((state, prevState) => {
+  if (state.floors !== prevState.floors) {
+    if (_cadSaveTimer) clearTimeout(_cadSaveTimer);
+    _cadSaveTimer = setTimeout(() => {
+      try {
+        const drawing = useCadStore.getState().serializeDrawing();
+        localStorage.setItem(CAD_STORAGE_KEY, JSON.stringify(drawing));
+      } catch { /* storage full */ }
+    }, 500);
+  }
+});

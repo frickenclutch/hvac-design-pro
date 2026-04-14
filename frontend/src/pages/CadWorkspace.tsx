@@ -42,13 +42,13 @@ export default function CadWorkspace() {
 
     const store = useCadStore.getState();
 
-    // Reset to a clean slate FIRST — prevents data from a previous project
-    // bleeding into this one. Each project is its own entity.
-    store.loadDrawing({});
-    store.setProjectId(projectId || null);
-    store.setDrawingId(null);
-
     if (projectId) {
+      // Reset to a clean slate FIRST — prevents data from a previous project
+      // bleeding into this one. Each project is its own entity.
+      store.loadDrawing({});
+      store.setProjectId(projectId);
+      store.setDrawingId(null);
+
       // Load this project's saved drawing from localStorage / D1
       loadDrawing(projectId).then((saved) => {
         // Guard: only apply if we're still on the same project
@@ -58,6 +58,29 @@ export default function CadWorkspace() {
           if (saved.id) useCadStore.getState().setDrawingId(saved.id);
         }
       });
+    } else {
+      // Draft mode: preserve any geometry already in the store (e.g. from
+      // Manual J → Export to CAD). If the store is empty, try loading from
+      // localStorage persistence.
+      const hasGeometry = store.floors.some(
+        f => f.walls.length > 0 || f.rooms.length > 0
+      );
+      if (!hasGeometry) {
+        try {
+          const saved = localStorage.getItem('hvac_cad_drawing');
+          if (saved) {
+            const data = JSON.parse(saved);
+            const savedHasGeometry = data.floors?.some(
+              (f: any) => (f.walls?.length || 0) > 0 || (f.rooms?.length || 0) > 0
+            );
+            if (savedHasGeometry) {
+              store.loadDrawing(data);
+            }
+          }
+        } catch { /* start fresh */ }
+      }
+      store.setProjectId(null);
+      store.setDrawingId(null);
     }
   }, [id]);
 

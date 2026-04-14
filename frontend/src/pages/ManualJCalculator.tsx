@@ -20,6 +20,7 @@ import { useProjectStore } from '../stores/useProjectStore';
 
 // ── Persistence helpers ───────────────────────────────────────────────────────
 const STORAGE_KEY = 'hvac_manualj_inputs';
+const RESULTS_KEY = 'hvac_manualj_results';
 
 function loadSavedInputs(): { buildingType: 'residential' | 'commercial'; rooms: RoomInput[]; conditions: DesignConditions } | null {
   try {
@@ -179,6 +180,10 @@ export default function ManualJCalculator() {
   const runCalculation = () => {
     const res = calculateWholeHouse(rooms, conditions);
     setWholeHouse(res);
+    // Persist results so Manual D can import them
+    try {
+      localStorage.setItem(RESULTS_KEY, JSON.stringify(res));
+    } catch { /* storage full */ }
   };
 
   const resetAll = () => {

@@ -14,6 +14,7 @@ import Mason from '../components/Mason';
 
 const STORAGE_KEY = 'hvac_manuald_inputs';
 const MANUALJ_KEY = 'hvac_manualj_inputs';
+const MANUALJ_RESULTS_KEY = 'hvac_manualj_results';
 
 type SavedState = { application: 'residential' | 'commercial'; equipmentCfm: number; blowerEsp: number; filterDrop: number; coilDrop: number; ductMaterial: DuctMaterial; preferredShape: DuctShape; maxAspectRatio: number; rooms: ManualDRoomInput[] };
 
@@ -106,24 +107,79 @@ export default function ManualDCalculator() {
 
   const importFromManualJ = useCallback(() => {
     try {
-      const raw = localStorage.getItem(MANUALJ_KEY);
-      if (!raw) { alert('No Manual J data found. Run a Manual J calculation first.'); return; }
-      const data = JSON.parse(raw);
-      if (!data.rooms || !Array.isArray(data.rooms)) { alert('Invalid Manual J data format.'); return; }
-      const imported: ManualDRoomInput[] = data.rooms.map((r: any, i: number) => ({
-        roomId: uid(),
-        roomName: r.name || `Room ${i + 1}`,
-        requiredCfm: Math.round((r.coolingBtu ?? r.area ?? 100) / 12),
-        actualLengthFt: 25,
-        fittings: [
-          { type: 'takeoff_round' as FittingType, qty: 1 },
-          { type: 'elbow_90' as FittingType, qty: 1 },
-          { type: 'register_boot' as FittingType, qty: 1 },
-        ],
-      }));
-      if (imported.length > 0) {
-        setRooms(imported);
-        setResult(null);
+      // First try to load calculated results (preferred — has actual BTU loads)
+      const resultsRaw = localStorage.getItem(MANUALJ_RESULTS_KEY);
+      const inputsRaw = localStorage.getItem(MANUALJ_KEY);
+
+      if (!resultsRaw && !inputsRaw) {
+        alert('No Manual J data found. Run a Manual J calculation first.');
+        return;
+      }
+
+      if (resultsRaw) {
+        // Use calculated results — proper CFM distribution from cooling loads
+        const results = JSON.parse(resultsRaw);
+        if (!results.rooms || !Array.isArray(results.rooms)) {
+          alert('Invalid Manual J results. Please re-run the Manual J calculation.');
+          return;
+        }
+
+        const totalCoolingBtu = results.totalCoolingBtu || results.rooms.reduce((s: number, r: any) => s + (r.coolingBtuTotal || 0), 0);
+        const systemCfm = Math.round((results.recommendedTons || 3) * 400);
+
+        const imported: ManualDRoomInput[] = results.rooms.map((r: any) => {
+          const roomCfm = totalCoolingBtu > 0
+            ? Math.round(systemCfm * ((r.coolingBtuTotal || 0) / totalCoolingBtu))
+            : Math.round(systemCfm / results.rooms.length);
+
+          return {
+            roomId: uid(),
+            roomName: r.roomName || r.name || 'Unknown Room',
+            requiredCfm: roomCfm,
+            actualLengthFt: roomCfm < 50 ? 12 : roomCfm < 100 ? 18 : roomCfm < 150 ? 25 : roomCfm < 200 ? 30 : roomCfm < 300 ? 35 : 40,
+            fittings: [
+              { type: 'takeoff_round' as FittingType, qty: 1 },
+              { type: 'elbow_90' as FittingType, qty: 1 },
+              { type: 'register_boot' as FittingType, qty: 1 },
+            ],
+          };
+        });
+
+        if (imported.length > 0) {
+          setEquipmentCfm(systemCfm);
+          setRooms(imported);
+          setResult(null);
+        }
+      } else if (inputsRaw) {
+        // Fallback: use room inputs (no results available)
+        const data = JSON.parse(inputsRaw);
+        if (!data.rooms || !Array.isArray(data.rooms)) {
+          alert('Invalid Manual J data format.');
+          return;
+        }
+
+        // Estimate CFM from room area and assume ~1 CFM per sq ft as rough baseline
+        const imported: ManualDRoomInput[] = data.rooms.map((r: any, i: number) => {
+          const area = (r.lengthFt || 12) * (r.widthFt || 10);
+          const estimatedCfm = Math.round(area * 1.0); // ~1 CFM/sqft baseline
+
+          return {
+            roomId: uid(),
+            roomName: r.name || `Room ${i + 1}`,
+            requiredCfm: estimatedCfm,
+            actualLengthFt: 25,
+            fittings: [
+              { type: 'takeoff_round' as FittingType, qty: 1 },
+              { type: 'elbow_90' as FittingType, qty: 1 },
+              { type: 'register_boot' as FittingType, qty: 1 },
+            ],
+          };
+        });
+
+        if (imported.length > 0) {
+          setRooms(imported);
+          setResult(null);
+        }
       }
     } catch { alert('Failed to parse Manual J data.'); }
   }, []);
