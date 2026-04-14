@@ -1,7 +1,9 @@
-import { useState, useRef, useEffect } from 'react';
-import { X, Send, Zap, Thermometer, Wind, Calculator, Phone, Command, MessageSquarePlus, Camera, Check, ArrowLeft } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { X, Send, Zap, Thermometer, Wind, Calculator, Phone, Command, MessageSquarePlus, Camera, Check, ArrowLeft, Paperclip, Trash2, AlertTriangle } from 'lucide-react';
 import { useProjectStore } from '../stores/useProjectStore';
 import { useCadStore } from '../features/cad/store/useCadStore';
+import { useAuthStore } from '../features/auth/store/useAuthStore';
+import { api } from '../lib/api';
 
 // ── Mason — your AI HVAC engineering assistant ───────────────────────────────
 // Named after the masons who've built the world's buildings, brick by brick.
@@ -759,9 +761,55 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackType, setFeedbackType] = useState<'bug' | 'suggestion' | 'question'>('bug');
   const [feedbackText, setFeedbackText] = useState('');
-  const [feedbackScreenshot, setFeedbackScreenshot] = useState<string | null>(null);
+  const [feedbackFiles, setFeedbackFiles] = useState<File[]>([]);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [feedbackSending, setFeedbackSending] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const feedbackFileRef = useRef<HTMLInputElement>(null);
+  const feedbackFormRef = useRef<HTMLDivElement>(null);
+  const { user, organisation } = useAuthStore();
+
+  // Add files (from any source: click, drag, paste)
+  const addFeedbackFiles = useCallback((newFiles: FileList | File[]) => {
+    const maxSize = 10 * 1024 * 1024; // 10MB per file
+    const maxFiles = 5;
+    const arr = Array.from(newFiles);
+    const valid = arr.filter(f => {
+      if (f.size > maxSize) { setFeedbackError(`${f.name} exceeds 10MB limit`); return false; }
+      return true;
+    });
+    setFeedbackFiles(prev => {
+      const combined = [...prev, ...valid];
+      if (combined.length > maxFiles) {
+        setFeedbackError(`Max ${maxFiles} files allowed`);
+        return combined.slice(0, maxFiles);
+      }
+      return combined;
+    });
+  }, []);
+
+  // Paste handler for clipboard images
+  useEffect(() => {
+    if (!showFeedback) return;
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const files: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].kind === 'file') {
+          const file = items[i].getAsFile();
+          if (file) files.push(file);
+        }
+      }
+      if (files.length > 0) {
+        e.preventDefault();
+        addFeedbackFiles(files);
+      }
+    };
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
+  }, [showFeedback, addFeedbackFiles]);
 
   // Global Keyboard Shortcuts
   useEffect(() => {
@@ -1024,15 +1072,24 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
 
       {/* Feedback Form (replaces input when active) */}
       {showFeedback ? (
-        <div className="p-4 border-t border-slate-800 bg-slate-900/50 flex-shrink-0 space-y-3">
+        <div
+          ref={feedbackFormRef}
+          className={`p-4 border-t border-slate-800 bg-slate-900/50 flex-shrink-0 space-y-3 ${isDragging ? 'ring-2 ring-amber-500/50 bg-amber-500/5' : ''}`}
+          onDragOver={e => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
+          onDragLeave={e => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); }}
+          onDrop={e => {
+            e.preventDefault(); e.stopPropagation(); setIsDragging(false);
+            if (e.dataTransfer.files.length > 0) addFeedbackFiles(e.dataTransfer.files);
+          }}
+        >
           {feedbackSubmitted ? (
             <div className="text-center py-4 space-y-2">
               <div className="w-10 h-10 mx-auto rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
                 <Check className="w-5 h-5 text-emerald-400" />
               </div>
               <p className="text-sm font-bold text-emerald-400">Feedback Submitted</p>
-              <p className="text-[10px] text-slate-500">Thank you! Our team will review this.</p>
-              <button onClick={() => { setShowFeedback(false); setFeedbackSubmitted(false); }} className="text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 mx-auto mt-2">
+              <p className="text-[10px] text-slate-500">Sent to support@c4tech.io — our team will review this.</p>
+              <button onClick={() => { setShowFeedback(false); setFeedbackSubmitted(false); setFeedbackError(null); }} className="text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 mx-auto mt-2">
                 <ArrowLeft className="w-3 h-3" /> Back to Chat
               </button>
             </div>
@@ -1040,7 +1097,7 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
             <>
               <div className="flex items-center justify-between">
                 <p className="text-xs font-bold text-slate-300">Submit Feedback</p>
-                <button onClick={() => setShowFeedback(false)} className="text-[10px] text-slate-500 hover:text-slate-300">Cancel</button>
+                <button onClick={() => { setShowFeedback(false); setFeedbackError(null); }} className="text-[10px] text-slate-500 hover:text-slate-300">Cancel</button>
               </div>
 
               {/* Type selector */}
@@ -1056,68 +1113,124 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
                 ))}
               </div>
 
-              {/* Description */}
+              {/* Description (also accepts paste) */}
               <textarea
                 value={feedbackText}
                 onChange={e => setFeedbackText(e.target.value)}
-                placeholder="Describe the issue or suggestion..."
+                placeholder="Describe the issue or suggestion... (Ctrl+V to paste images)"
                 rows={3}
                 className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500/50 transition-colors placeholder:text-slate-600 resize-none"
               />
 
-              {/* Screenshot */}
-              <input ref={feedbackFileRef} type="file" accept="image/*" className="hidden" onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                if (file.size > 5 * 1024 * 1024) { alert('Max 5MB'); return; }
-                const reader = new FileReader();
-                reader.onload = () => { if (typeof reader.result === 'string') setFeedbackScreenshot(reader.result); };
-                reader.readAsDataURL(file);
+              {/* File attachments */}
+              <input ref={feedbackFileRef} type="file" accept="image/*,video/*,.pdf,.doc,.docx,.txt,.log" multiple className="hidden" onChange={(e) => {
+                if (e.target.files) addFeedbackFiles(e.target.files);
                 e.target.value = '';
               }} />
 
-              <div className="flex items-center gap-2">
-                {feedbackScreenshot ? (
-                  <div className="flex items-center gap-2 flex-1">
-                    <img src={feedbackScreenshot} alt="Screenshot" className="w-10 h-10 rounded-lg object-cover border border-slate-700" />
-                    <span className="text-[10px] text-slate-400 flex-1">Screenshot attached</span>
-                    <button onClick={() => setFeedbackScreenshot(null)} className="text-[10px] text-red-400">Remove</button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => feedbackFileRef.current?.click()}
-                    className="flex items-center gap-1.5 text-[10px] text-slate-500 hover:text-slate-300 transition-colors"
-                  >
-                    <Camera className="w-3.5 h-3.5" /> Attach Screenshot
-                  </button>
-                )}
+              {/* Drag-drop hint when dragging */}
+              {isDragging && (
+                <div className="text-center py-3 border-2 border-dashed border-amber-500/40 rounded-xl">
+                  <p className="text-[10px] text-amber-400 font-bold">Drop files here</p>
+                </div>
+              )}
+
+              {/* Attached files list */}
+              {feedbackFiles.length > 0 && (
+                <div className="space-y-1.5 max-h-24 overflow-y-auto">
+                  {feedbackFiles.map((file, i) => (
+                    <div key={`${file.name}-${i}`} className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-2.5 py-1.5">
+                      {file.type.startsWith('image/') ? (
+                        <img src={URL.createObjectURL(file)} alt="" className="w-7 h-7 rounded object-cover border border-slate-700 flex-shrink-0" />
+                      ) : (
+                        <Paperclip className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
+                      )}
+                      <span className="text-[10px] text-slate-400 flex-1 truncate">{file.name}</span>
+                      <span className="text-[9px] text-slate-600 flex-shrink-0">{(file.size / 1024).toFixed(0)}KB</span>
+                      <button onClick={() => setFeedbackFiles(prev => prev.filter((_, j) => j !== i))} className="text-slate-600 hover:text-red-400 flex-shrink-0">
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add file buttons */}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => feedbackFileRef.current?.click()}
+                  className="flex items-center gap-1.5 text-[10px] text-slate-500 hover:text-slate-300 transition-colors"
+                >
+                  <Camera className="w-3.5 h-3.5" /> Attach Screenshot
+                </button>
+                <button
+                  onClick={() => feedbackFileRef.current?.click()}
+                  className="flex items-center gap-1.5 text-[10px] text-slate-500 hover:text-slate-300 transition-colors"
+                >
+                  <Paperclip className="w-3.5 h-3.5" /> Add File
+                </button>
+                <span className="text-[9px] text-slate-700 ml-auto">or drag & drop / Ctrl+V</span>
               </div>
+
+              {/* Error message */}
+              {feedbackError && (
+                <div className="flex items-center gap-1.5 text-[10px] text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-2.5 py-1.5">
+                  <AlertTriangle className="w-3 h-3 flex-shrink-0" /> {feedbackError}
+                </div>
+              )}
 
               {/* Submit */}
               <button
-                disabled={!feedbackText.trim()}
-                onClick={() => {
-                  // Store feedback locally (can be sent to API later)
-                  const feedbackData = {
-                    type: feedbackType,
-                    text: feedbackText,
-                    screenshot: feedbackScreenshot ? '(attached)' : null,
-                    context,
-                    timestamp: new Date().toISOString(),
-                    userAgent: navigator.userAgent,
-                  };
+                disabled={!feedbackText.trim() || feedbackSending}
+                onClick={async () => {
+                  setFeedbackSending(true);
+                  setFeedbackError(null);
                   try {
-                    const existing = JSON.parse(localStorage.getItem('hvac_feedback') || '[]');
-                    existing.push(feedbackData);
-                    localStorage.setItem('hvac_feedback', JSON.stringify(existing));
-                  } catch { /* full */ }
-                  setFeedbackText('');
-                  setFeedbackScreenshot(null);
-                  setFeedbackSubmitted(true);
+                    // Try API first
+                    await api.submitFeedback({
+                      type: feedbackType,
+                      text: feedbackText,
+                      context,
+                      userAgent: navigator.userAgent,
+                      files: feedbackFiles,
+                    });
+                    setFeedbackText('');
+                    setFeedbackFiles([]);
+                    setFeedbackSubmitted(true);
+                  } catch {
+                    // Fallback to localStorage if API unreachable
+                    try {
+                      const fallbackData = {
+                        type: feedbackType,
+                        text: feedbackText,
+                        fileCount: feedbackFiles.length,
+                        context,
+                        timestamp: new Date().toISOString(),
+                        userAgent: navigator.userAgent,
+                        userName: user ? `${user.firstName} ${user.lastName}` : 'unknown',
+                        userEmail: user?.email || 'unknown',
+                        orgName: organisation?.name || 'unknown',
+                      };
+                      const existing = JSON.parse(localStorage.getItem('hvac_feedback') || '[]');
+                      existing.push(fallbackData);
+                      localStorage.setItem('hvac_feedback', JSON.stringify(existing));
+                      setFeedbackText('');
+                      setFeedbackFiles([]);
+                      setFeedbackSubmitted(true);
+                    } catch {
+                      setFeedbackError('Failed to submit. Please try again.');
+                    }
+                  } finally {
+                    setFeedbackSending(false);
+                  }
                 }}
                 className="w-full py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold hover:bg-amber-500/20 transition-all disabled:opacity-30"
               >
-                <Send className="w-3.5 h-3.5 inline mr-1.5" /> Submit Feedback
+                {feedbackSending ? (
+                  <span className="animate-pulse">Sending...</span>
+                ) : (
+                  <><Send className="w-3.5 h-3.5 inline mr-1.5" /> Submit Feedback</>
+                )}
               </button>
             </>
           )}

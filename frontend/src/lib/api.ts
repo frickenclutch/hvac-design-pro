@@ -176,6 +176,29 @@ class ApiClient {
   async deleteDrawing(id: string) {
     return this.request<{ ok: boolean }>(`/api/cad/${id}`, { method: 'DELETE' });
   }
+
+  // Feedback
+  async submitFeedback(data: {
+    type: string;
+    text: string;
+    context: string;
+    userAgent: string;
+    files: File[];
+  }) {
+    const formData = new FormData();
+    formData.append('type', data.type);
+    formData.append('text', data.text);
+    formData.append('context', data.context);
+    formData.append('userAgent', data.userAgent);
+    for (const file of data.files) {
+      formData.append('files', file);
+    }
+
+    return this.request<{ id: string; status: string; attachmentCount: number }>('/api/feedback', {
+      method: 'POST',
+      body: formData,
+    });
+  }
 }
 
 export const api = new ApiClient();
