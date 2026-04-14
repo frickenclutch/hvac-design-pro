@@ -8,7 +8,9 @@
  */
 
 const RESEND_API = 'https://api.resend.com/emails';
-const FROM_ADDRESS = 'HVAC DesignPro <onboarding@hvac-design-pro.pages.dev>';
+// Resend requires a verified domain. Use onboarding@resend.dev for free tier,
+// or configure a custom domain (e.g., noreply@c4tech.co) in the Resend dashboard.
+const FROM_ADDRESS = 'HVAC DesignPro <onboarding@resend.dev>';
 
 interface EmailPayload {
   to: string;
