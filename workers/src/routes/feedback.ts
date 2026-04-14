@@ -10,7 +10,7 @@ interface Env {
 
 export const feedbackRoutes = new Hono<{ Bindings: Env }>();
 
-const SUPPORT_EMAIL = 'support@c4tech.io';
+const SUPPORT_EMAIL = 'support@c4tech.co';
 
 // Submit feedback (multipart: text fields + optional file attachments)
 feedbackRoutes.post('/', async (c) => {
