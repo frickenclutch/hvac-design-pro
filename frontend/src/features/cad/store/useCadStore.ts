@@ -1043,6 +1043,17 @@ export const useCadStore = create<CadState>((set, get) => {
         ductSystems: f.ductSystems ?? [],
         radiantZones: f.radiantZones ?? [],
       }));
+
+      // Sync floorCounter to highest existing floor index so addFloor()
+      // never creates a duplicate ID that collides with a loaded floor.
+      for (const f of floors) {
+        const match = f.id?.match(/^floor-(\d+)$/);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num >= floorCounter) floorCounter = num + 1;
+        }
+      }
+
       set({
         floors,
         activeFloorId: data.activeFloorId ?? data.floors?.[0]?.id ?? 'floor-1',
