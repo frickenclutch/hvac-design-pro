@@ -34,6 +34,9 @@ interface ProjectState {
 
   // Create a new project from inside CAD and make it active
   createProject: (project: { name: string; type: string; address: string; city: string }) => string;
+
+  // Read-only access to the project list (for selectors/dialogs)
+  getProjectList: () => Project[];
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -137,5 +140,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       activeProjectAddress: `${project.address}${project.city ? `, ${project.city}` : ''}`,
     });
     return id;
+  },
+
+  getProjectList: () => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
   },
 }));

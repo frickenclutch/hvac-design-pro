@@ -16,29 +16,57 @@ import { useCadStore } from '../features/cad/store/useCadStore';
 import RetailerFinderPanel from '../features/retailer/components/RetailerFinderPanel';
 import { useRetailerStore } from '../features/retailer/store/useRetailerStore';
 import Mason from '../components/Mason';
+import ProjectContextBar from '../components/ProjectContextBar';
+import ProjectGateDialog from '../components/ProjectGateDialog';
 import { useProjectStore } from '../stores/useProjectStore';
 
-// ── Persistence helpers ───────────────────────────────────────────────────────
-const STORAGE_KEY = 'hvac_manualj_inputs';
-const RESULTS_KEY = 'hvac_manualj_results';
+// ── Persistence helpers (project-scoped) ─────────────────────────────────────
+function getInputsKey(projectId: string | null): string {
+  return `hvac_manualj_inputs_${projectId || 'draft'}`;
+}
+function getResultsKey(projectId: string | null): string {
+  return `hvac_manualj_results_${projectId || 'draft'}`;
+}
 
-function loadSavedInputs(): { buildingType: 'residential' | 'commercial'; rooms: RoomInput[]; conditions: DesignConditions } | null {
+// One-time migration: move old global keys to draft if no scoped data exists
+(function migrateGlobalKeys() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const oldInputs = localStorage.getItem('hvac_manualj_inputs');
+    const oldResults = localStorage.getItem('hvac_manualj_results');
+    if (oldInputs && !localStorage.getItem('hvac_manualj_inputs_draft')) {
+      localStorage.setItem('hvac_manualj_inputs_draft', oldInputs);
+    }
+    if (oldResults && !localStorage.getItem('hvac_manualj_results_draft')) {
+      localStorage.setItem('hvac_manualj_results_draft', oldResults);
+    }
+  } catch { /* ignore */ }
+})();
+
+function loadSavedInputs(projectId: string | null): { buildingType: 'residential' | 'commercial'; rooms: RoomInput[]; conditions: DesignConditions } | null {
+  try {
+    const raw = localStorage.getItem(getInputsKey(projectId));
     if (!raw) return null;
     return JSON.parse(raw);
   } catch { return null; }
 }
 
-function saveInputs(buildingType: string, rooms: RoomInput[], conditions: DesignConditions) {
+function saveInputs(projectId: string | null, buildingType: string, rooms: RoomInput[], conditions: DesignConditions) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ buildingType, rooms, conditions }));
+    localStorage.setItem(getInputsKey(projectId), JSON.stringify({ buildingType, rooms, conditions }));
   } catch { /* storage full — silently fail */ }
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function ManualJCalculator() {
-  const saved = useRef(loadSavedInputs()).current;
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const activeProjectName = useProjectStore((s) => s.activeProjectName);
+  const displayName = activeProjectName || 'HVAC DesignPro';
+
+  // Project gate: show dialog if no project selected
+  const [gateAccepted, setGateAccepted] = useState(!!activeProjectId);
+  const showGate = !activeProjectId && !gateAccepted;
+
+  const saved = useRef(loadSavedInputs(activeProjectId)).current;
   const [buildingType, setBuildingType] = useState<'residential' | 'commercial'>(saved?.buildingType ?? 'residential');
   const [rooms, setRooms] = useState<RoomInput[]>(saved?.rooms ?? [createDefaultRoom(0)]);
   const [wholeHouse, setWholeHouse] = useState<WholeHouseResult | null>(null);
@@ -51,18 +79,32 @@ export default function ManualJCalculator() {
   const [showExportCadDialog, setShowExportCadDialog] = useState(false);
   const [layoutAlgorithm, setLayoutAlgorithm] = useState<LayoutAlgorithm>('horizontal_strip');
 
-  const activeProjectName = useProjectStore((s) => s.activeProjectName);
-  const displayName = activeProjectName || 'HVAC DesignPro';
+  // Reload data when project changes
+  useEffect(() => {
+    const data = loadSavedInputs(activeProjectId);
+    if (data) {
+      setBuildingType(data.buildingType);
+      setRooms(data.rooms);
+      setConditions(data.conditions);
+    } else {
+      setBuildingType('residential');
+      setRooms([createDefaultRoom(0)]);
+      setConditions(createDefaultConditions());
+    }
+    setWholeHouse(null);
+    setGateAccepted(!!activeProjectId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProjectId]);
 
-  // Auto-save all inputs to localStorage whenever they change
+  // Auto-save all inputs to localStorage whenever they change (project-scoped)
   const isFirstRender = useRef(true);
   useEffect(() => {
     if (isFirstRender.current) { isFirstRender.current = false; return; }
-    saveInputs(buildingType, rooms, conditions);
+    saveInputs(activeProjectId, buildingType, rooms, conditions);
     setSaveStatus('saved');
     const t = setTimeout(() => setSaveStatus('idle'), 1500);
     return () => clearTimeout(t);
-  }, [buildingType, rooms, conditions]);
+  }, [buildingType, rooms, conditions, activeProjectId]);
 
   const addRoom = (floorName?: string) => {
     const newRoom = createDefaultRoom(rooms.length);
@@ -180,9 +222,9 @@ export default function ManualJCalculator() {
   const runCalculation = () => {
     const res = calculateWholeHouse(rooms, conditions);
     setWholeHouse(res);
-    // Persist results so Manual D can import them
+    // Persist results so Manual D can import them (project-scoped)
     try {
-      localStorage.setItem(RESULTS_KEY, JSON.stringify(res));
+      localStorage.setItem(getResultsKey(activeProjectId), JSON.stringify(res));
     } catch { /* storage full */ }
   };
 
@@ -191,7 +233,8 @@ export default function ManualJCalculator() {
     setConditions(createDefaultConditions());
     setBuildingType('residential');
     setWholeHouse(null);
-    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(getInputsKey(activeProjectId));
+    localStorage.removeItem(getResultsKey(activeProjectId));
   };
 
   const results = wholeHouse?.rooms ?? null;
@@ -409,6 +452,17 @@ export default function ManualJCalculator() {
 
   return (
     <div className="h-full overflow-y-auto -webkit-overflow-scrolling-touch">
+      {/* Project Gate Dialog */}
+      {showGate && (
+        <ProjectGateDialog
+          onProjectSelected={() => setGateAccepted(true)}
+          onDraft={() => setGateAccepted(true)}
+        />
+      )}
+
+      {/* Project Context Bar */}
+      <ProjectContextBar />
+
       <div className="max-w-6xl mx-auto px-4 py-6 pt-8 pb-24 md:p-8 md:pt-12 md:pb-24">
         {/* Header */}
         <header className="mb-10">

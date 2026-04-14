@@ -11,15 +11,34 @@ import {
 import { useCadStore } from '../features/cad/store/useCadStore';
 import { useProjectStore } from '../stores/useProjectStore';
 import Mason from '../components/Mason';
+import ProjectContextBar from '../components/ProjectContextBar';
+import ProjectGateDialog from '../components/ProjectGateDialog';
 
-const STORAGE_KEY = 'hvac_manuald_inputs';
-const MANUALJ_KEY = 'hvac_manualj_inputs';
-const MANUALJ_RESULTS_KEY = 'hvac_manualj_results';
+// ── Project-scoped persistence ───────────────────────────────────────────────
+function getStorageKey(projectId: string | null): string {
+  return `hvac_manuald_inputs_${projectId || 'draft'}`;
+}
+function getMjResultsKey(projectId: string | null): string {
+  return `hvac_manualj_results_${projectId || 'draft'}`;
+}
+function getMjInputsKey(projectId: string | null): string {
+  return `hvac_manualj_inputs_${projectId || 'draft'}`;
+}
+
+// One-time migration
+(function migrateGlobalKeys() {
+  try {
+    const old = localStorage.getItem('hvac_manuald_inputs');
+    if (old && !localStorage.getItem('hvac_manuald_inputs_draft')) {
+      localStorage.setItem('hvac_manuald_inputs_draft', old);
+    }
+  } catch { /* ignore */ }
+})();
 
 type SavedState = { application: 'residential' | 'commercial'; equipmentCfm: number; blowerEsp: number; filterDrop: number; coilDrop: number; ductMaterial: DuctMaterial; preferredShape: DuctShape; maxAspectRatio: number; rooms: ManualDRoomInput[] };
 
-function loadSaved(): SavedState | null { try { const r = localStorage.getItem(STORAGE_KEY); return r ? JSON.parse(r) : null; } catch { return null; } }
-function saveState(s: SavedState) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch { /* */ } }
+function loadSaved(projectId: string | null): SavedState | null { try { const r = localStorage.getItem(getStorageKey(projectId)); return r ? JSON.parse(r) : null; } catch { return null; } }
+function saveState(projectId: string | null, s: SavedState) { try { localStorage.setItem(getStorageKey(projectId), JSON.stringify(s)); } catch { /* */ } }
 
 const FITTING_OPTIONS: { value: FittingType; label: string }[] = [
   { value: 'elbow_90', label: '90-deg Elbow' },
@@ -62,7 +81,14 @@ function createDefaultRoom(index: number): ManualDRoomInput {
 }
 
 export default function ManualDCalculator() {
-  const saved = useRef(loadSaved()).current;
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const activeProjectName = useProjectStore((s) => s.activeProjectName);
+
+  // Project gate
+  const [gateAccepted, setGateAccepted] = useState(!!activeProjectId);
+  const showGate = !activeProjectId && !gateAccepted;
+
+  const saved = useRef(loadSaved(activeProjectId)).current;
 
   const [application, setApplication] = useState<'residential' | 'commercial'>(saved?.application ?? 'residential');
   const [equipmentCfm, setEquipmentCfm] = useState(saved?.equipmentCfm ?? 1200);
@@ -78,17 +104,44 @@ export default function ManualDCalculator() {
   const [fittingEditorId, setFittingEditorId] = useState<string | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
-  const activeProjectName = useProjectStore((s) => s.activeProjectName);
+  // Reload data when project changes
+  useEffect(() => {
+    const data = loadSaved(activeProjectId);
+    if (data) {
+      setApplication(data.application);
+      setEquipmentCfm(data.equipmentCfm);
+      setBlowerEsp(data.blowerEsp);
+      setFilterDrop(data.filterDrop);
+      setCoilDrop(data.coilDrop);
+      setDuctMaterial(data.ductMaterial);
+      setPreferredShape(data.preferredShape);
+      setMaxAspectRatio(data.maxAspectRatio);
+      setRooms(data.rooms);
+    } else {
+      setApplication('residential');
+      setEquipmentCfm(1200);
+      setBlowerEsp(0.5);
+      setFilterDrop(0.1);
+      setCoilDrop(0.2);
+      setDuctMaterial('sheet_metal');
+      setPreferredShape('round');
+      setMaxAspectRatio(4);
+      setRooms([createDefaultRoom(0)]);
+    }
+    setResult(null);
+    setGateAccepted(!!activeProjectId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProjectId]);
 
-  // Auto-save
+  // Auto-save (project-scoped)
   const isFirst = useRef(true);
   useEffect(() => {
     if (isFirst.current) { isFirst.current = false; return; }
-    saveState({ application, equipmentCfm, blowerEsp, filterDrop, coilDrop, ductMaterial, preferredShape, maxAspectRatio, rooms });
+    saveState(activeProjectId, { application, equipmentCfm, blowerEsp, filterDrop, coilDrop, ductMaterial, preferredShape, maxAspectRatio, rooms });
     setSaveStatus('saved');
     const t = setTimeout(() => setSaveStatus('idle'), 1500);
     return () => clearTimeout(t);
-  }, [application, equipmentCfm, blowerEsp, filterDrop, coilDrop, ductMaterial, preferredShape, maxAspectRatio, rooms]);
+  }, [application, equipmentCfm, blowerEsp, filterDrop, coilDrop, ductMaterial, preferredShape, maxAspectRatio, rooms, activeProjectId]);
 
   const addRoom = useCallback(() => {
     setRooms(prev => [...prev, createDefaultRoom(prev.length)]);
@@ -108,8 +161,9 @@ export default function ManualDCalculator() {
   const importFromManualJ = useCallback(() => {
     try {
       // First try to load calculated results (preferred — has actual BTU loads)
-      const resultsRaw = localStorage.getItem(MANUALJ_RESULTS_KEY);
-      const inputsRaw = localStorage.getItem(MANUALJ_KEY);
+      const currentProjectId = useProjectStore.getState().activeProjectId;
+      const resultsRaw = localStorage.getItem(getMjResultsKey(currentProjectId));
+      const inputsRaw = localStorage.getItem(getMjInputsKey(currentProjectId));
 
       if (!resultsRaw && !inputsRaw) {
         alert('No Manual J data found. Run a Manual J calculation first.');
@@ -213,8 +267,8 @@ export default function ManualDCalculator() {
     setMaxAspectRatio(4);
     setRooms([createDefaultRoom(0)]);
     setResult(null);
-    localStorage.removeItem(STORAGE_KEY);
-  }, []);
+    localStorage.removeItem(getStorageKey(activeProjectId));
+  }, [activeProjectId]);
 
   const exportPdf = useCallback(() => {
     alert('PDF export coming soon. Results are available on-screen for now.');
@@ -249,6 +303,17 @@ export default function ManualDCalculator() {
 
   return (
     <div className="h-full overflow-y-auto -webkit-overflow-scrolling-touch">
+      {/* Project Gate Dialog */}
+      {showGate && (
+        <ProjectGateDialog
+          onProjectSelected={() => setGateAccepted(true)}
+          onDraft={() => setGateAccepted(true)}
+        />
+      )}
+
+      {/* Project Context Bar */}
+      <ProjectContextBar />
+
       <div className="max-w-6xl mx-auto px-4 py-6 pt-8 pb-24 md:p-8 md:pt-12 md:pb-24">
 
         {/* Header */}
