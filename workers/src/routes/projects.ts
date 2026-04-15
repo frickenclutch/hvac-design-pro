@@ -44,11 +44,11 @@ projectRoutes.post('/', async (c) => {
   const id = generateId();
 
   await c.env.DB.prepare(
-    `INSERT INTO projects (id, org_id, name, address, city, state, zip, climate_zone, standard, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO projects (id, org_id, name, address, city, state, zip, country, climate_zone, standard, status, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(id, user.orgId, body.name, body.address || null, body.city || null,
-         body.state || null, body.zip || null, body.climateZone || null,
-         body.standard || 'ACCA', user.id).run();
+         body.state || null, body.zip || null, body.country || 'US', body.climateZone || null,
+         body.standard || 'ACCA', body.status || 'active', user.id).run();
 
   const project = await c.env.DB.prepare('SELECT * FROM projects WHERE id = ?').bind(id).first();
   return c.json({ project }, 201);

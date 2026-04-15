@@ -1,6 +1,11 @@
+import { toast } from '../stores/useToastStore';
+
 // API base URL — set VITE_API_BASE_URL in environment (Cloudflare Pages / .env.local)
 // When unset, API calls go to same origin (Pages functions or local dev proxy)
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+
+const MAX_RETRIES = 2;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 class ApiClient {
   private token: string | null = null;
@@ -36,22 +41,66 @@ class ApiClient {
       headers['Content-Type'] = 'application/json';
     }
 
-    const res = await fetch(`${API_BASE}${path}`, {
-      ...options,
-      headers,
-    });
+    let lastError: Error | null = null;
 
-    if (res.status === 401) {
-      this.setToken(null);
-      throw new Error('Session expired');
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const res = await fetch(`${API_BASE}${path}`, {
+          ...options,
+          headers,
+        });
+
+        // 401 — no retry, clear session immediately
+        if (res.status === 401) {
+          this.setToken(null);
+          if (!window.location.pathname.includes('/login') && window.location.pathname !== '/') {
+            toast.error('Session expired. Please sign in again.');
+          }
+          throw new Error('Session expired');
+        }
+
+        // 4xx — client error, no retry
+        if (res.status >= 400 && res.status < 500) {
+          const body = await res.json().catch(() => ({ error: res.statusText }));
+          const msg = body.error || 'Request failed';
+          toast.error(msg);
+          throw new Error(msg);
+        }
+
+        // 5xx — server error, retry if attempts remain
+        if (res.status >= 500) {
+          lastError = new Error(`Server error (${res.status})`);
+          if (attempt < MAX_RETRIES) {
+            if (attempt === 0) toast.warning('Connection issue, retrying...');
+            await sleep(1000 * Math.pow(2, attempt));
+            continue;
+          }
+          toast.error('Server error. Please try again in a moment.');
+          throw lastError;
+        }
+
+        return await res.json() as T;
+      } catch (err: any) {
+        // If it's our own thrown error (401, 4xx, or final 5xx), re-throw
+        if (err === lastError || err.message === 'Session expired' || (err instanceof Error && err.message !== 'Failed to fetch')) {
+          throw err;
+        }
+
+        // Network error — retry if attempts remain
+        lastError = err;
+        if (attempt < MAX_RETRIES) {
+          if (attempt === 0) toast.warning('Connection issue, retrying...');
+          await sleep(1000 * Math.pow(2, attempt));
+          continue;
+        }
+
+        toast.error('Unable to reach the server. Please check your connection.');
+        throw new Error('Unable to reach the server. Please check your connection.');
+      }
     }
 
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(error.error || 'Request failed');
-    }
-
-    return res.json();
+    // Unreachable, but TypeScript needs it
+    throw lastError ?? new Error('Request failed');
   }
 
   // Auth

@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useCadStore } from '../store/useCadStore';
-import { Eye, EyeOff, Lock, Unlock, Layers, Target, Circle, CheckCircle2 } from 'lucide-react';
+import { Eye, EyeOff, Lock, Unlock, Layers, Target, Circle, CheckCircle2, Minus, Plus } from 'lucide-react';
 import { usePreferencesStore } from '../../../stores/usePreferencesStore';
 import PanelResizeHandle from './PanelResizeHandle';
 
@@ -20,9 +20,17 @@ export default function LayerManager() {
 
   // Hooks must be called unconditionally (React Rules of Hooks)
   const panelWidth = usePreferencesStore(s => s.panelSizes?.layersWidth ?? 320);
+  const layersScale = usePreferencesStore(s => s.panelSizes?.layersScale ?? 1);
   const updatePrefs = usePreferencesStore(s => s.update);
   const handleResize = useCallback((w: number) => {
     updatePrefs({ panelSizes: { ...usePreferencesStore.getState().panelSizes, layersWidth: w } });
+  }, [updatePrefs]);
+
+  const adjustLayersScale = useCallback((delta: number) => {
+    const ps = usePreferencesStore.getState().panelSizes;
+    const current = ps.layersScale ?? 1;
+    const next = Math.round(Math.min(1.25, Math.max(0.7, current + delta)) * 100) / 100;
+    updatePrefs({ panelSizes: { ...ps, layersScale: next } });
   }, [updatePrefs]);
 
   // ---- Hidden in 3D view ----
@@ -43,7 +51,7 @@ export default function LayerManager() {
 
   // ---- Expanded panel ----
   return (
-    <div className="absolute right-6 bottom-6 z-10 pointer-events-auto" style={{ width: panelWidth }}>
+    <div className="absolute right-6 bottom-6 z-10 pointer-events-auto" style={{ width: panelWidth, transform: `scale(${layersScale})`, transformOrigin: 'bottom right' }}>
       <div className="glass-panel rounded-2xl flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.6)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/70 overflow-hidden transition-[background,border,shadow] duration-500 relative">
         <PanelResizeHandle edge="left" currentWidth={panelWidth} onResize={handleResize} minWidth={220} maxWidth={520} />
 
@@ -55,13 +63,21 @@ export default function LayerManager() {
               Layers
             </h3>
           </div>
-          <button
-            onClick={() => setOpen(false)}
-            className="text-slate-500 hover:text-slate-300 transition-colors text-xs"
-            title="Collapse"
-          >
-            &times;
-          </button>
+          <div className="flex items-center gap-1">
+            <button onClick={() => adjustLayersScale(-0.1)} className="p-1 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800/80 transition-colors" title="Shrink panel">
+              <Minus className="w-3 h-3" />
+            </button>
+            <button onClick={() => adjustLayersScale(0.1)} className="p-1 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800/80 transition-colors" title="Grow panel">
+              <Plus className="w-3 h-3" />
+            </button>
+            <button
+              onClick={() => setOpen(false)}
+              className="text-slate-500 hover:text-slate-300 transition-colors text-xs ml-1"
+              title="Collapse"
+            >
+              &times;
+            </button>
+          </div>
         </div>
 
         {/* Layer list */}

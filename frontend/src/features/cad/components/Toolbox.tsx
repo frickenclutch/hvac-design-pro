@@ -86,8 +86,34 @@ export default function Toolbox() {
   // ── Scale controls ──────────────────────────────────────────────────────
   const adjustScale = (delta: number) => {
     const ps = usePreferencesStore.getState().panelSizes;
-    const next = Math.round(Math.min(1.25, Math.max(0.7, ps.toolboxScale + delta)) * 100) / 100;
+    const currentScale = ps.toolboxScale ?? 1;
+
+    // Cap max scale so the toolbox can't grow taller than the viewport
+    const el = panelRef.current;
+    const unscaledHeight = el ? el.getBoundingClientRect().height / currentScale : 600;
+    const maxScaleForViewport = Math.floor(((window.innerHeight - EDGE_MARGIN * 2) / unscaledHeight) * 100) / 100;
+    const maxScale = Math.min(1.25, maxScaleForViewport);
+
+    const next = Math.round(Math.min(maxScale, Math.max(0.7, currentScale + delta)) * 100) / 100;
     updatePrefs({ panelSizes: { ...ps, toolboxScale: next } });
+
+    // Re-clamp position so the toolbox stays within viewport after scaling
+    requestAnimationFrame(() => {
+      if (!panelRef.current) return;
+      const rect = panelRef.current.getBoundingClientRect();
+      const maxX = window.innerWidth - rect.width - EDGE_MARGIN;
+      const maxY = window.innerHeight - rect.height - EDGE_MARGIN;
+      setPos(p => {
+        const nx = Math.max(EDGE_MARGIN, Math.min(maxX, p.x));
+        const ny = Math.max(EDGE_MARGIN, Math.min(maxY, p.y));
+        if (nx !== p.x || ny !== p.y) {
+          const latest = usePreferencesStore.getState().panelSizes;
+          updatePrefs({ panelSizes: { ...latest, toolboxPos: { x: nx, y: ny } } });
+          return { x: nx, y: ny };
+        }
+        return p;
+      });
+    });
   };
 
   // ── Image import ────────────────────────────────────────────────────────

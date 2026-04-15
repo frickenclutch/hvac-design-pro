@@ -14,6 +14,7 @@ import { useCadStore } from '../features/cad/store/useCadStore';
 import Mason from '../components/Mason';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { useProjectStore } from '../stores/useProjectStore';
+import { toast } from '../stores/useToastStore';
 
 export default function CadWorkspace() {
   // Auto-save drawing to D1 / localStorage
@@ -57,6 +58,8 @@ export default function CadWorkspace() {
           useCadStore.getState().loadDrawing(saved.canvasJson);
           if (saved.id) useCadStore.getState().setDrawingId(saved.id);
         }
+      }).catch(() => {
+        toast.error('Failed to load drawing. Starting with a blank canvas.');
       });
     } else {
       // Draft mode: preserve any geometry already in the store (e.g. from

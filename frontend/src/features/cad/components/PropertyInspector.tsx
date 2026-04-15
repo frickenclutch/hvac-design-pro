@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { useCadStore } from '../store/useCadStore';
 import type { WallMaterial, Opening, HvacUnit, PipeSegment, PipeMaterial, DetectedRoom, UnderlayImage, Annotation, DuctSegment, DuctFitting, DuctShape, DuctMaterial, DuctSide, DuctRole, FittingType } from '../store/useCadStore';
 import { fmtLength, fmtArea, fmtTemp, smallLengthUnit } from '../../../utils/units';
-import { Settings2, Layers, Ruler, Triangle, Wind, DoorOpen, LayoutGrid, ScanLine, ImageIcon, Lock, Unlock, Trash2, Type, RotateCcw, Bold, Italic, AlignLeft, AlignCenter, AlignRight, ChevronLeft, ChevronRight, GitBranch, Diamond } from 'lucide-react';
+import { Settings2, Layers, Ruler, Triangle, Wind, DoorOpen, LayoutGrid, ScanLine, ImageIcon, Lock, Unlock, Trash2, Type, RotateCcw, Bold, Italic, AlignLeft, AlignCenter, AlignRight, ChevronLeft, ChevronRight, GitBranch, Diamond, Minus, Plus } from 'lucide-react';
 import { usePreferencesStore } from '../../../stores/usePreferencesStore';
 import PanelResizeHandle from './PanelResizeHandle';
 
@@ -95,9 +95,17 @@ export default function PropertyInspector() {
   }, [selectedObject, floor]);
 
   const panelWidth = usePreferencesStore(s => s.panelSizes.propertiesWidth);
+  const propertiesScale = usePreferencesStore(s => s.panelSizes.propertiesScale ?? 1);
   const updatePrefs = usePreferencesStore(s => s.update);
   const handleResize = useCallback((w: number) => {
     updatePrefs({ panelSizes: { ...usePreferencesStore.getState().panelSizes, propertiesWidth: w } });
+  }, [updatePrefs]);
+
+  const adjustPropertiesScale = useCallback((delta: number) => {
+    const ps = usePreferencesStore.getState().panelSizes;
+    const current = ps.propertiesScale ?? 1;
+    const next = Math.round(Math.min(1.25, Math.max(0.7, current + delta)) * 100) / 100;
+    updatePrefs({ panelSizes: { ...ps, propertiesScale: next } });
   }, [updatePrefs]);
 
   const headerText = selectedWall ? 'Wall Selected' : selectedOpening ? 'Opening Selected' : selectedHvac ? 'HVAC Unit Selected' : selectedPipe ? 'Pipe Selected' : selectedDuct ? 'Duct Segment Selected' : selectedFitting ? 'Duct Fitting Selected' : selectedUnderlay ? 'Underlay Selected' : selectedAnnotation ? 'Label Selected' : selectedObject ? 'Object Selected' : 'Canvas Settings';
@@ -120,7 +128,7 @@ export default function PropertyInspector() {
   }
 
   return (
-    <div className="absolute right-6 top-24 bottom-6 z-10 pointer-events-none" style={{ width: panelWidth }}>
+    <div className="absolute right-6 top-24 bottom-6 z-10 pointer-events-none" style={{ width: panelWidth, transform: `scale(${propertiesScale})`, transformOrigin: 'top right' }}>
       <div className="h-full glass-panel rounded-2xl flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.6)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/70 overflow-hidden pointer-events-auto transition-[background,border,shadow] duration-500 transform origin-right relative">
         <PanelResizeHandle edge="left" currentWidth={panelWidth} onResize={handleResize} minWidth={220} maxWidth={520} />
 
@@ -131,13 +139,21 @@ export default function PropertyInspector() {
               <Settings2 className="w-4 h-4 text-emerald-400" />
               <h3 className="text-sm font-bold text-slate-200 uppercase tracking-widest">Properties</h3>
             </div>
-            <button
-              onClick={() => setPanelProperties(false)}
-              className="p-1 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800/80 transition-colors"
-              title="Hide Properties (P)"
-            >
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button onClick={() => adjustPropertiesScale(-0.1)} className="p-1 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800/80 transition-colors" title="Shrink panel">
+                <Minus className="w-3 h-3" />
+              </button>
+              <button onClick={() => adjustPropertiesScale(0.1)} className="p-1 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800/80 transition-colors" title="Grow panel">
+                <Plus className="w-3 h-3" />
+              </button>
+              <button
+                onClick={() => setPanelProperties(false)}
+                className="p-1 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800/80 transition-colors"
+                title="Hide Properties (P)"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
           <p className="text-xs text-slate-500 font-mono">{headerText}</p>
         </div>

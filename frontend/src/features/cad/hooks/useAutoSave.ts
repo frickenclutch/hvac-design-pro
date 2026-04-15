@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useCadStore } from '../store/useCadStore';
 import { api } from '../../../lib/api';
+import { toast } from '../../../stores/useToastStore';
 
 export function useAutoSave() {
   const isDirty = useCadStore(s => s.isDirty);
@@ -58,6 +59,7 @@ export function useAutoSave() {
         }
       } catch (err: any) {
         console.warn('Auto-save D1 sync failed (localStorage backup is safe):', err.message);
+        toast.warning('Cloud sync failed. Your work is saved locally.');
         // D1 save failed but localStorage already has the data — mark as saved
         // so we don't show an error or retry in an infinite loop.
         markSaved(drawingId || 'local');

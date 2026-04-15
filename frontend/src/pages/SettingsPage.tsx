@@ -3,6 +3,7 @@ import { usePreferencesStore, type ThemeMode, type UIDensity, type UnitSystem } 
 import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save } from 'lucide-react';
 import A11yPanel from '../components/accessibility/A11yPanel';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
+import { toast } from '../stores/useToastStore';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
@@ -401,19 +402,23 @@ function OrgProfileSection({ token, orgId }: { token: string | null; orgId?: str
           setLoaded(true);
         }
       })
-      .catch(() => {});
+      .catch(() => { toast.error('Failed to load organisation profile.'); });
   }, [token, orgId]);
 
   const saveOrg = async () => {
     if (!token) return;
     setSaving(true);
     try {
-      await fetch(`${API_BASE}/api/org`, {
+      const res = await fetch(`${API_BASE}/api/org`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(orgData),
       });
-    } catch { /* */ }
+      if (!res.ok) throw new Error();
+      toast.success('Organisation profile saved.');
+    } catch {
+      toast.error('Failed to save organisation profile.');
+    }
     setSaving(false);
   };
 
@@ -482,19 +487,23 @@ function UserProfileSection({ token, user }: { token: string | null; user: { id:
           setProfile({ firstName: data.user.firstName || '', lastName: data.user.lastName || '', phone: data.user.phone || '' });
         }
       })
-      .catch(() => {});
+      .catch(() => { toast.error('Failed to load user profile.'); });
   }, [token]);
 
   const saveProfile = async () => {
     if (!token) return;
     setSaving(true);
     try {
-      await fetch(`${API_BASE}/api/org/profile`, {
+      const res = await fetch(`${API_BASE}/api/org/profile`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(profile),
       });
-    } catch { /* */ }
+      if (!res.ok) throw new Error();
+      toast.success('User profile saved.');
+    } catch {
+      toast.error('Failed to save user profile.');
+    }
     setSaving(false);
   };
 

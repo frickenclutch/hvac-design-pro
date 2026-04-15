@@ -191,20 +191,35 @@ export default function ManualJCalculator() {
     const newFloors: ReturnType<typeof generateCadFloorFromManualJ>[] = [];
     let baseIndex = cadState.floors.length;
     for (const [floorName, floorRooms] of floorGroups) {
-      const newFloor = generateCadFloorFromManualJ(floorRooms, pxPerFt, layoutAlgorithm, baseIndex);
-      newFloor.name = floorName;
-      newFloors.push(newFloor);
-      baseIndex++;
+      // Check if a floor with this name already exists (e.g. default empty "Floor 1")
+      const existingFloor = cadState.floors.find(f => f.name === floorName && f.walls.length === 0 && f.rooms.length === 0);
+      if (existingFloor) {
+        // Replace the empty existing floor instead of duplicating
+        const newFloor = generateCadFloorFromManualJ(floorRooms, pxPerFt, layoutAlgorithm, existingFloor.index);
+        newFloor.id = existingFloor.id;
+        newFloor.name = floorName;
+        newFloors.push(newFloor);
+      } else {
+        const newFloor = generateCadFloorFromManualJ(floorRooms, pxPerFt, layoutAlgorithm, baseIndex);
+        newFloor.name = floorName;
+        newFloors.push(newFloor);
+        baseIndex++;
+      }
     }
 
     const lastFloorId = newFloors[newFloors.length - 1]?.id;
-    useCadStore.setState((s) => ({
-      floors: [...s.floors, ...newFloors],
-      activeFloorId: lastFloorId || s.activeFloorId,
-      isDirty: true,
-      undoStack: [],
-      redoStack: [],
-    }));
+    useCadStore.setState((s) => {
+      // Separate floors that are being replaced vs kept
+      const replacedIds = new Set(newFloors.filter(f => s.floors.some(sf => sf.id === f.id)).map(f => f.id));
+      const keptFloors = s.floors.filter(f => !replacedIds.has(f.id));
+      return {
+        floors: [...keptFloors, ...newFloors],
+        activeFloorId: lastFloorId || s.activeFloorId,
+        isDirty: true,
+        undoStack: [],
+        redoStack: [],
+      };
+    });
 
     setShowExportCadDialog(false);
     alert(`${newFloors.length} floor(s) generated! Switch to the 2D CAD Workspace to view.`);
@@ -502,6 +517,63 @@ export default function ManualJCalculator() {
         doc.text(b.internalGain.toLocaleString(), bCols[6], y, { align: 'right' });
         y += 14;
       });
+
+      drawFooter();
+      drawStamp();
+    }
+
+    // ── Page 4: Envelope Breakdown (per-room transmission losses) ────
+    if (prefs.pdfIncludeLoadSummary !== false) {
+      doc.addPage(); pageNum++; y = 50;
+
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(0);
+      doc.text('Envelope & Ventilation Breakdown', margin, y); y += 24;
+
+      const eCols = [margin, margin + 100, margin + 155, margin + 210, margin + 265, margin + 320, margin + 375, margin + 435, margin + 490];
+      const eHeaders = ['Room', 'Wall', 'Window', 'Ceiling', 'Floor', 'Solar', 'Infiltr.', 'Ventil.', 'Duct'];
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(100);
+      eHeaders.forEach((h, i) => doc.text(h, eCols[i], y, { align: i === 0 ? 'left' : 'right' }));
+      y += 4;
+      doc.setDrawColor(200); doc.setLineWidth(0.5);
+      doc.line(margin, y, pw - margin, y); y += 10;
+
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(30);
+      let totWall = 0, totWin = 0, totCeil = 0, totFloor = 0, totSolar = 0, totInfil = 0, totVent = 0, totDuct = 0;
+      wh.rooms.forEach((r) => {
+        if (y > ph - 60) { drawFooter(); doc.addPage(); pageNum++; y = 50; }
+        const b = r.breakdown;
+        totWall += b.wallLoss; totWin += b.windowLoss; totCeil += b.ceilingLoss;
+        totFloor += b.floorLoss; totSolar += b.solarGain;
+        totInfil += b.infiltrationSensible; totVent += b.ventilationSensible; totDuct += b.ductLoss;
+
+        doc.setFont('helvetica', 'bold');
+        doc.text(r.roomName, eCols[0], y);
+        doc.setFont('helvetica', 'normal');
+        doc.text(b.wallLoss.toLocaleString(), eCols[1], y, { align: 'right' });
+        doc.text(b.windowLoss.toLocaleString(), eCols[2], y, { align: 'right' });
+        doc.text(b.ceilingLoss.toLocaleString(), eCols[3], y, { align: 'right' });
+        doc.text(b.floorLoss.toLocaleString(), eCols[4], y, { align: 'right' });
+        doc.text(b.solarGain.toLocaleString(), eCols[5], y, { align: 'right' });
+        doc.text(b.infiltrationSensible.toLocaleString(), eCols[6], y, { align: 'right' });
+        doc.text(b.ventilationSensible.toLocaleString(), eCols[7], y, { align: 'right' });
+        doc.text(b.ductLoss.toLocaleString(), eCols[8], y, { align: 'right' });
+        y += 14;
+      });
+
+      // Totals row
+      y += 4;
+      doc.setDrawColor(0); doc.setLineWidth(1);
+      doc.line(margin, y - 4, pw - margin, y - 4); y += 8;
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(0);
+      doc.text('TOTAL', eCols[0], y);
+      doc.text(totWall.toLocaleString(), eCols[1], y, { align: 'right' });
+      doc.text(totWin.toLocaleString(), eCols[2], y, { align: 'right' });
+      doc.text(totCeil.toLocaleString(), eCols[3], y, { align: 'right' });
+      doc.text(totFloor.toLocaleString(), eCols[4], y, { align: 'right' });
+      doc.text(totSolar.toLocaleString(), eCols[5], y, { align: 'right' });
+      doc.text(totInfil.toLocaleString(), eCols[6], y, { align: 'right' });
+      doc.text(totVent.toLocaleString(), eCols[7], y, { align: 'right' });
+      doc.text(totDuct.toLocaleString(), eCols[8], y, { align: 'right' });
 
       drawFooter();
       drawStamp();
@@ -1024,8 +1096,8 @@ function RoomInputCard({ room, index, expanded, onToggle, onChange, onRemove, ca
 
   return (
     <div className="glass-panel rounded-2xl border border-slate-800/60 overflow-hidden">
-      <button onClick={onToggle}
-        className="w-full flex items-center justify-between p-5 hover:bg-slate-800/20 transition-colors">
+      <div role="button" tabIndex={0} onClick={onToggle} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}
+        className="w-full flex items-center justify-between p-5 hover:bg-slate-800/20 transition-colors cursor-pointer">
         <div className="flex items-center gap-3">
           <span className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center text-sm font-bold text-slate-300">
             {index + 1}
@@ -1045,7 +1117,7 @@ function RoomInputCard({ room, index, expanded, onToggle, onChange, onRemove, ca
           )}
           {expanded ? <ChevronUp className="w-5 h-5 text-slate-500" /> : <ChevronDown className="w-5 h-5 text-slate-500" />}
         </div>
-      </button>
+      </div>
 
       {expanded && (
         <div className="p-5 pt-0 border-t border-slate-800/40 animate-in slide-in-from-top-2 fade-in duration-300">

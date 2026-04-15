@@ -7,6 +7,8 @@ import AuthPage from './pages/AuthPage';
 import TermsPage from './pages/TermsPage';
 import DemoPage from './pages/DemoPage';
 import UserAvatarMenu from './components/UserAvatarMenu';
+import ErrorBoundary from './components/ErrorBoundary';
+import ToastContainer from './components/ToastContainer';
 
 // Lazy-load heavy pages (Three.js, jsPDF, Fabric.js stay out of initial bundle)
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -28,6 +30,7 @@ function App() {
         <SkipLinks />
         <AppLayout />
       </BrowserRouter>
+      <ToastContainer />
     </A11yProvider>
   );
 }
@@ -160,6 +163,7 @@ function AppLayout() {
 
       {/* Main Content Area */}
       <main id="main-content" role="main" className={`flex-1 relative overflow-y-auto ${isPublicScrollPage ? '' : 'md:overflow-hidden'} bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black`}>
+        <ErrorBoundary label="Application" fullPage key={location.pathname}>
         <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" /></div>}>
         <Routes>
           {/* Public routes — authentication required to proceed past sign-in */}
@@ -183,6 +187,7 @@ function AppLayout() {
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
         </Suspense>
+        </ErrorBoundary>
       </main>
     </div>
   );
