@@ -309,7 +309,7 @@ export default function Dashboard() {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 lg:gap-8 gap-6 pb-20" style={{ transform: `scale(${layout.tileScale ?? 1})`, transformOrigin: 'top left', width: `${100 / (layout.tileScale ?? 1)}%` }}>
+        <div className="pb-20 columns-1 lg:columns-2 gap-6 lg:gap-8 space-y-6 lg:space-y-8" style={{ transform: `scale(${layout.tileScale ?? 1})`, transformOrigin: 'top left', width: `${100 / (layout.tileScale ?? 1)}%` }}>
           {filtered.map(proj => {
             const isEditing = editingId === proj.id;
             const isCollapsed = !!layout.collapsed[proj.id] && !isEditing;
@@ -320,10 +320,10 @@ export default function Dashboard() {
               <div
                 key={proj.id}
                 data-project-id={proj.id}
-                className={`glass-panel rounded-3xl transition-all duration-200 group relative ${
+                className={`glass-panel rounded-3xl transition-all duration-200 group relative break-inside-avoid ${
                   isDragging ? 'opacity-50 scale-[1.02] ring-2 ring-emerald-500/40 shadow-[0_0_30px_rgba(0,0,0,0.5)] z-50' : ''
                 } ${isDropTarget ? 'ring-2 ring-emerald-500/60 ring-offset-2 ring-offset-slate-950' : ''
-                } ${isCollapsed ? 'self-start' : 'hover:border-emerald-500/30'}`}
+                } ${isCollapsed ? '' : 'hover:border-emerald-500/30'}`}
               >
                 {/* ── Tile Header (always visible) ──────────────────────── */}
                 <div className={`flex items-center gap-3 ${isCollapsed ? 'px-5 py-3' : 'px-6 pt-5 pb-2'}`}>
