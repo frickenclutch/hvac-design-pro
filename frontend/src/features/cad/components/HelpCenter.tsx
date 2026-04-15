@@ -2,7 +2,7 @@ import { useState } from 'react';
 import {
   HelpCircle, X, SquarePen,
   Layers, Building2, Keyboard, ChevronRight,
-  Save, Box,
+  Save, Box, Thermometer, GitBranch, FolderOpen,
 } from 'lucide-react';
 
 interface HelpSection {
@@ -199,6 +199,41 @@ const sections: HelpSection[] = [
         title: 'Undo & Redo',
         desc: 'Use Ctrl+Z to undo and Ctrl+Y to redo. The undo/redo buttons in the top bar also work. History is tracked per floor.',
       },
+    ],
+  },
+  {
+    id: 'manual-j',
+    title: 'Manual J Quick Reference',
+    icon: <Thermometer className="w-4 h-4" />,
+    items: [
+      { title: 'Running a Calculation', desc: 'Navigate to Manual J from the sidebar. Add rooms with dimensions, wall/window specs, and select a room type. Click "Calculate Loads" to get heating and cooling BTU/hr per room.' },
+      { title: 'ASHRAE Weather Lookup', desc: 'Enter a ZIP code and click Auto-Fill to load ASHRAE design temperatures, latitude, elevation, and daily range for your location.' },
+      { title: 'Internal Loads', desc: 'Select a Room Type (Kitchen, Bedroom, Fitness, etc.) to auto-fill appliance presets, activity level, and lighting type. Add custom miscellaneous loads for equipment not in the library.' },
+      { title: 'Export to CAD', desc: 'After calculating, click "Export to CAD" to generate floor plans from your room data. Choose Horizontal Strip, Grid, or L-Shape layout.' },
+      { title: 'Import from CAD', desc: 'Click "Import from CAD" to pull detected rooms from your CAD floor plan into Manual J, including wall R-values and window properties.' },
+    ],
+  },
+  {
+    id: 'manual-d',
+    title: 'Manual D Quick Reference',
+    icon: <GitBranch className="w-4 h-4" />,
+    items: [
+      { title: 'Getting Started', desc: 'Navigate to Manual D. Click "Import from Manual J" to populate rooms with proportional CFM values based on cooling loads.' },
+      { title: 'System Configuration', desc: 'Set Equipment CFM, Blower ESP (from equipment specs), Filter Drop (~0.1 inwg), and Coil Drop (~0.2 inwg). Select duct material and shape.' },
+      { title: 'Duct Sizing Results', desc: 'After calculating, each room shows: duct size (diameter), velocity (FPM), pressure drop, and whether it is the critical path (CP).' },
+      { title: 'Velocity Warnings', desc: 'Residential supply ducts should stay under 900 FPM for trunks and 600 FPM for branches. The calculator flags rooms exceeding limits.' },
+      { title: 'Apply to CAD', desc: 'Click "Apply to CAD" to transfer duct sizing results back to the CAD workspace for layout design.' },
+    ],
+  },
+  {
+    id: 'projects',
+    title: 'Project Management',
+    icon: <FolderOpen className="w-4 h-4" />,
+    items: [
+      { title: 'Creating Projects', desc: 'From the Dashboard, click "New Project" to create a project with a name, building type (Residential/Commercial), and address.' },
+      { title: 'Switching Projects', desc: 'Use the Project Context Bar at the top of Manual J/D, or click "Switch" to open the project dropdown. Each project has isolated data.' },
+      { title: 'Draft Mode', desc: 'You can work without a project by choosing "Continue as Draft" in the gate dialog. Draft data is saved separately and won\'t affect any project.' },
+      { title: 'Session Persistence', desc: 'Your workspace state saves automatically — panel positions, zoom, toolbar state, and all data persist between sessions.' },
     ],
   },
 ];

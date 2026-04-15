@@ -23,7 +23,7 @@ import { getDirectionsUrl } from '../retailer/utils/geolocation';
 // TYPES
 // ═══════════════════════════════════════════════════════════════════════════════
 
-type ResultCategory = 'project' | 'page' | 'retailer' | 'tool' | 'file' | 'action';
+type ResultCategory = 'project' | 'page' | 'retailer' | 'tool' | 'file' | 'action' | 'shortcut' | 'help' | 'room';
 
 interface SearchResult {
   id: string;
@@ -215,9 +215,127 @@ function searchAll(
     }
   });
 
+  // 6. Keyboard shortcuts
+  const shortcuts = [
+    { key: 'V', desc: 'Select tool', ctx: 'CAD' }, { key: 'H', desc: 'Pan / Hand tool', ctx: 'CAD' },
+    { key: 'W', desc: 'Draw wall', ctx: 'CAD' }, { key: 'D', desc: 'Dimension tool', ctx: 'CAD' },
+    { key: 'L', desc: 'Add label / text', ctx: 'CAD' }, { key: 'R', desc: 'Detect rooms', ctx: 'CAD' },
+    { key: 'G', desc: 'Toggle grid snap', ctx: 'CAD' }, { key: 'T', desc: 'Toggle toolbox', ctx: 'CAD' },
+    { key: 'P', desc: 'Toggle properties', ctx: 'CAD' }, { key: 'F', desc: 'Toggle floors panel', ctx: 'CAD' },
+    { key: 'Ctrl+Z', desc: 'Undo', ctx: 'Global' }, { key: 'Ctrl+Y', desc: 'Redo', ctx: 'Global' },
+    { key: 'Ctrl+S', desc: 'Save project', ctx: 'CAD' }, { key: 'Ctrl+E', desc: 'Export PDF', ctx: 'CAD' },
+    { key: 'Ctrl+K', desc: 'Spotlight search', ctx: 'Global' }, { key: 'Alt+M', desc: 'Toggle Mason AI', ctx: 'Global' },
+    { key: 'Escape', desc: 'Cancel / deselect', ctx: 'Global' }, { key: 'Delete', desc: 'Delete selected', ctx: 'CAD' },
+  ];
+  shortcuts.forEach(s => {
+    if (fuzzyMatch(q, `${s.key} ${s.desc} shortcut keyboard hotkey keybind ${s.ctx}`)) {
+      results.push({
+        id: `shortcut-${s.key}`,
+        category: 'shortcut',
+        title: `${s.key}`,
+        subtitle: `${s.desc} (${s.ctx})`,
+        icon: <Zap className="w-4 h-4" />,
+        action: () => { /* no-op — informational */ },
+      });
+    }
+  });
+
+  // 7. Mason help topics (searchable KB)
+  const masonTopics = [
+    { q: 'manual j load calculation', title: 'Manual J Basics', sub: 'What is Manual J and how it works' },
+    { q: 'measure rooms dimensions', title: 'How to Measure Rooms', sub: 'Room dimensions for load calcs' },
+    { q: 'window area glass fenestration', title: 'Window Measurements', sub: 'Window sizing for Manual J' },
+    { q: 'r-value insulation wall', title: 'R-Value Guide', sub: 'Identifying wall & ceiling insulation' },
+    { q: 'duct sizing manual d friction', title: 'Duct Sizing Basics', sub: 'Manual D duct design fundamentals' },
+    { q: 'cfm airflow distribution', title: 'CFM Distribution', sub: 'How airflow is allocated to rooms' },
+    { q: 'internal load appliance room type', title: 'Internal Loads', sub: 'Room types, appliances & heat sources' },
+    { q: 'project isolation switch', title: 'Project Management', sub: 'Creating and switching between projects' },
+    { q: 'feedback bug report idea', title: 'Submit Feedback', sub: 'Report bugs or suggest features via Mason' },
+    { q: 'session persist workspace restore', title: 'Session Persistence', sub: 'Workspace state saves between sessions' },
+    { q: 'keyboard shortcuts cad', title: 'Keyboard Shortcuts', sub: 'All CAD workspace hotkeys' },
+    { q: 'pdf export print report', title: 'PDF Reports', sub: 'Export and customize PDF documents' },
+    { q: '3d view orbit pan zoom', title: '3D Viewer', sub: '3D building visualization controls' },
+  ];
+  masonTopics.forEach(t => {
+    if (fuzzyMatch(q, `${t.q} ${t.title} ${t.sub} mason help ask`)) {
+      results.push({
+        id: `help-${t.title}`,
+        category: 'help',
+        title: `Ask Mason: ${t.title}`,
+        subtitle: t.sub,
+        icon: <Zap className="w-4 h-4 text-amber-400" />,
+        action: () => {
+          // Dispatch topic to Mason by simulating Alt+M then setting input
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', altKey: true, bubbles: true }));
+        },
+      });
+    }
+  });
+
+  // 8. Search Manual J rooms in active project
+  try {
+    const projRaw = localStorage.getItem('hvac_projects');
+    if (projRaw) {
+      const projects = JSON.parse(projRaw);
+      // Check each project for Manual J rooms
+      for (const proj of projects) {
+        const mjRaw = localStorage.getItem(`hvac_manualj_inputs_${proj.id}`);
+        if (!mjRaw) continue;
+        const mj = JSON.parse(mjRaw);
+        if (!mj.rooms) continue;
+        for (const room of mj.rooms) {
+          const searchText = `${room.name} ${room.roomType || ''} ${room.floorName || ''} ${proj.name}`;
+          if (fuzzyMatch(q, searchText)) {
+            const area = (room.lengthFt || 0) * (room.widthFt || 0);
+            results.push({
+              id: `room-${proj.id}-${room.id}`,
+              category: 'room',
+              title: room.name,
+              subtitle: `${area} sqft · ${room.floorName || 'Floor 1'} · ${proj.name}`,
+              icon: <Home className="w-4 h-4" />,
+              action: () => {
+                // Set active project and navigate to calculator
+                try {
+                  const raw = localStorage.getItem('hvac_projects');
+                  if (raw) {
+                    // Signal project selection via localStorage (the calculator will pick it up)
+                    localStorage.setItem('hvac_spotlight_project', proj.id);
+                  }
+                } catch { /* */ }
+                navigate('/calculator');
+              },
+            });
+          }
+        }
+      }
+    }
+  } catch { /* */ }
+
+  // 9. Settings sections
+  const settingsSections = [
+    { q: 'theme dark light midnight appearance', title: 'Appearance Settings', sub: 'Theme, density, animations' },
+    { q: 'units imperial metric measurement', title: 'Units & Defaults', sub: 'Unit system and default values' },
+    { q: 'pdf print watermark stamp seal', title: 'PDF & Print Settings', sub: 'Page size, sections, watermark, stamps' },
+    { q: 'firm stamp pe seal notary', title: 'Blueprint Stamps', sub: 'Upload PE seal and notary stamp' },
+    { q: 'grid snap autosave cad workspace', title: 'CAD Workspace Settings', sub: 'Grid, snap, auto-save' },
+    { q: 'accessibility a11y', title: 'Accessibility', sub: 'Screen reader and visual accessibility' },
+  ];
+  settingsSections.forEach(s => {
+    if (fuzzyMatch(q, `${s.q} ${s.title} settings preferences config`)) {
+      results.push({
+        id: `settings-${s.title}`,
+        category: 'page',
+        title: s.title,
+        subtitle: s.sub,
+        icon: <Settings className="w-4 h-4" />,
+        action: () => navigate('/settings'),
+      });
+    }
+  });
+
   // Sort: preferred retailers first, then by score, then by category priority
   const categoryOrder: Record<ResultCategory, number> = {
-    project: 0, action: 1, page: 2, retailer: 3, tool: 4, file: 5,
+    project: 0, action: 1, room: 2, page: 3, help: 4, shortcut: 5, retailer: 6, tool: 7, file: 8,
   };
 
   return results.sort((a, b) => {
@@ -303,6 +421,9 @@ export default function SpotlightSearch() {
     tool: 'Tools & Equipment',
     file: 'Files',
     action: 'Quick Actions',
+    shortcut: 'Keyboard Shortcuts',
+    help: 'Ask Mason',
+    room: 'Rooms',
   };
 
   const categoryColors: Record<ResultCategory, string> = {
@@ -312,6 +433,9 @@ export default function SpotlightSearch() {
     tool: 'text-violet-400',
     file: 'text-emerald-400',
     action: 'text-emerald-400',
+    shortcut: 'text-cyan-400',
+    help: 'text-amber-400',
+    room: 'text-orange-400',
   };
 
   // Group results by category for display

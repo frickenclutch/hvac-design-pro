@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   Compass, ArrowRight, ArrowLeft, PenTool, Calculator, Box, FileText,
   Smartphone, Zap, CheckCircle2, Layers, Thermometer, DollarSign,
-  MousePointer, Move, Ruler, Home as HomeIcon, Building2
+  MousePointer, Move, Ruler, Home as HomeIcon, Building2, GitBranch
 } from 'lucide-react';
 
 const STEPS = [
@@ -34,7 +34,17 @@ const STEPS = [
     icon: Calculator,
     color: 'orange',
     visual: 'calc',
-    features: ['Room-by-room heating & cooling loads', 'Solar heat gain by orientation', 'Duct loss calculations (ACCA Table 7)', 'Infiltration and ventilation (ASHRAE 62.2)', 'Equipment sizing in BTU/h and tons'],
+    features: ['Room-by-room heating & cooling loads', 'Solar heat gain by orientation', 'Internal loads — room types, appliances, lighting', 'Duct loss calculations (ACCA Table 7)', 'Infiltration and ventilation (ASHRAE 62.2)', 'Equipment sizing in BTU/h and tons'],
+  },
+  {
+    id: 'duct',
+    title: 'Manual D Duct Design',
+    subtitle: 'Size every duct run — automatically.',
+    description: 'Import your Manual J results and DesignPro distributes CFM proportionally to each room, sizes ducts using the equal friction method, checks velocities against residential limits, and identifies the critical path. One click from load calc to duct schedule.',
+    icon: GitBranch,
+    color: 'sky',
+    visual: 'calc',
+    features: ['Import from Manual J — proportional CFM distribution', 'Equal friction duct sizing method', 'Velocity warnings for noise control', 'Critical path identification', 'System balance analysis with damper recommendations', 'Sheet metal, flex, spiral, PVC material options'],
   },
   {
     id: '3d',

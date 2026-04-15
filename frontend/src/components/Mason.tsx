@@ -593,6 +593,208 @@ Click **Export PDF** in the top toolbar to generate a multi-page engineering doc
 **Page 5 — General Notes**
 - Standard engineering disclaimers and code references`,
   },
+
+  // ── Manual D specific ──────────────────────────────────────────────────────
+  {
+    keywords: ['manual d', 'duct sizing', 'duct design', 'duct calculator', 'what is manual d'],
+    contexts: ['manual-d', 'manualj', 'cad'],
+    answer: `**Manual D** is the ACCA standard for residential duct design and sizing.
+
+It determines the correct duct sizes for every room based on:
+- **Required CFM** per room (from your Manual J cooling loads)
+- **Available static pressure** (blower ESP minus filter/coil drops)
+- **Friction rate** (pressure loss per 100 ft of duct)
+- **Duct material** (sheet metal, flex, spiral, etc.)
+
+The goal: deliver the right amount of air to every room without excessive noise or pressure loss.
+
+**Quick start:** Run your Manual J calculation first, then click **Import from Manual J** in Manual D to auto-populate all rooms with proportional CFM values.`,
+  },
+  {
+    keywords: ['friction rate', 'friction', 'pressure loss', 'inwg per 100'],
+    contexts: ['manual-d'],
+    answer: `**Friction Rate** is the pressure drop per 100 feet of straight duct, measured in inwg/100ft.
+
+It's calculated from your available static pressure divided by the critical path length:
+\`Friction Rate = Available SP / (Critical Path TEL / 100)\`
+
+**Available SP** = Blower ESP − Filter Drop − Coil Drop
+
+Typical residential values:
+- **0.08–0.12 inwg/100ft** — generous, quiet system
+- **0.12–0.20 inwg/100ft** — standard residential
+- **0.20–0.30 inwg/100ft** — tight, may be noisy
+
+Lower friction rates = larger ducts = quieter operation. Higher rates = smaller ducts = more noise risk.`,
+  },
+  {
+    keywords: ['equal friction', 'design method', 'sizing method'],
+    contexts: ['manual-d'],
+    answer: `**Equal Friction Method** sizes every duct run at the same friction rate. This is the standard residential approach recommended by ACCA Manual D.
+
+How it works:
+1. Calculate available static pressure (blower minus filter/coil losses)
+2. Find the critical path (longest total equivalent length)
+3. Set friction rate = available SP ÷ critical path TEL × 100
+4. Size every duct to meet its CFM requirement at that friction rate
+
+This ensures balanced pressure across all runs. Shorter runs may need balancing dampers to avoid over-delivery.`,
+  },
+  {
+    keywords: ['fitting', 'equivalent length', 'elbow', 'tee', 'takeoff', 'boot', 'tel'],
+    contexts: ['manual-d'],
+    answer: `**Fittings** add resistance to duct runs. Each fitting has an **equivalent length (EL)** — the length of straight duct that would cause the same pressure drop.
+
+Common residential fitting equivalent lengths:
+| Fitting | Equivalent Length |
+|---------|-----------------|
+| 90° elbow | 10–15 ft |
+| 45° elbow | 5–7 ft |
+| Tee (branch) | 30–40 ft |
+| Wye | 10–15 ft |
+| Round takeoff | 10–20 ft |
+| Register boot | 10–15 ft |
+| Manual damper | 5 ft |
+
+**TEL (Total Equivalent Length)** = actual duct length + sum of all fitting ELs. This determines your friction rate design.`,
+  },
+  {
+    keywords: ['velocity', 'speed', 'fpm', 'noise', 'velocity limit'],
+    contexts: ['manual-d'],
+    answer: `**Duct Velocity** is how fast air moves through the duct, in feet per minute (FPM).
+
+Residential velocity limits (supply ducts):
+| Duct Type | Max FPM | Notes |
+|-----------|---------|-------|
+| Main trunk | 900 FPM | Keeps noise down |
+| Branch runs | 600 FPM | Bedroom comfort |
+| Return ducts | 700 FPM | Slightly more tolerant |
+
+**Too high?** Increase duct size. Going from 6" to 7" round drops velocity by ~30%.
+
+**Too low?** Not usually a problem, but very low velocity (< 200 FPM) can cause air stratification.
+
+Formula: \`Velocity = CFM / Duct Area (sq ft)\``,
+  },
+  {
+    keywords: ['static pressure', 'esp', 'blower', 'pressure budget'],
+    contexts: ['manual-d'],
+    answer: `**Static Pressure Budget** determines how much pressure your blower has to push air through the duct system.
+
+The budget:
+\`Available SP = Blower ESP − Filter Drop − Coil Drop\`
+
+Typical residential values:
+- **Blower ESP:** 0.4–0.8 inwg (from equipment specs)
+- **Filter drop:** 0.08–0.15 inwg (standard 1" filter)
+- **Coil drop:** 0.15–0.25 inwg (standard DX coil)
+- **Available:** 0.15–0.40 inwg for the duct system
+
+If your duct system exceeds the available SP, the blower can't deliver rated airflow — rooms will be underserved.`,
+  },
+  {
+    keywords: ['import manual j', 'import from', 'cfm from', 'room cfm', 'airflow distribution'],
+    contexts: ['manual-d'],
+    answer: `**Importing from Manual J** auto-populates your duct runs with room names and CFM values.
+
+How CFM is distributed:
+\`Room CFM = Equipment CFM × (Room Cooling BTU / Total Cooling BTU)\`
+
+Equipment CFM = Recommended Tons × 400 CFM/ton
+
+Example: 5-ton system = 2,000 CFM total
+- Kitchen (8,973 BTU / 55,530 total) = 323 CFM
+- Bedroom (1,350 BTU / 55,530 total) = 49 CFM
+
+Click **Import from Manual J** in the Duct Runs section. It reads from your last Manual J calculation for the active project.`,
+  },
+  {
+    keywords: ['balance', 'balancing', 'damper', 'system balance'],
+    contexts: ['manual-d'],
+    answer: `**System Balance** means every room gets its design airflow. The calculator checks this automatically.
+
+**Balanced:** All rooms within ±10% of design CFM. Good to go.
+
+**Needs Balancing:** Some runs have excess capacity. Install **balancing dampers** on shorter runs to throttle airflow and redirect it to longer (critical) runs.
+
+**CFM Mismatch Warning:** If total room CFM differs from equipment CFM by >5%, check that all rooms are accounted for. Common causes:
+- Hallways/stairs not included (they need return air paths)
+- Equipment CFM not updated after Manual J import`,
+  },
+
+  // ── Internal Loads ──────────────────────────────────────────────────────────
+  {
+    keywords: ['internal load', 'internal gain', 'appliance', 'room type', 'activity level', 'lighting', 'heat source', 'occupant', 'people load'],
+    contexts: ['manualj', 'manual-d', 'cad'],
+    answer: `**Internal Loads** account for every heat source inside a room beyond the building envelope.
+
+**Room Type Presets** — select a room type (Kitchen, Bedroom, Fitness, etc.) to auto-fill:
+- **Occupant count & activity level** (sleeping 200 BTU/hr → heavy exercise 700 BTU/hr per person)
+- **Appliances** (gas range 2,200S/1,200L, refrigerator 400S, etc.)
+- **Lighting** (LED 0.5 BTU/sqft, fluorescent 1.0, incandescent 3.0)
+
+**Appliance Library** — 19 equipment types with calibrated sensible + latent BTU values from ACCA Manual J Table 6 and ASHRAE Fundamentals.
+
+**Miscellaneous Loads** — free-form BTU input for anything: server racks, aquariums, grow lights, hot tubs. If it produces heat, enter it here.
+
+All values are presets that you can override — the room type just gives you a starting point.`,
+  },
+
+  // ── Project Management ──────────────────────────────────────────────────────
+  {
+    keywords: ['project', 'new project', 'switch project', 'project isolation', 'create project', 'draft mode'],
+    contexts: ['manualj', 'manual-d', 'cad'],
+    answer: `**Project Isolation** keeps each project's data completely separate.
+
+**Creating a project:** When you enter Manual J or Manual D without an active project, a dialog asks you to select an existing project, create a new one, or continue as draft.
+
+**Project Context Bar** — the bar at the top of calculators shows your active project name, type, and a **Switch** dropdown to quickly change projects.
+
+**Data scoping:** Each project has its own:
+- Manual J rooms, conditions, and results
+- Manual D duct runs and system config
+- CAD floor plans and geometry
+
+**Draft mode:** Work without a project — data saves under a "draft" scope. Useful for quick calculations that don't belong to a specific building.`,
+  },
+
+  // ── Feedback ────────────────────────────────────────────────────────────────
+  {
+    keywords: ['feedback', 'bug report', 'submit bug', 'report issue', 'feature request', 'idea'],
+    contexts: ['manualj', 'manual-d', 'cad'],
+    answer: `**Submit Feedback** directly from Mason!
+
+Click the **+** button in my header to open the feedback form.
+
+**Three types:**
+- **Bug** — something's broken or unexpected
+- **Idea** — a feature suggestion or improvement
+- **Question** — need help understanding something
+
+**Attach files** three ways:
+- **Click** "Attach Screenshot" or "Add File"
+- **Drag & drop** files onto the form
+- **Ctrl+V** to paste screenshots from your clipboard
+
+Supports images, videos, PDFs, docs, and text files (up to 5 files, 10MB each).
+
+Submissions go to the C4 Technologies support team and are tracked in our system.`,
+  },
+
+  // ── Session Persistence ─────────────────────────────────────────────────────
+  {
+    keywords: ['session', 'save state', 'remember', 'persist', 'left off', 'restore', 'workspace state'],
+    contexts: ['manualj', 'manual-d', 'cad'],
+    answer: `**Your workspace saves automatically.** When you return, everything is right where you left it.
+
+What persists between sessions:
+- **CAD workspace:** panel visibility, toolbar position, zoom level, ghost floors toggle, all geometry
+- **Manual J:** all room inputs, design conditions, calculation results (per project)
+- **Manual D:** system config, duct runs, fittings (per project)
+- **Settings:** theme, units, PDF preferences, firm stamps
+
+**Per-project isolation:** Each project saves its own calculator data. Switch projects and your workspace updates automatically.`,
+  },
 ];
 
 function findAnswer(query: string, context: MasonContext): string {
@@ -623,20 +825,192 @@ function findAnswer(query: string, context: MasonContext): string {
 }
 
 function processCommands(query: string, context: MasonContext): string | null {
-  if (query.trim().toLowerCase() === '/status') {
+  const q = query.trim().toLowerCase();
+
+  // ── /status — enhanced with all workspace data ─────────────────────
+  if (q === '/status') {
     const cadStore = useCadStore.getState();
     const projStore = useProjectStore.getState();
+    const projectId = projStore.activeProjectId;
     const numRooms = cadStore.floors.flatMap(f => f.rooms).length;
     const numWalls = cadStore.floors.flatMap(f => f.walls).length;
+
+    let mjStatus = '';
+    try {
+      const resultsRaw = localStorage.getItem(`hvac_manualj_results_${projectId || 'draft'}`);
+      if (resultsRaw) {
+        const r = JSON.parse(resultsRaw);
+        mjStatus = `\n- **Manual J**: ${r.rooms?.length || 0} rooms, ${r.totalHeatingBtu?.toLocaleString() || 0} BTU/hr heating, ${r.totalCoolingBtu?.toLocaleString() || 0} cooling, ${r.recommendedTons || '?'} ton recommended`;
+      }
+    } catch { /* */ }
+
+    let mdStatus = '';
+    try {
+      const mdRaw = localStorage.getItem(`hvac_manuald_inputs_${projectId || 'draft'}`);
+      if (mdRaw) {
+        const d = JSON.parse(mdRaw);
+        mdStatus = `\n- **Manual D**: ${d.rooms?.length || 0} duct runs, ${d.equipmentCfm || '?'} CFM equipment`;
+      }
+    } catch { /* */ }
+
     return `**Live Workspace Status**
 
-- **Project**: ${projStore.activeProjectName || 'Untitled Project'}
+- **Project**: ${projStore.activeProjectName || 'No project (draft mode)'}
+- **Project Type**: ${projStore.activeProjectType || 'N/A'}
 - **Current Floor**: ${cadStore.floors.find(f => f.id === cadStore.activeFloorId)?.name || 'N/A'}
 - **Total Floors**: ${cadStore.floors.length}
 - **Detected Rooms in CAD**: ${numRooms}
-- **Walls Drawn**: ${numWalls}
-- **Current Mode**: ${context.toUpperCase()}`;
+- **Walls Drawn**: ${numWalls}${mjStatus}${mdStatus}
+- **Current Workspace**: ${context === 'manualj' ? 'Manual J Calculator' : context === 'manual-d' ? 'Manual D Calculator' : 'CAD Workspace'}`;
   }
+
+  // ── /navigate — workspace navigation ───────────────────────────────
+  if (q.startsWith('/navigate ') || q.startsWith('/go ') || q.startsWith('/open ')) {
+    const target = q.replace(/^\/(navigate|go|open)\s+/, '').trim();
+    const routes: Record<string, [string, string]> = {
+      'manual-j':   ['/calculator', 'Manual J Calculator'],
+      'manualj':    ['/calculator', 'Manual J Calculator'],
+      'calculator': ['/calculator', 'Manual J Calculator'],
+      'manual-d':   ['/manual-d', 'Manual D Calculator'],
+      'manuald':    ['/manual-d', 'Manual D Calculator'],
+      'duct':       ['/manual-d', 'Manual D Calculator'],
+      'cad':        ['/cad', 'CAD Workspace'],
+      'workspace':  ['/cad', 'CAD Workspace'],
+      'drawing':    ['/cad', 'CAD Workspace'],
+      'settings':   ['/settings', 'Settings'],
+      'preferences':['/settings', 'Settings'],
+      'dashboard':  ['/dashboard', 'Dashboard'],
+      'projects':   ['/dashboard', 'Dashboard'],
+      'guide':      ['/guide', 'User Guide'],
+      'help':       ['/guide', 'User Guide'],
+      'team':       ['/team', 'Team Management'],
+    };
+    const match = routes[target];
+    if (match) {
+      setTimeout(() => { window.location.href = match[0]; }, 500);
+      return `Navigating to **${match[1]}**...`;
+    }
+    return `I don't recognize "${target}". Try: manual-j, manual-d, cad, settings, dashboard, guide, or team.`;
+  }
+
+  // ── /calculate — trigger Manual J calculation ──────────────────────
+  if (q === '/calculate' || q === '/calc' || q === '/run') {
+    if (context === 'manualj') {
+      setTimeout(() => {
+        const btn = document.querySelector('button') && Array.from(document.querySelectorAll('button')).find(b => b.textContent?.includes('Calculate Loads'));
+        if (btn) (btn as HTMLButtonElement).click();
+      }, 300);
+      return `Running **Manual J calculation**... Check results below.`;
+    }
+    if (context === 'manual-d') {
+      setTimeout(() => {
+        const btn = Array.from(document.querySelectorAll('button')).find(b => b.textContent?.includes('Calculate Duct'));
+        if (btn) (btn as HTMLButtonElement).click();
+      }, 300);
+      return `Running **Manual D duct sizing**... Check results below.`;
+    }
+    return `The /calculate command works on the Manual J and Manual D pages. Navigate there first with \`/navigate manual-j\`.`;
+  }
+
+  // ── /export — trigger exports ──────────────────────────────────────
+  if (q === '/export pdf' || q === '/pdf') {
+    setTimeout(() => {
+      const btn = Array.from(document.querySelectorAll('button')).find(b => b.textContent?.includes('Export PDF'));
+      if (btn) (btn as HTMLButtonElement).click();
+    }, 300);
+    return `Exporting **PDF report**...`;
+  }
+  if (q === '/export cad' || q === '/to cad') {
+    setTimeout(() => {
+      const btn = Array.from(document.querySelectorAll('button')).find(b => b.textContent?.includes('Export to CAD'));
+      if (btn) (btn as HTMLButtonElement).click();
+    }, 300);
+    return `Opening **Export to CAD** dialog...`;
+  }
+
+  // ── /import — trigger Manual J import in Manual D ──────────────────
+  if (q === '/import' || q === '/import manual-j' || q === '/import mj') {
+    if (context === 'manual-d') {
+      setTimeout(() => {
+        const btn = Array.from(document.querySelectorAll('button, span')).find(b => b.textContent?.includes('Import from Manual J'));
+        if (btn) (btn as HTMLElement).click();
+      }, 300);
+      return `Importing rooms from **Manual J** results...`;
+    }
+    return `The /import command works on the Manual D page. Navigate there with \`/navigate manual-d\`.`;
+  }
+
+  // ── Smart queries about current results ────────────────────────────
+  const projId = useProjectStore.getState().activeProjectId;
+
+  if (q.includes('biggest') || q.includes('largest') || q.includes('highest') || q.includes('most')) {
+    try {
+      const raw = localStorage.getItem(`hvac_manualj_results_${projId || 'draft'}`);
+      if (raw) {
+        const r = JSON.parse(raw);
+        if (r.rooms?.length) {
+          if (q.includes('heat') || q.includes('heating')) {
+            const sorted = [...r.rooms].sort((a: any, b: any) => b.heatingBtu - a.heatingBtu);
+            return `The **highest heating load** is **${sorted[0].roomName}** at **${sorted[0].heatingBtu.toLocaleString()} BTU/hr**.\n\nTop 3:\n1. ${sorted[0].roomName} — ${sorted[0].heatingBtu.toLocaleString()}\n2. ${sorted[1]?.roomName || 'N/A'} — ${sorted[1]?.heatingBtu?.toLocaleString() || 'N/A'}\n3. ${sorted[2]?.roomName || 'N/A'} — ${sorted[2]?.heatingBtu?.toLocaleString() || 'N/A'}`;
+          }
+          const sorted = [...r.rooms].sort((a: any, b: any) => b.coolingBtuTotal - a.coolingBtuTotal);
+          return `The **highest cooling load** is **${sorted[0].roomName}** at **${sorted[0].coolingBtuTotal.toLocaleString()} BTU/hr**.\n\nTop 3:\n1. ${sorted[0].roomName} — ${sorted[0].coolingBtuTotal.toLocaleString()}\n2. ${sorted[1]?.roomName || 'N/A'} — ${sorted[1]?.coolingBtuTotal?.toLocaleString() || 'N/A'}\n3. ${sorted[2]?.roomName || 'N/A'} — ${sorted[2]?.coolingBtuTotal?.toLocaleString() || 'N/A'}`;
+        }
+      }
+    } catch { /* */ }
+    return `No calculation results found. Run a Manual J calculation first, then ask me again.`;
+  }
+
+  if (q.includes('tonnage') || q.includes('recommended') || q.includes('equipment size')) {
+    try {
+      const raw = localStorage.getItem(`hvac_manualj_results_${projId || 'draft'}`);
+      if (raw) {
+        const r = JSON.parse(raw);
+        return `**Recommended equipment:** ${r.recommendedTons} Ton\n\n- Heating: ${r.totalHeatingBtu?.toLocaleString()} BTU/hr (${(r.totalHeatingBtu / 12000).toFixed(1)} tons)\n- Cooling: ${r.totalCoolingBtu?.toLocaleString()} BTU/hr (${(r.totalCoolingBtu / 12000).toFixed(1)} tons)\n- SHR: ${r.sensibleHeatRatio}\n- Ventilation: ${r.ventilationCFM} CFM`;
+      }
+    } catch { /* */ }
+    return `No calculation results found. Run a Manual J calculation first.`;
+  }
+
+  if (q.includes('how many rooms') || q.includes('room count')) {
+    try {
+      const raw = localStorage.getItem(`hvac_manualj_inputs_${projId || 'draft'}`);
+      if (raw) {
+        const d = JSON.parse(raw);
+        const rooms = d.rooms || [];
+        const byFloor = new Map<string, number>();
+        rooms.forEach((r: any) => {
+          const f = r.floorName || 'Unassigned';
+          byFloor.set(f, (byFloor.get(f) || 0) + 1);
+        });
+        let breakdown = '';
+        byFloor.forEach((count, floor) => { breakdown += `\n- ${floor}: ${count} rooms`; });
+        return `**${rooms.length} rooms** in the active project.${breakdown}`;
+      }
+    } catch { /* */ }
+    return `No room data found for the active project.`;
+  }
+
+  // ── /help — list available commands ────────────────────────────────
+  if (q === '/help' || q === '/commands') {
+    return `**Mason Commands:**
+
+| Command | Action |
+|---------|--------|
+| \`/status\` | Show project & workspace status |
+| \`/calculate\` | Run Manual J or D calculation |
+| \`/export pdf\` | Export PDF report |
+| \`/export cad\` | Export to CAD workspace |
+| \`/import\` | Import Manual J data into Manual D |
+| \`/navigate <page>\` | Go to a page (manual-j, manual-d, cad, settings, dashboard) |
+| \`/help\` | Show this list |
+
+**Smart Questions** (just ask naturally):
+- "What's the biggest cooling load?"
+- "What's the recommended tonnage?"
+- "How many rooms are there?"`;
+  }
+
   return null;
 }
 

@@ -5,7 +5,7 @@ import {
   Keyboard, FileText, Settings, Compass,
   Eye, Lock,
   Printer, MessageSquarePlus,
-  Wind, SquarePen,
+  Wind, SquarePen, GitBranch, FolderOpen, Flame,
 } from 'lucide-react';
 
 type GuideMode = 'easy' | 'advanced';
@@ -392,6 +392,109 @@ const sections: GuideSection[] = [
           <ShortcutRow keys="Ctrl+K" desc="Opens SpotlightSearch overlay" />
           <ShortcutRow keys="Escape" desc="Cancels active tool, exits 3D, closes modals" />
         </div>
+      </div>
+    ),
+  },
+  {
+    id: 'manual-d',
+    title: 'Manual D — Duct Design',
+    icon: <GitBranch className="w-5 h-5 text-sky-400" />,
+    easyContent: (
+      <div className="space-y-4">
+        <p>Manual D sizes every duct run based on your Manual J cooling loads. The calculator determines the correct duct diameter, velocity, and pressure drop for each room.</p>
+        <div className="space-y-2">
+          <p className="font-semibold text-white">Quick Start:</p>
+          <ol className="list-decimal list-inside space-y-1">
+            <li>Run your Manual J calculation first</li>
+            <li>Go to Manual D and click <strong>Import from Manual J</strong></li>
+            <li>All 16 rooms (or however many) appear with proportional CFM values</li>
+            <li>Set your blower ESP, filter drop, and coil drop from equipment specs</li>
+            <li>Click <strong>Calculate Duct Sizing</strong></li>
+          </ol>
+        </div>
+        <div className="space-y-2">
+          <p className="font-semibold text-white">What You Get:</p>
+          <ul className="list-disc list-inside space-y-1">
+            <li><strong>Duct sizes</strong> — round diameter for each room run</li>
+            <li><strong>Velocity</strong> — FPM with warnings if exceeding residential limits</li>
+            <li><strong>Critical path</strong> — the longest run that sets your friction rate</li>
+            <li><strong>System balance</strong> — whether dampers are needed</li>
+          </ul>
+        </div>
+        <p className="text-sm text-slate-500">CFM per room = Equipment CFM × (Room Cooling BTU ÷ Total Cooling BTU). Equipment CFM = Recommended Tons × 400.</p>
+      </div>
+    ),
+    advancedContent: (
+      <div className="space-y-3 text-sm text-slate-400">
+        <p>Manual D implements the <strong>Equal Friction Method</strong> per ACCA standards. The friction rate is derived from: Available SP ÷ (Critical Path TEL ÷ 100).</p>
+        <p>Available SP = Blower ESP − Filter Drop − Coil Drop. Typical residential: 0.15–0.40 inwg.</p>
+        <p>Each fitting (elbow, tee, takeoff, boot) adds equivalent length. TEL = actual length + sum of fitting ELs.</p>
+        <p>The engine calculates round duct diameter from: D = √(4 × CFM / (π × Velocity)). Velocity is derived from the friction rate via Darcy-Weisbach approximation for the selected duct material.</p>
+      </div>
+    ),
+  },
+  {
+    id: 'internal-loads',
+    title: 'Internal Loads',
+    icon: <Flame className="w-5 h-5 text-orange-400" />,
+    easyContent: (
+      <div className="space-y-4">
+        <p>Internal loads account for every heat source inside a room — people, appliances, lighting, and anything else that produces heat.</p>
+        <div className="space-y-2">
+          <p className="font-semibold text-white">Room Type Presets:</p>
+          <p>Select a room type (Kitchen, Bedroom, Fitness, Office, etc.) and the calculator auto-fills appropriate defaults for occupancy, appliances, and lighting.</p>
+        </div>
+        <div className="space-y-2">
+          <p className="font-semibold text-white">Activity Levels:</p>
+          <ul className="list-disc list-inside space-y-1">
+            <li><strong>Sleeping</strong> — 200 sensible / 150 latent BTU/hr per person</li>
+            <li><strong>Seated</strong> — 230 / 190 (default)</li>
+            <li><strong>Light work</strong> — 300 / 300 (cooking, cleaning)</li>
+            <li><strong>Moderate exercise</strong> — 500 / 500</li>
+            <li><strong>Heavy exercise</strong> — 700 / 700</li>
+          </ul>
+        </div>
+        <div className="space-y-2">
+          <p className="font-semibold text-white">Appliance Library (19 types):</p>
+          <p>Gas range, refrigerator, dishwasher, dryer, computer, TV, server rack, hot tub, aquarium, grow lights, and more. Each has calibrated sensible + latent BTU values.</p>
+        </div>
+        <p className="text-sm text-slate-500"><strong>Miscellaneous Loads:</strong> Free-form sensible/latent BTU fields for anything not in the library — server rooms, aquaponics, industrial equipment.</p>
+      </div>
+    ),
+    advancedContent: (
+      <div className="space-y-3 text-sm text-slate-400">
+        <p>Internal gains are calculated per-room and added to the cooling sensible/latent subtotals. The breakdown appears in the PDF report under "Internal Load Breakdown."</p>
+        <p>Values derived from ACCA Manual J Table 6 and ASHRAE Fundamentals. The engine replaces the old flat 1.0 BTU/sqft constant with: people (activity-scaled) + appliance sum + lighting (type-scaled) + miscellaneous.</p>
+        <p>CAD-to-Manual-J bridge auto-guesses room type from name (e.g., "Kitchen and Dining" → kitchen preset with gas range, fridge, dishwasher).</p>
+      </div>
+    ),
+  },
+  {
+    id: 'project-isolation',
+    title: 'Project Management',
+    icon: <FolderOpen className="w-5 h-5 text-emerald-400" />,
+    easyContent: (
+      <div className="space-y-4">
+        <p>Every project keeps its calculations, duct designs, and CAD drawings completely separate. No cross-contamination when switching between projects.</p>
+        <div className="space-y-2">
+          <p className="font-semibold text-white">Project Context Bar:</p>
+          <p>A bar at the top of Manual J and Manual D shows your active project name, type (Residential/Commercial), and a <strong>Switch</strong> dropdown to quickly change projects.</p>
+        </div>
+        <div className="space-y-2">
+          <p className="font-semibold text-white">Project Gate:</p>
+          <p>When entering a calculator without an active project, a dialog asks you to select an existing project, create a new one, or continue in draft mode.</p>
+        </div>
+        <div className="space-y-2">
+          <p className="font-semibold text-white">Session Persistence:</p>
+          <p>Your workspace state saves automatically between sessions — panel positions, zoom level, toolbar state, and all data. When you return, everything is exactly where you left it.</p>
+        </div>
+      </div>
+    ),
+    advancedContent: (
+      <div className="space-y-3 text-sm text-slate-400">
+        <p>Data is scoped to project IDs in localStorage: <code>hvac_manualj_inputs_&#123;projectId&#125;</code>, <code>hvac_manuald_inputs_&#123;projectId&#125;</code>, <code>hvac_cad_&#123;projectId&#125;</code>.</p>
+        <p>Draft mode uses the key suffix <code>_draft</code>. One-time migration copies old global keys to draft scope on first load.</p>
+        <p>CAD workspace state (panel visibility, zoom, ghosting) persists via the drawing serialization. The subscribe handler auto-saves on state changes with 500ms debounce.</p>
       </div>
     ),
   },
