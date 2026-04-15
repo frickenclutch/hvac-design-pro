@@ -480,7 +480,7 @@ export default function Dashboard() {
                   </div>
                 )}
 
-                <div className="absolute -inset-1 bg-gradient-to-r from-emerald-500/0 via-emerald-500/0 to-emerald-500/0 group-hover:via-emerald-500/5 blur-2xl transition-all duration-700 pointer-events-none rounded-3xl" />
+                <div className="absolute -inset-1 bg-gradient-to-r from-emerald-500/0 via-emerald-500/0 to-emerald-500/0 group-hover:via-emerald-500/5 blur-none group-hover:blur-2xl transition-all duration-700 pointer-events-none rounded-3xl" />
               </div>
             );
           })}
