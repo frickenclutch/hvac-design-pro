@@ -1029,6 +1029,12 @@ export const useCadStore = create<CadState>((set, get) => {
         wallColor: s.wallColor,
         openingColor: s.openingColor,
         hvacAccentColor: s.hvacAccentColor,
+        // Workspace UI state (persists between sessions)
+        panelToolbox: s.panelToolbox,
+        panelProperties: s.panelProperties,
+        panelFloors: s.panelFloors,
+        panelNavBar: s.panelNavBar,
+        ghostingEnabled: s.ghostingEnabled,
       };
     },
 
@@ -1066,6 +1072,12 @@ export const useCadStore = create<CadState>((set, get) => {
         wallColor: data.wallColor ?? '#34d399',
         openingColor: data.openingColor ?? '#38bdf8',
         hvacAccentColor: data.hvacAccentColor ?? '#22d3ee',
+        // Restore workspace UI state
+        panelToolbox: data.panelToolbox ?? true,
+        panelProperties: data.panelProperties ?? true,
+        panelFloors: data.panelFloors ?? true,
+        panelNavBar: data.panelNavBar ?? true,
+        ghostingEnabled: data.ghostingEnabled ?? true,
         isDirty: false,
         undoStack: [],
         redoStack: [],
@@ -1077,25 +1089,34 @@ export const useCadStore = create<CadState>((set, get) => {
 // ── LocalStorage Persistence ─────────────────────────────────────────────────
 const CAD_STORAGE_KEY = 'hvac_cad_drawing';
 
-// Load persisted drawing on startup
+// Load persisted drawing + workspace state on startup
 try {
   const saved = localStorage.getItem(CAD_STORAGE_KEY);
   if (saved) {
     const data = JSON.parse(saved);
-    // Only restore if there is actual geometry
     const hasGeometry = data.floors?.some(
       (f: any) => f.walls?.length > 0 || f.rooms?.length > 0 || f.openings?.length > 0
     );
-    if (hasGeometry) {
+    // Restore geometry if present, or at least restore workspace UI state
+    const hasWorkspaceState = data.panelToolbox !== undefined || data.zoom !== undefined;
+    if (hasGeometry || hasWorkspaceState) {
       useCadStore.getState().loadDrawing(data);
     }
   }
 } catch { /* corrupt or missing — start fresh */ }
 
-// Auto-save when floors change (debounced)
+// Auto-save when floors or workspace UI state changes (debounced)
 let _cadSaveTimer: ReturnType<typeof setTimeout> | null = null;
 useCadStore.subscribe((state, prevState) => {
-  if (state.floors !== prevState.floors) {
+  if (
+    state.floors !== prevState.floors ||
+    state.panelToolbox !== prevState.panelToolbox ||
+    state.panelProperties !== prevState.panelProperties ||
+    state.panelFloors !== prevState.panelFloors ||
+    state.panelNavBar !== prevState.panelNavBar ||
+    state.ghostingEnabled !== prevState.ghostingEnabled ||
+    state.zoom !== prevState.zoom
+  ) {
     if (_cadSaveTimer) clearTimeout(_cadSaveTimer);
     _cadSaveTimer = setTimeout(() => {
       try {
