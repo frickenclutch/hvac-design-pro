@@ -323,7 +323,7 @@ export default function Dashboard() {
                 className={`glass-panel rounded-3xl transition-all duration-200 group relative ${
                   isDragging ? 'opacity-50 scale-[1.02] ring-2 ring-emerald-500/40 shadow-[0_0_30px_rgba(0,0,0,0.5)] z-50' : ''
                 } ${isDropTarget ? 'ring-2 ring-emerald-500/60 ring-offset-2 ring-offset-slate-950' : ''
-                } ${isCollapsed ? '' : 'hover:border-emerald-500/30'}`}
+                } ${isCollapsed ? 'self-start' : 'hover:border-emerald-500/30'}`}
               >
                 {/* ── Tile Header (always visible) ──────────────────────── */}
                 <div className={`flex items-center gap-3 ${isCollapsed ? 'px-5 py-3' : 'px-6 pt-5 pb-2'}`}>
