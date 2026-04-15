@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, MapPin, Calendar, ArrowRight, Pencil, Check, X, Trash2, Building2, Home, GripVertical, ChevronDown, ChevronRight, RotateCcw } from 'lucide-react';
+import { Plus, Search, MapPin, Calendar, ArrowRight, Pencil, Check, X, Trash2, Building2, Home, GripVertical, ChevronDown, ChevronRight, RotateCcw, Minus } from 'lucide-react';
 import NewProjectModal from '../features/projects/components/NewProjectModal';
 
 interface Project {
@@ -16,6 +16,7 @@ interface Project {
 interface TileLayout {
   order: string[];
   collapsed: Record<string, boolean>;
+  tileScale: number;
 }
 
 const STORAGE_KEY = 'hvac_projects';
@@ -37,9 +38,11 @@ function saveProjects(projects: Project[]) {
 function loadLayout(): TileLayout {
   try {
     const raw = localStorage.getItem(LAYOUT_KEY);
-    return raw ? JSON.parse(raw) : { order: [], collapsed: {} };
+    if (!raw) return { order: [], collapsed: {}, tileScale: 1 };
+    const parsed = JSON.parse(raw);
+    return { order: parsed.order ?? [], collapsed: parsed.collapsed ?? {}, tileScale: parsed.tileScale ?? 1 };
   } catch {
-    return { order: [], collapsed: {} };
+    return { order: [], collapsed: {}, tileScale: 1 };
   }
 }
 
@@ -59,12 +62,12 @@ function reconcileLayout(layout: TileLayout, projects: Project[]): TileLayout {
     if (layout.collapsed[id]) collapsed[id] = true;
   }
 
-  return { order, collapsed };
+  return { order, collapsed, tileScale: layout.tileScale ?? 1 };
 }
 
 export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [layout, setLayout] = useState<TileLayout>({ order: [], collapsed: {} });
+  const [layout, setLayout] = useState<TileLayout>({ order: [], collapsed: {}, tileScale: 1 });
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -91,7 +94,7 @@ export default function Dashboard() {
     setProjects(updated);
     saveProjects(updated);
     setLayout(prev => {
-      const next = { order: [newProject.id, ...prev.order], collapsed: prev.collapsed };
+      const next = { ...prev, order: [newProject.id, ...prev.order] };
       saveLayout(next);
       return next;
     });
@@ -130,7 +133,7 @@ export default function Dashboard() {
     saveProjects(updated);
     if (editingId === id) cancelEdit();
     setLayout(prev => {
-      const next = { order: prev.order.filter(oid => oid !== id), collapsed: { ...prev.collapsed } };
+      const next = { ...prev, order: prev.order.filter(oid => oid !== id), collapsed: { ...prev.collapsed } };
       delete next.collapsed[id];
       saveLayout(next);
       return next;
@@ -148,9 +151,17 @@ export default function Dashboard() {
   };
 
   const resetLayout = () => {
-    const fresh: TileLayout = { order: projects.map(p => p.id), collapsed: {} };
+    const fresh: TileLayout = { order: projects.map(p => p.id), collapsed: {}, tileScale: 1 };
     setLayout(fresh);
     saveLayout(fresh);
+  };
+
+  const adjustTileScale = (delta: number) => {
+    setLayout(prev => {
+      const next = { ...prev, tileScale: Math.round(Math.min(1.25, Math.max(0.65, (prev.tileScale ?? 1) + delta)) * 100) / 100 };
+      saveLayout(next);
+      return next;
+    });
   };
 
   // ── Drag-to-reorder ────────────────────────────────────────────────────
@@ -254,14 +265,32 @@ export default function Dashboard() {
           />
         </div>
         {projects.length > 0 && (
-          <button
-            onClick={resetLayout}
-            className="flex items-center gap-1.5 text-slate-500 hover:text-slate-300 text-xs font-medium px-3 py-2 rounded-xl hover:bg-slate-800/50 transition-colors"
-            title="Reset tile order and expand all"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Reset Layout</span>
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => adjustTileScale(-0.1)}
+              className="p-2 rounded-xl text-slate-500 hover:text-slate-300 hover:bg-slate-800/50 transition-colors"
+              title="Shrink tiles"
+            >
+              <Minus className="w-3.5 h-3.5" />
+            </button>
+            <span className="text-[10px] text-slate-600 font-mono w-8 text-center">{Math.round((layout.tileScale ?? 1) * 100)}%</span>
+            <button
+              onClick={() => adjustTileScale(0.1)}
+              className="p-2 rounded-xl text-slate-500 hover:text-slate-300 hover:bg-slate-800/50 transition-colors"
+              title="Grow tiles"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+            <div className="w-px h-5 bg-slate-800 mx-1" />
+            <button
+              onClick={resetLayout}
+              className="flex items-center gap-1.5 text-slate-500 hover:text-slate-300 text-xs font-medium px-3 py-2 rounded-xl hover:bg-slate-800/50 transition-colors"
+              title="Reset tile order, scale, and expand all"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Reset</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -280,7 +309,7 @@ export default function Dashboard() {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 lg:gap-8 gap-6 pb-20">
+        <div className="grid grid-cols-1 lg:grid-cols-2 lg:gap-8 gap-6 pb-20" style={{ transform: `scale(${layout.tileScale ?? 1})`, transformOrigin: 'top left', width: `${100 / (layout.tileScale ?? 1)}%` }}>
           {filtered.map(proj => {
             const isEditing = editingId === proj.id;
             const isCollapsed = !!layout.collapsed[proj.id] && !isEditing;
