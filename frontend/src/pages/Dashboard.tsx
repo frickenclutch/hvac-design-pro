@@ -75,7 +75,6 @@ export default function Dashboard() {
   // ── Drag state ─────────────────────────────────────────────────────────
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
-  const dragGhostRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const loaded = loadProjects();
