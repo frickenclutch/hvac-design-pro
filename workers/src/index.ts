@@ -14,6 +14,11 @@ export interface Env {
   STORAGE: R2Bucket;
   ENVIRONMENT: string;
   RESEND_API_KEY?: string;
+  AZURE_CLIENT_ID?: string;
+  AZURE_CLIENT_SECRET?: string;
+  CF_ACCESS_CLIENT_ID?: string;
+  CF_ACCESS_CLIENT_SECRET?: string;
+  CF_ACCESS_ISSUER?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();

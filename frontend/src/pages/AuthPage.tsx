@@ -5,7 +5,7 @@ import { SecurityBadge } from '../features/auth/components/SecurityComponents';
 import { Compass, Mail, Lock, ArrowRight, Eye, EyeOff, AlertCircle, Play } from 'lucide-react';
 
 export default function AuthPage() {
-  const { login, authError, authLoading, clearError } = useAuthStore();
+  const { login, ssoMicrosoft, ssoCloudflare, authError, authLoading, clearError } = useAuthStore();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -15,8 +15,11 @@ export default function AuthPage() {
     e.preventDefault();
     if (!email || !password) return;
     await login(email, password);
-    if (useAuthStore.getState().isAuthenticated) {
+    const state = useAuthStore.getState();
+    if (state.isAuthenticated) {
       navigate('/dashboard');
+    } else if (state.pendingVerification) {
+      navigate('/verify-email');
     }
   };
 
@@ -121,6 +124,12 @@ export default function AuthPage() {
                 </div>
               </div>
 
+              <div className="flex justify-end">
+                <Link to="/forgot-password" className="text-sm text-emerald-400 hover:text-emerald-300 font-medium transition-colors">
+                  Forgot password?
+                </Link>
+              </div>
+
               <button
                 type="submit"
                 disabled={authLoading}
@@ -133,6 +142,41 @@ export default function AuthPage() {
                 )}
               </button>
             </form>
+
+            {/* SSO Divider */}
+            <div className="flex items-center gap-4 my-8">
+              <div className="flex-1 h-px bg-slate-800" />
+              <span className="text-xs font-bold text-slate-600 uppercase tracking-widest">or</span>
+              <div className="flex-1 h-px bg-slate-800" />
+            </div>
+
+            {/* SSO Buttons */}
+            <div className="space-y-3">
+              <button
+                onClick={ssoMicrosoft}
+                disabled={authLoading}
+                className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl border border-slate-700/60 bg-slate-800/50 text-white font-bold hover:bg-slate-800 hover:border-slate-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 21 21" fill="none">
+                  <rect x="1" y="1" width="9" height="9" fill="#F25022" />
+                  <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
+                  <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
+                  <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
+                </svg>
+                Sign in with Microsoft
+              </button>
+              <button
+                onClick={ssoCloudflare}
+                disabled={authLoading}
+                className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl border border-slate-700/60 bg-slate-800/50 text-white font-bold hover:bg-slate-800 hover:border-slate-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 64 64" fill="none">
+                  <path d="M44.9 35.5l-2.3-7.8c-.2-.6-.6-1-1.1-1.2-.5-.2-1-.2-1.5 0l-4 1.8c-1.5-1.7-3.5-2.9-5.8-3.3l-.6-4.3c-.1-.6-.4-1.1-.9-1.4-.5-.3-1.1-.4-1.6-.2l-7.8 2.3c-.6.2-1 .6-1.2 1.1-.2.5-.2 1 0 1.5l1.8 4c-1.7 1.5-2.9 3.5-3.3 5.8l-4.3.6c-.6.1-1.1.4-1.4.9-.3.5-.4 1.1-.2 1.6l2.3 7.8c.2.6.6 1 1.1 1.2.5.2 1 .2 1.5 0l4-1.8c1.5 1.7 3.5 2.9 5.8 3.3l.6 4.3c.1.6.4 1.1.9 1.4.5.3 1.1.4 1.6.2l7.8-2.3c.6-.2 1-.6 1.2-1.1.2-.5.2-1 0-1.5l-1.8-4c1.7-1.5 2.9-3.5 3.3-5.8l4.3-.6c.6-.1 1.1-.4 1.4-.9.3-.5.4-1.1.2-1.6z" fill="#F6821F"/>
+                  <circle cx="28.5" cy="35.5" r="6" fill="#FBAD41"/>
+                </svg>
+                Enterprise SSO
+              </button>
+            </div>
           </div>
 
           <div className="pt-10 mt-10 border-t border-slate-800 space-y-4">

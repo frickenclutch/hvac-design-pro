@@ -48,8 +48,10 @@ export default function OnboardingPage() {
       phone: orgPhone || undefined,
     });
 
-    // Check if registration succeeded
-    if (useAuthStore.getState().isAuthenticated) {
+    const state = useAuthStore.getState();
+    if (state.pendingVerification) {
+      navigate('/verify-email');
+    } else if (state.isAuthenticated) {
       setStep(5); // Show success
     }
   };

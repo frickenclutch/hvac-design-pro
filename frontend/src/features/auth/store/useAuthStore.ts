@@ -79,7 +79,7 @@ async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<{ data
 
     const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) return { error: (body as { error?: string }).error || `HTTP ${res.status}`, status: res.status };
+    if (!res.ok) return { error: (body as { error?: string }).error || `HTTP ${res.status}`, status: res.status, data: body as T };
     return { data: body as T, status: res.status };
   } catch {
     return { error: 'Unable to reach server. Please check your connection and try again.', status: 0 };
@@ -96,6 +96,10 @@ interface AuthState {
   authError: string | null;
   authLoading: boolean;
 
+  // Email verification state
+  pendingVerification: boolean;
+  pendingEmail: string | null;
+
   // Actions
   login: (email: string, password: string) => Promise<void>;
   register: (data: { email: string; password: string; firstName: string; lastName: string; orgName?: string; orgType?: OrgType; regionCode?: RegionCode; addressLine1?: string; city?: string; state?: string; zip?: string; country?: string; phone?: string }) => Promise<void>;
@@ -104,6 +108,17 @@ interface AuthState {
   setOnboarding: (isOnboarding: boolean) => void;
   restoreSession: () => Promise<void>;
   clearError: () => void;
+
+  // Verification & password reset actions
+  verifyEmail: (email: string, code: string) => Promise<void>;
+  resendVerification: (email: string) => Promise<void>;
+  forgotPassword: (email: string) => Promise<boolean>;
+  resetPassword: (email: string, code: string, newPassword: string) => Promise<boolean>;
+
+  // SSO actions
+  ssoMicrosoft: () => Promise<void>;
+  ssoCloudflare: () => Promise<void>;
+  ssoCallback: (code: string, provider?: 'microsoft' | 'cloudflare') => Promise<void>;
 }
 
 // Hydrate from persisted session on creation
@@ -117,17 +132,94 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isOnboarding: false,
   authError: null,
   authLoading: false,
+  pendingVerification: false,
+  pendingEmail: null,
 
   login: async (email, password) => {
     set({ authLoading: true, authError: null });
 
-    const { data, error } = await apiFetch<{ token: string; user: User; organisation: Organisation }>('/api/auth/login', {
+    const { data, error, status } = await apiFetch<{ token?: string; user?: User; organisation?: Organisation; pendingVerification?: boolean; email?: string }>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
 
-    if (error || !data) {
+    // Handle unverified account — redirect to verification
+    if (status === 403 && data?.pendingVerification) {
+      set({
+        authLoading: false,
+        authError: null,
+        pendingVerification: true,
+        pendingEmail: data.email || email.toLowerCase().trim(),
+      });
+      return;
+    }
+
+    if (error || !data?.token) {
       set({ authLoading: false, authError: error || 'Login failed. Please try again.' });
+      return;
+    }
+
+    persistSession(data.token, data.user!, data.organisation!);
+    set({
+      user: data.user!,
+      organisation: data.organisation!,
+      token: data.token,
+      isAuthenticated: true,
+      authLoading: false,
+      authError: null,
+      pendingVerification: false,
+      pendingEmail: null,
+    });
+  },
+
+  register: async (data) => {
+    set({ authLoading: true, authError: null });
+
+    const { data: resp, error } = await apiFetch<{ token?: string; user?: User; organisation?: Organisation; pendingVerification?: boolean; email?: string }>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+
+    if (error && !resp?.pendingVerification) {
+      set({ authLoading: false, authError: error || 'Registration failed. Please try again.' });
+      return;
+    }
+
+    // Registration now returns pendingVerification instead of a session
+    if (resp?.pendingVerification) {
+      set({
+        authLoading: false,
+        authError: null,
+        pendingVerification: true,
+        pendingEmail: resp.email || data.email.toLowerCase().trim(),
+      });
+      return;
+    }
+
+    // Fallback: if server returns a full session (shouldn't happen but be safe)
+    if (resp?.token && resp.user && resp.organisation) {
+      persistSession(resp.token, resp.user, resp.organisation);
+      set({
+        user: resp.user,
+        organisation: resp.organisation,
+        token: resp.token,
+        isAuthenticated: true,
+        authLoading: false,
+        authError: null,
+      });
+    }
+  },
+
+  verifyEmail: async (email, code) => {
+    set({ authLoading: true, authError: null });
+
+    const { data, error } = await apiFetch<{ token: string; user: User; organisation: Organisation }>('/api/auth/verify-email', {
+      method: 'POST',
+      body: JSON.stringify({ email, code }),
+    });
+
+    if (error || !data) {
+      set({ authLoading: false, authError: error || 'Verification failed. Please try again.' });
       return;
     }
 
@@ -139,30 +231,126 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       isAuthenticated: true,
       authLoading: false,
       authError: null,
+      pendingVerification: false,
+      pendingEmail: null,
     });
   },
 
-  register: async (data) => {
-    set({ authLoading: true, authError: null });
+  resendVerification: async (email) => {
+    set({ authError: null });
 
-    const { data: resp, error } = await apiFetch<{ token: string; user: User; organisation: Organisation }>('/api/auth/register', {
+    const { error } = await apiFetch('/api/auth/resend-verification', {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify({ email }),
     });
 
-    if (error || !resp) {
-      set({ authLoading: false, authError: error || 'Registration failed. Please try again.' });
+    if (error) {
+      set({ authError: error });
+    }
+  },
+
+  forgotPassword: async (email) => {
+    set({ authLoading: true, authError: null });
+
+    const { error } = await apiFetch('/api/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+
+    set({ authLoading: false });
+
+    if (error) {
+      set({ authError: error });
+      return false;
+    }
+    return true;
+  },
+
+  resetPassword: async (email, code, newPassword) => {
+    set({ authLoading: true, authError: null });
+
+    const { error } = await apiFetch('/api/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ email, code, newPassword }),
+    });
+
+    set({ authLoading: false });
+
+    if (error) {
+      set({ authError: error });
+      return false;
+    }
+    return true;
+  },
+
+  ssoMicrosoft: async () => {
+    set({ authLoading: true, authError: null });
+
+    const { data, error } = await apiFetch<{ url: string; state: string }>('/api/auth/sso/microsoft/url');
+
+    if (error || !data) {
+      set({ authLoading: false, authError: error || 'Failed to initiate Microsoft sign-in.' });
       return;
     }
 
-    persistSession(resp.token, resp.user, resp.organisation);
+    try {
+      sessionStorage.setItem('hvac_sso_state', data.state);
+      sessionStorage.setItem('hvac_sso_provider', 'microsoft');
+    } catch { /* ok */ }
+
+    window.location.href = data.url;
+  },
+
+  ssoCloudflare: async () => {
+    set({ authLoading: true, authError: null });
+
+    const { data, error } = await apiFetch<{ url: string; state: string }>('/api/auth/sso/cloudflare/url');
+
+    if (error || !data) {
+      set({ authLoading: false, authError: error || 'Failed to initiate SSO sign-in.' });
+      return;
+    }
+
+    try {
+      sessionStorage.setItem('hvac_sso_state', data.state);
+      sessionStorage.setItem('hvac_sso_provider', 'cloudflare');
+    } catch { /* ok */ }
+
+    window.location.href = data.url;
+  },
+
+  ssoCallback: async (code, provider) => {
+    set({ authLoading: true, authError: null });
+
+    // Determine which provider to use
+    const ssoProvider = provider || (() => {
+      try { return sessionStorage.getItem('hvac_sso_provider') as 'microsoft' | 'cloudflare' | null; } catch { return null; }
+    })() || 'microsoft';
+
+    const callbackUrl = ssoProvider === 'cloudflare'
+      ? '/api/auth/sso/cloudflare/callback'
+      : '/api/auth/sso/microsoft/callback';
+
+    const { data, error } = await apiFetch<{ token: string; user: User; organisation: Organisation }>(callbackUrl, {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+
+    if (error || !data) {
+      set({ authLoading: false, authError: error || 'Microsoft sign-in failed. Please try again.' });
+      return;
+    }
+
+    persistSession(data.token, data.user, data.organisation);
     set({
-      user: resp.user,
-      organisation: resp.organisation,
-      token: resp.token,
+      user: data.user,
+      organisation: data.organisation,
+      token: data.token,
       isAuthenticated: true,
       authLoading: false,
       authError: null,
+      pendingVerification: false,
+      pendingEmail: null,
     });
   },
 
@@ -172,7 +360,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     }
     clearPersistedSession();
-    set({ user: null, organisation: null, token: null, isAuthenticated: false, isOnboarding: false, authError: null });
+    set({ user: null, organisation: null, token: null, isAuthenticated: false, isOnboarding: false, authError: null, pendingVerification: false, pendingEmail: null });
   },
 
   setAuthenticated: (isAuthenticated) => set({ isAuthenticated }),

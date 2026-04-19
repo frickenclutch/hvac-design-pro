@@ -6,6 +6,9 @@ account_id = "e923bf772f49580f54b7b5dc7910e32f"
 
 [vars]
 ENVIRONMENT = "production"
+AZURE_CLIENT_ID = "e0e0d219-e48b-49b5-b86d-40fbaaf78fde"
+CF_ACCESS_CLIENT_ID = "949b317683ac7e62be218c9a642d99b0b191c8ba17f0d426f1c3ddcfbea54067"
+CF_ACCESS_ISSUER = "https://c4tech.cloudflareaccess.com/cdn-cgi/access/sso/oidc/949b317683ac7e62be218c9a642d99b0b191c8ba17f0d426f1c3ddcfbea54067"
 
 [[d1_databases]]
 binding = "DB"

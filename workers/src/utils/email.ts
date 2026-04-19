@@ -10,7 +10,7 @@
 const RESEND_API = 'https://api.resend.com/emails';
 // Resend requires a verified domain. Use onboarding@resend.dev for free tier,
 // or configure a custom domain (e.g., noreply@c4tech.co) in the Resend dashboard.
-const FROM_ADDRESS = 'HVAC DesignPro <onboarding@resend.dev>';
+const FROM_ADDRESS = 'HVAC DesignPro <noreply@c4tech.co>';
 
 interface EmailPayload {
   to: string;
@@ -178,6 +178,112 @@ export function buildFeedbackEmail(data: FeedbackEmailData): EmailPayload & { su
         </tr>
       </table>
     </td></tr>
+  </table>
+</body>
+</html>`,
+  };
+}
+
+// ── Verification Code Email ──────────────────────────────────────────────────
+
+export function buildVerificationEmail(firstName: string, code: string): EmailPayload & { subject: string; html: string } {
+  return {
+    to: '',
+    subject: `Your HVAC DesignPro verification code: ${code}`,
+    html: `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0;padding:0;background-color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0f172a;padding:40px 20px;">
+    <tr>
+      <td align="center">
+        <table width="560" cellpadding="0" cellspacing="0" style="background-color:#1e293b;border-radius:16px;border:1px solid #334155;overflow:hidden;">
+          <tr>
+            <td style="padding:32px 40px 24px;border-bottom:1px solid #334155;">
+              <span style="font-size:24px;font-weight:800;color:#34d399;letter-spacing:-0.5px;">HVAC DesignPro</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px 40px;">
+              <h1 style="margin:0 0 16px;font-size:24px;font-weight:800;color:#f1f5f9;line-height:1.2;">
+                Verify your email, ${firstName}
+              </h1>
+              <p style="margin:0 0 28px;font-size:16px;color:#94a3b8;line-height:1.6;">
+                Enter this code to complete your registration:
+              </p>
+              <div style="text-align:center;padding:24px;background-color:#0f172a;border:2px solid #334155;border-radius:16px;margin-bottom:28px;">
+                <span style="font-size:40px;font-weight:800;font-family:'Courier New',monospace;color:#34d399;letter-spacing:12px;">${code}</span>
+              </div>
+              <p style="margin:0;font-size:14px;color:#64748b;line-height:1.6;">
+                This code expires in <strong style="color:#94a3b8;">10 minutes</strong>. If you didn't create an account, you can safely ignore this email.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 40px;border-top:1px solid #334155;background-color:#0f172a;">
+              <p style="margin:0;font-size:11px;color:#475569;line-height:1.6;">
+                C4 Technologies — HVAC DesignPro<br>
+                This email was sent because someone registered with this address at hvac-design-pro.pages.dev
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`,
+  };
+}
+
+// ── Password Reset Email ────────────────────────────────────────────────────
+
+export function buildPasswordResetEmail(firstName: string, code: string): EmailPayload & { subject: string; html: string } {
+  return {
+    to: '',
+    subject: `Reset your HVAC DesignPro password`,
+    html: `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0;padding:0;background-color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0f172a;padding:40px 20px;">
+    <tr>
+      <td align="center">
+        <table width="560" cellpadding="0" cellspacing="0" style="background-color:#1e293b;border-radius:16px;border:1px solid #334155;overflow:hidden;">
+          <tr>
+            <td style="padding:32px 40px 24px;border-bottom:1px solid #334155;">
+              <span style="font-size:24px;font-weight:800;color:#34d399;letter-spacing:-0.5px;">HVAC DesignPro</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px 40px;">
+              <h1 style="margin:0 0 16px;font-size:24px;font-weight:800;color:#f1f5f9;line-height:1.2;">
+                Password reset, ${firstName}
+              </h1>
+              <p style="margin:0 0 28px;font-size:16px;color:#94a3b8;line-height:1.6;">
+                Enter this code to reset your password:
+              </p>
+              <div style="text-align:center;padding:24px;background-color:#0f172a;border:2px solid #334155;border-radius:16px;margin-bottom:28px;">
+                <span style="font-size:40px;font-weight:800;font-family:'Courier New',monospace;color:#34d399;letter-spacing:12px;">${code}</span>
+              </div>
+              <p style="margin:0;font-size:14px;color:#64748b;line-height:1.6;">
+                This code expires in <strong style="color:#94a3b8;">15 minutes</strong>. If you didn't request a password reset, you can safely ignore this email.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 40px;border-top:1px solid #334155;background-color:#0f172a;">
+              <p style="margin:0;font-size:11px;color:#475569;line-height:1.6;">
+                C4 Technologies — HVAC DesignPro<br>
+                This email was sent because a password reset was requested for this account.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
   </table>
 </body>
 </html>`,
