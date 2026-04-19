@@ -104,8 +104,8 @@ function tryImportFromCad(): GlassGroup[] | null {
         const wall = floor.walls.find(w => w.id === opening.wallId);
         let orientation: Exposure = 'S'; // default fallback
         if (wall) {
-          const dx = wall.endX - wall.startX;
-          const dy = wall.endY - wall.startY;
+          const dx = wall.x2 - wall.x1;
+          const dy = wall.y2 - wall.y1;
           // Wall faces perpendicular to its length. Convert to compass bearing.
           // Canvas Y increases downward; negate to get math convention.
           const angleDeg = (Math.atan2(-dy, dx) * 180 / Math.PI + 360) % 360;
