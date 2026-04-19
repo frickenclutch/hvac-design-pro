@@ -8,7 +8,7 @@ import {
   type RoomInput, type DesignConditions, type WholeHouseResult,
   type GlassType, type DuctLocation, type WallGradeType, type Construction, type DailyRange,
   type RoomType, type OccupantActivity, type LightingType, type ApplianceEntry,
-  calculateWholeHouse, tonnageFromBtu, createDefaultRoom, createDefaultConditions, GLASS_PRESETS,
+  calculateWholeHouse, tonnageFromBtu, roundForDisplay, createDefaultRoom, createDefaultConditions, GLASS_PRESETS,
   APPLIANCE_LIBRARY, ROOM_TYPE_PRESETS,
 } from '../engines/manualJ';
 import { lookupByZip } from '../engines/ashraeWeather';
@@ -21,6 +21,13 @@ import Mason from '../components/Mason';
 import ProjectContextBar from '../components/ProjectContextBar';
 import ProjectGateDialog from '../components/ProjectGateDialog';
 import { useProjectStore } from '../stores/useProjectStore';
+import { useAuthStore } from '../features/auth/store/useAuthStore';
+
+// ── Display formatting (engine values are full-precision floats) ─────────────
+/** Round to integer and format with locale separators for display */
+function fmt(value: number): string {
+  return roundForDisplay(value).toLocaleString();
+}
 
 // ── Persistence helpers (project-scoped) ─────────────────────────────────────
 function getInputsKey(projectId: string | null): string {
@@ -255,8 +262,8 @@ export default function ManualJCalculator() {
   };
 
   const results = wholeHouse?.rooms ?? null;
-  const totalHeating = wholeHouse?.totalHeatingBtu ?? 0;
-  const totalCooling = wholeHouse?.totalCoolingBtu ?? 0;
+  const totalHeating = roundForDisplay(wholeHouse?.totalHeatingBtu ?? 0);
+  const totalCooling = roundForDisplay(wholeHouse?.totalCoolingBtu ?? 0);
 
   // ── Print ───────────────────────────────────────────────────────────────
   const handlePrint = () => {
@@ -309,17 +316,17 @@ export default function ManualJCalculator() {
         <div class="summary-card">
           <div class="summary-label">Recommended</div>
           <div class="summary-value">${wh.recommendedTons} Ton</div>
-          <div class="summary-sub">SHR: ${wh.sensibleHeatRatio}</div>
+          <div class="summary-sub">SHR: ${roundForDisplay(wh.sensibleHeatRatio, 2)}</div>
         </div>
         <div class="summary-card">
           <div class="summary-label">Ventilation</div>
-          <div class="summary-value">${wh.ventilationCFM} CFM</div>
+          <div class="summary-value">${fmt(wh.ventilationCFM)} CFM</div>
           <div class="summary-sub">ASHRAE 62.2</div>
         </div>
       </div>
       <div class="detail-grid">
-        <div class="detail-item"><span class="detail-label">Duct Loss (Heating):</span> <span class="detail-value">${wh.ductLossHeating.toLocaleString()} BTU/hr</span></div>
-        <div class="detail-item"><span class="detail-label">Duct Loss (Cooling):</span> <span class="detail-value">${wh.ductLossCooling.toLocaleString()} BTU/hr</span></div>
+        <div class="detail-item"><span class="detail-label">Duct Loss (Heating):</span> <span class="detail-value">${fmt(wh.ductLossHeating)} BTU/hr</span></div>
+        <div class="detail-item"><span class="detail-label">Duct Loss (Cooling):</span> <span class="detail-value">${fmt(wh.ductLossCooling)} BTU/hr</span></div>
         <div class="detail-item"><span class="detail-label">Duct Location:</span> <span class="detail-value">${conditions.ductLocation}</span></div>
         <div class="detail-item"><span class="detail-label">Construction:</span> <span class="detail-value">${conditions.constructionQuality}</span></div>
         <div class="detail-item"><span class="detail-label">Outdoor Grains:</span> <span class="detail-value">${conditions.outdoorGrains} gr/lb</span></div>
@@ -337,8 +344,8 @@ export default function ManualJCalculator() {
       <table>
         <thead><tr><th style="text-align:left">Room</th><th>Heating</th><th>Sensible</th><th>Latent</th><th>Cooling Total</th></tr></thead>
         <tbody>
-          ${wh.rooms.map(r => `<tr><td style="font-weight:600">${r.roomName}</td><td>${r.heatingBtu.toLocaleString()}</td><td>${r.coolingBtuSensible.toLocaleString()}</td><td>${r.coolingBtuLatent.toLocaleString()}</td><td style="font-weight:700">${r.coolingBtuTotal.toLocaleString()}</td></tr>`).join('')}
-          <tr><td>TOTAL</td><td>${totalHeating.toLocaleString()}</td><td>${wh.totalCoolingSensible.toLocaleString()}</td><td>${wh.totalCoolingLatent.toLocaleString()}</td><td>${totalCooling.toLocaleString()}</td></tr>
+          ${wh.rooms.map(r => `<tr><td style="font-weight:600">${r.roomName}</td><td>${fmt(r.heatingBtu)}</td><td>${fmt(r.coolingBtuSensible)}</td><td>${fmt(r.coolingBtuLatent)}</td><td style="font-weight:700">${fmt(r.coolingBtuTotal)}</td></tr>`).join('')}
+          <tr><td>TOTAL</td><td>${totalHeating.toLocaleString()}</td><td>${fmt(wh.totalCoolingSensible)}</td><td>${fmt(wh.totalCoolingLatent)}</td><td>${totalCooling.toLocaleString()}</td></tr>
         </tbody>
       </table>
       <br/><p style="font-size:10px;color:#94a3b8;text-align:center;margin-top:24px;">HVAC DesignPro — ACCA Manual J 8th Edition — For reference only, not a substitute for PE-stamped calculations.</p>
@@ -348,7 +355,7 @@ export default function ManualJCalculator() {
     win.print();
   };
 
-  // ── Export PDF (preference-driven) ──────────────────────────────────────
+  // ── Export PDF (permit-ready, preference-driven) ────────────────────────
   const handleExportPdf = async () => {
     if (!wholeHouse) return;
     const wh = wholeHouse;
@@ -356,25 +363,39 @@ export default function ManualJCalculator() {
     const { usePreferencesStore } = await import('../stores/usePreferencesStore');
     const prefs = usePreferencesStore.getState();
 
+    // Pull project + user context for title block
+    const projStore = useProjectStore.getState();
+    const authStore = useAuthStore.getState();
+    const projectName = projStore.activeProjectName || displayName;
+    const projectAddress = projStore.activeProjectAddress || '';
+    const projectType = projStore.activeProjectType || buildingType;
+    const engineerName = authStore.user ? `${authStore.user.firstName} ${authStore.user.lastName}`.trim() : '';
+    const companyName = authStore.organisation?.name || '';
+    const engineerEmail = authStore.user?.email || '';
+
     const pageFormat = prefs.pdfPageSize || 'letter';
     const orientation = prefs.pdfOrientation || 'portrait';
     const doc = new JsPDF({ orientation, unit: 'pt', format: pageFormat });
     const pw = doc.internal.pageSize.getWidth();
     const ph = doc.internal.pageSize.getHeight();
     const margin = 50;
+    const contentWidth = pw - margin * 2;
     let y = 50;
     let pageNum = 1;
 
     const watermark = prefs.pdfWatermarkText || 'GENERATED BY HVAC DESIGNPRO';
+    const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    const safeProjectName = projectName.replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '_').slice(0, 40);
 
-    // ── Helper: draw watermark + page footer ────────────────────────
+    // ── Helper: page footer with watermark, standard, page number ───
     const drawFooter = () => {
       doc.setFont('helvetica', 'normal'); doc.setFontSize(6); doc.setTextColor(150);
-      doc.text(`${watermark} \u2014 ACCA Manual J 8th Edition`, margin, ph - 20);
+      doc.text(`${watermark}  \u2014  ACCA Manual J 8th Edition (ANSI/ACCA 2-2016)  \u2014  ASHRAE 62.2-2022`, margin, ph - 20);
       doc.text(`Page ${pageNum}`, pw - margin, ph - 20, { align: 'right' });
+      doc.text(dateStr, pw / 2, ph - 20, { align: 'center' });
     };
 
-    // ── Helper: draw firm stamp if uploaded ──────────────────────────
+    // ── Helper: firm stamp overlay ──────────────────────────────────
     const drawStamp = () => {
       if (!prefs.firmStampDataUrl) return;
       const pos = prefs.firmStampPosition || 'bottom-right';
@@ -384,69 +405,142 @@ export default function ManualJCalculator() {
       try { doc.addImage(prefs.firmStampDataUrl, 'PNG', sx, sy, stampSize, stampSize); } catch { /* skip */ }
     };
 
-    // ── Page 1: Title Block + Summary ───────────────────────────────
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(22);
-    doc.text(displayName, pw / 2, y, { align: 'center' });
-    y += 20;
-    doc.setFontSize(11); doc.setFont('helvetica', 'normal'); doc.setTextColor(100);
-    doc.text('Manual J 8th Edition \u2014 Load Calculation Report', pw / 2, y, { align: 'center' });
-    y += 14;
-    doc.setFontSize(8);
-    doc.text(`Generated: ${new Date().toLocaleString()}`, pw / 2, y, { align: 'center' });
-    y += 6;
-    doc.setDrawColor(0); doc.setLineWidth(1.5);
-    doc.line(margin, y, pw - margin, y);
-    y += 24;
+    // ── Helper: section heading ─────────────────────────────────────
+    const sectionHead = (title: string) => {
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(0);
+      doc.text(title, margin, y); y += 4;
+      doc.setDrawColor(0); doc.setLineWidth(0.75);
+      doc.line(margin, y, pw - margin, y); y += 16;
+    };
 
-    // Summary (always included)
-    doc.setTextColor(0); doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
-    doc.text('Summary', margin, y); y += 16;
+    // ── Helper: labeled row ─────────────────────────────────────────
+    const labelRow = (label: string, value: string, x2 = margin + 200) => {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(100);
+      doc.text(label, margin, y);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(30);
+      doc.text(value, x2, y);
+      y += 14;
+    };
+
+    // ═════════════════════════════════════════════════════════════════════
+    // PAGE 1: Professional Title Block + Summary
+    // ═════════════════════════════════════════════════════════════════════
+
+    // Title block border
+    doc.setDrawColor(0); doc.setLineWidth(2);
+    doc.rect(margin - 10, 30, contentWidth + 20, 120);
+
+    // Project name (large)
+    y = 55;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(20); doc.setTextColor(0);
+    doc.text(projectName, pw / 2, y, { align: 'center' }); y += 18;
+
+    // Subtitle
+    doc.setFontSize(11); doc.setFont('helvetica', 'normal'); doc.setTextColor(80);
+    doc.text('ACCA Manual J 8th Edition \u2014 Residential Load Calculation Report', pw / 2, y, { align: 'center' }); y += 16;
+
+    // Project metadata row
+    doc.setFontSize(8); doc.setTextColor(100);
+    if (projectAddress) {
+      doc.text(`Project Address: ${projectAddress}`, margin, y);
+    }
+    doc.text(`Type: ${projectType}`, pw / 2, y, { align: 'center' });
+    doc.text(`Date: ${dateStr}`, pw - margin, y, { align: 'right' });
+    y += 12;
+
+    // Engineer / Company row
+    if (engineerName || companyName) {
+      doc.text(
+        [companyName, engineerName, engineerEmail].filter(Boolean).join('  \u2014  '),
+        pw / 2, y, { align: 'center' }
+      );
+    }
+    y = 170;
+
+    // ── Load Summary ────────────────────────────────────────────────
+    sectionHead('Load Summary');
+
     doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
-    const summaryData = [
+    const summaryRows: [string, string, string][] = [
       ['Total Heating Load', `${totalHeating.toLocaleString()} BTU/hr`, `${tonnageFromBtu(totalHeating)} tons`],
       ['Total Cooling Load', `${totalCooling.toLocaleString()} BTU/hr`, `${tonnageFromBtu(totalCooling)} tons`],
-      ['Recommended System', `${wh.recommendedTons} Ton`, `SHR: ${wh.sensibleHeatRatio}`],
-      ['Ventilation (62.2)', `${wh.ventilationCFM} CFM`, `${wh.ventilationSensible.toLocaleString()} BTU/hr sensible`],
-      ['Duct Loss (Heating)', `${wh.ductLossHeating.toLocaleString()} BTU/hr`, `Location: ${conditions.ductLocation}`],
-      ['Duct Loss (Cooling)', `${wh.ductLossCooling.toLocaleString()} BTU/hr`, `R-${conditions.ductInsulationR}, ${conditions.ductLeakagePercent}% leak`],
+      ['  Sensible', `${fmt(wh.totalCoolingSensible)} BTU/hr`, ''],
+      ['  Latent', `${fmt(wh.totalCoolingLatent)} BTU/hr`, ''],
+      ['Recommended System', `${wh.recommendedTons} Ton`, `SHR: ${roundForDisplay(wh.sensibleHeatRatio, 2)}`],
+      ['Ventilation (ASHRAE 62.2)', `${fmt(wh.ventilationCFM)} CFM`, `${fmt(wh.ventilationSensible)} BTU/hr sensible`],
+      ['Duct Loss (Heating)', `${fmt(wh.ductLossHeating)} BTU/hr`, `Location: ${conditions.ductLocation}`],
+      ['Duct Loss (Cooling)', `${fmt(wh.ductLossCooling)} BTU/hr`, `R-${conditions.ductInsulationR}, ${conditions.ductLeakagePercent}% leak`],
     ];
-    summaryData.forEach(([label, val, sub]) => {
-      doc.setFont('helvetica', 'normal'); doc.setTextColor(100);
+    summaryRows.forEach(([label, val, sub]) => {
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(80);
       doc.text(label, margin, y);
       doc.setFont('helvetica', 'bold'); doc.setTextColor(0);
-      doc.text(val, margin + 180, y);
-      doc.setFont('helvetica', 'normal'); doc.setTextColor(130);
-      doc.text(sub, margin + 360, y);
-      y += 16;
+      doc.text(val, margin + 200, y);
+      if (sub) { doc.setFont('helvetica', 'normal'); doc.setTextColor(120); doc.text(sub, margin + 380, y); }
+      y += 15;
     });
-    y += 10;
+    y += 8;
 
-    // Design Conditions
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(0);
-    doc.text('Design Conditions', margin, y); y += 16;
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(60);
-    const condData = [
-      [`Outdoor Heating: ${conditions.outdoorHeatingTemp}\u00b0F`, `Indoor Heating: ${conditions.indoorHeatingTemp}\u00b0F`],
-      [`Outdoor Cooling: ${conditions.outdoorCoolingTemp}\u00b0F`, `Indoor Cooling: ${conditions.indoorCoolingTemp}\u00b0F`],
-      [`Outdoor Grains: ${conditions.outdoorGrains} gr/lb`, `Indoor Grains: ${conditions.indoorGrains} gr/lb`],
-      [`Elevation: ${conditions.elevation} ft`, `Construction: ${conditions.constructionQuality}`],
-      [`Building Type: ${buildingType}`, `Daily Range: ${conditions.coolingDailyRange}`],
-    ];
-    condData.forEach(([left, right]) => {
-      doc.text(left, margin, y);
-      doc.text(right, margin + 220, y);
-      y += 14;
-    });
+    // ── AED Status ──────────────────────────────────────────────────
+    sectionHead('Adequate Exposure Diversity (Section N)');
+
+    const aed = wh.aed;
+    doc.setFontSize(10);
+    if (aed.pass) {
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(22, 128, 61);
+      doc.text('PASS', margin, y);
+    } else {
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(200, 30, 30);
+      doc.text('FAIL', margin, y);
+    }
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(60); doc.setFontSize(9);
+    doc.text(`Peak/Average Ratio: ${roundForDisplay(aed.ratio * 100, 1)}% (max 130%)`, margin + 50, y);
+    doc.text(`Peak: ${fmt(aed.peakLoad)} BTU/hr`, margin + 280, y);
+    if (aed.excursion > 0) {
+      doc.text(`Excursion: +${fmt(aed.excursion)} BTU/hr`, margin + 400, y);
+    }
+    y += 20;
+
+    // ── Design Conditions ───────────────────────────────────────────
+    sectionHead('Design Conditions');
+
+    doc.setFontSize(9);
+    const col2 = margin + 240;
+    labelRow('Outdoor Heating Design:', `${conditions.outdoorHeatingTemp}\u00b0F (99% ASHRAE)`, col2);
+    labelRow('Outdoor Cooling Design:', `${conditions.outdoorCoolingTemp}\u00b0F (1% ASHRAE)`, col2);
+    labelRow('Indoor Heating Setpoint:', `${conditions.indoorHeatingTemp}\u00b0F`, col2);
+    labelRow('Indoor Cooling Setpoint:', `${conditions.indoorCoolingTemp}\u00b0F`, col2);
+    labelRow('Outdoor Humidity:', `${conditions.outdoorGrains} gr/lb`, col2);
+    labelRow('Indoor Humidity:', `${conditions.indoorGrains} gr/lb`, col2);
+    labelRow('Latitude:', `${conditions.latitude}\u00b0N`, col2);
+    labelRow('Elevation:', `${conditions.elevation} ft`, col2);
+    labelRow('Daily Range:', conditions.coolingDailyRange.charAt(0).toUpperCase() + conditions.coolingDailyRange.slice(1), col2);
+    labelRow('Construction Quality:', conditions.constructionQuality.charAt(0).toUpperCase() + conditions.constructionQuality.slice(1), col2);
+    if (conditions.infiltrationMethod === 'blower_door' && conditions.blowerDoorCFM50) {
+      labelRow('Infiltration Method:', `Blower Door (${conditions.blowerDoorCFM50} CFM50)`, col2);
+    } else {
+      labelRow('Infiltration Method:', 'Default Table', col2);
+    }
+
+    // ── PE Seal Placeholder ─────────────────────────────────────────
+    const sealBoxW = 120; const sealBoxH = 120;
+    const sealX = pw - margin - sealBoxW; const sealY = ph - 60 - sealBoxH;
+    doc.setDrawColor(150); doc.setLineWidth(0.5);
+    doc.rect(sealX, sealY, sealBoxW, sealBoxH);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(150);
+    doc.text('LICENSED PROFESSIONAL', sealX + sealBoxW / 2, sealY + 40, { align: 'center' });
+    doc.text('ENGINEER SEAL', sealX + sealBoxW / 2, sealY + 52, { align: 'center' });
+    doc.text('(Affix seal here)', sealX + sealBoxW / 2, sealY + 80, { align: 'center' });
 
     drawFooter();
     drawStamp();
 
-    // ── Page 2: Room-by-Room Results (if pdfIncludeRoomSchedule) ─────
+    // ═════════════════════════════════════════════════════════════════════
+    // PAGE 2: Room-by-Room Results (if pdfIncludeRoomSchedule)
+    // ═════════════════════════════════════════════════════════════════════
     if (prefs.pdfIncludeRoomSchedule !== false) {
       doc.addPage(); pageNum++; y = 50;
-
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(0);
-      doc.text('Room-by-Room Results', margin, y); y += 24;
+      sectionHead('Room-by-Room Load Results');
 
       const cols = [margin, margin + 140, margin + 260, margin + 360, margin + 440];
       const headers = ['Room', 'Heating (BTU/hr)', 'Cooling Sensible', 'Cooling Latent', 'Cooling Total'];
@@ -454,8 +548,7 @@ export default function ManualJCalculator() {
       headers.forEach((h, i) => doc.text(h, cols[i], y, { align: i === 0 ? 'left' : 'right' }));
       y += 4;
       doc.setDrawColor(200); doc.setLineWidth(0.5);
-      doc.line(margin, y, pw - margin, y);
-      y += 12;
+      doc.line(margin, y, pw - margin, y); y += 12;
 
       doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(30);
       wh.rooms.forEach((r) => {
@@ -463,34 +556,68 @@ export default function ManualJCalculator() {
         doc.setFont('helvetica', 'bold');
         doc.text(r.roomName, cols[0], y);
         doc.setFont('helvetica', 'normal');
-        doc.text(r.heatingBtu.toLocaleString(), cols[1], y, { align: 'right' });
-        doc.text(r.coolingBtuSensible.toLocaleString(), cols[2], y, { align: 'right' });
-        doc.text(r.coolingBtuLatent.toLocaleString(), cols[3], y, { align: 'right' });
+        doc.text(fmt(r.heatingBtu), cols[1], y, { align: 'right' });
+        doc.text(fmt(r.coolingBtuSensible), cols[2], y, { align: 'right' });
+        doc.text(fmt(r.coolingBtuLatent), cols[3], y, { align: 'right' });
         doc.setFont('helvetica', 'bold');
-        doc.text(r.coolingBtuTotal.toLocaleString(), cols[4], y, { align: 'right' });
+        doc.text(fmt(r.coolingBtuTotal), cols[4], y, { align: 'right' });
         y += 16;
       });
 
-      // Totals row
+      // Totals
       doc.setDrawColor(0); doc.setLineWidth(1);
       doc.line(margin, y - 4, pw - margin, y - 4); y += 8;
       doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(0);
       doc.text('TOTAL', cols[0], y);
       doc.text(totalHeating.toLocaleString(), cols[1], y, { align: 'right' });
-      doc.text(wh.totalCoolingSensible.toLocaleString(), cols[2], y, { align: 'right' });
-      doc.text(wh.totalCoolingLatent.toLocaleString(), cols[3], y, { align: 'right' });
+      doc.text(fmt(wh.totalCoolingSensible), cols[2], y, { align: 'right' });
+      doc.text(fmt(wh.totalCoolingLatent), cols[3], y, { align: 'right' });
       doc.text(totalCooling.toLocaleString(), cols[4], y, { align: 'right' });
 
-      drawFooter();
-      drawStamp();
+      drawFooter(); drawStamp();
     }
 
-    // ── Page 3: Internal Load Breakdown (if pdfIncludeLoadSummary) ───
+    // ═════════════════════════════════════════════════════════════════════
+    // PAGE 3: Room Input Parameters (new — for ACCA reviewer)
+    // ═════════════════════════════════════════════════════════════════════
+    if (prefs.pdfIncludeRoomSchedule !== false) {
+      doc.addPage(); pageNum++; y = 50;
+      sectionHead('Room Input Parameters');
+
+      const iCols = [margin, margin + 80, margin + 120, margin + 170, margin + 215, margin + 265, margin + 310, margin + 365, margin + 420, margin + 470];
+      const iHeaders = ['Room', 'Area (ft²)', 'Walls', 'Wall R', 'Ceil R', 'Floor R', 'Win (ft²)', 'U-val', 'SHGC', 'Dir'];
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(100);
+      iHeaders.forEach((h, i) => doc.text(h, iCols[i], y, { align: i === 0 ? 'left' : 'right' }));
+      y += 4;
+      doc.setDrawColor(200); doc.setLineWidth(0.5);
+      doc.line(margin, y, pw - margin, y); y += 10;
+
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(30);
+      rooms.forEach((r) => {
+        if (y > ph - 60) { drawFooter(); doc.addPage(); pageNum++; y = 50; }
+        doc.setFont('helvetica', 'bold'); doc.text(r.name, iCols[0], y);
+        doc.setFont('helvetica', 'normal');
+        doc.text(`${r.lengthFt}×${r.widthFt}`, iCols[1], y, { align: 'right' });
+        doc.text(`${r.exteriorWalls}`, iCols[2], y, { align: 'right' });
+        doc.text(`R-${r.wallRValue}`, iCols[3], y, { align: 'right' });
+        doc.text(`R-${r.ceilingRValue}`, iCols[4], y, { align: 'right' });
+        doc.text(`R-${r.floorRValue}`, iCols[5], y, { align: 'right' });
+        doc.text(`${r.windowSqFt}`, iCols[6], y, { align: 'right' });
+        doc.text(`${r.windowUValue}`, iCols[7], y, { align: 'right' });
+        doc.text(`${r.windowSHGC}`, iCols[8], y, { align: 'right' });
+        doc.text(r.exposureDirection, iCols[9], y, { align: 'right' });
+        y += 14;
+      });
+
+      drawFooter(); drawStamp();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // PAGE 4: Internal Load Breakdown (if pdfIncludeLoadSummary)
+    // ═════════════════════════════════════════════════════════════════════
     if (prefs.pdfIncludeLoadSummary !== false) {
       doc.addPage(); pageNum++; y = 50;
-
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(0);
-      doc.text('Internal Load Breakdown', margin, y); y += 24;
+      sectionHead('Internal Load Breakdown');
 
       const bCols = [margin, margin + 120, margin + 200, margin + 280, margin + 340, margin + 400, margin + 460];
       const bHeaders = ['Room', 'People (S)', 'Appliance (S)', 'Lighting', 'Misc (S)', 'Total Latent', 'Internal Total'];
@@ -507,27 +634,26 @@ export default function ManualJCalculator() {
         doc.setFont('helvetica', 'bold');
         doc.text(r.roomName, bCols[0], y);
         doc.setFont('helvetica', 'normal');
-        doc.text((b.peopleGain ?? 0).toLocaleString(), bCols[1], y, { align: 'right' });
-        doc.text((b.applianceGain ?? 0).toLocaleString(), bCols[2], y, { align: 'right' });
-        doc.text((b.lightingGain ?? 0).toLocaleString(), bCols[3], y, { align: 'right' });
-        doc.text((b.miscGain ?? 0).toLocaleString(), bCols[4], y, { align: 'right' });
-        const totalLatent = (b.peopleLatent ?? 0) + (b.applianceLatent ?? 0) + (b.miscLatent ?? 0);
-        doc.text(totalLatent.toLocaleString(), bCols[5], y, { align: 'right' });
+        doc.text(fmt(b.peopleGain ?? 0), bCols[1], y, { align: 'right' });
+        doc.text(fmt(b.applianceGain ?? 0), bCols[2], y, { align: 'right' });
+        doc.text(fmt(b.lightingGain ?? 0), bCols[3], y, { align: 'right' });
+        doc.text(fmt(b.miscGain ?? 0), bCols[4], y, { align: 'right' });
+        const tLatent = (b.peopleLatent ?? 0) + (b.applianceLatent ?? 0) + (b.miscLatent ?? 0);
+        doc.text(fmt(tLatent), bCols[5], y, { align: 'right' });
         doc.setFont('helvetica', 'bold');
-        doc.text(b.internalGain.toLocaleString(), bCols[6], y, { align: 'right' });
+        doc.text(fmt(b.internalGain), bCols[6], y, { align: 'right' });
         y += 14;
       });
 
-      drawFooter();
-      drawStamp();
+      drawFooter(); drawStamp();
     }
 
-    // ── Page 4: Envelope Breakdown (per-room transmission losses) ────
+    // ═════════════════════════════════════════════════════════════════════
+    // PAGE 5: Envelope & Ventilation Breakdown
+    // ═════════════════════════════════════════════════════════════════════
     if (prefs.pdfIncludeLoadSummary !== false) {
       doc.addPage(); pageNum++; y = 50;
-
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(0);
-      doc.text('Envelope & Ventilation Breakdown', margin, y); y += 24;
+      sectionHead('Envelope & Ventilation Breakdown');
 
       const eCols = [margin, margin + 100, margin + 155, margin + 210, margin + 265, margin + 320, margin + 375, margin + 435, margin + 490];
       const eHeaders = ['Room', 'Wall', 'Window', 'Ceiling', 'Floor', 'Solar', 'Infiltr.', 'Ventil.', 'Duct'];
@@ -546,67 +672,83 @@ export default function ManualJCalculator() {
         totFloor += b.floorLoss; totSolar += b.solarGain;
         totInfil += b.infiltrationSensible; totVent += b.ventilationSensible; totDuct += b.ductLoss;
 
-        doc.setFont('helvetica', 'bold');
-        doc.text(r.roomName, eCols[0], y);
+        doc.setFont('helvetica', 'bold'); doc.text(r.roomName, eCols[0], y);
         doc.setFont('helvetica', 'normal');
-        doc.text(b.wallLoss.toLocaleString(), eCols[1], y, { align: 'right' });
-        doc.text(b.windowLoss.toLocaleString(), eCols[2], y, { align: 'right' });
-        doc.text(b.ceilingLoss.toLocaleString(), eCols[3], y, { align: 'right' });
-        doc.text(b.floorLoss.toLocaleString(), eCols[4], y, { align: 'right' });
-        doc.text(b.solarGain.toLocaleString(), eCols[5], y, { align: 'right' });
-        doc.text(b.infiltrationSensible.toLocaleString(), eCols[6], y, { align: 'right' });
-        doc.text(b.ventilationSensible.toLocaleString(), eCols[7], y, { align: 'right' });
-        doc.text(b.ductLoss.toLocaleString(), eCols[8], y, { align: 'right' });
+        doc.text(fmt(b.wallLoss), eCols[1], y, { align: 'right' });
+        doc.text(fmt(b.windowLoss), eCols[2], y, { align: 'right' });
+        doc.text(fmt(b.ceilingLoss), eCols[3], y, { align: 'right' });
+        doc.text(fmt(b.floorLoss), eCols[4], y, { align: 'right' });
+        doc.text(fmt(b.solarGain), eCols[5], y, { align: 'right' });
+        doc.text(fmt(b.infiltrationSensible), eCols[6], y, { align: 'right' });
+        doc.text(fmt(b.ventilationSensible), eCols[7], y, { align: 'right' });
+        doc.text(fmt(b.ductLoss), eCols[8], y, { align: 'right' });
         y += 14;
       });
 
-      // Totals row
       y += 4;
       doc.setDrawColor(0); doc.setLineWidth(1);
       doc.line(margin, y - 4, pw - margin, y - 4); y += 8;
       doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(0);
       doc.text('TOTAL', eCols[0], y);
-      doc.text(totWall.toLocaleString(), eCols[1], y, { align: 'right' });
-      doc.text(totWin.toLocaleString(), eCols[2], y, { align: 'right' });
-      doc.text(totCeil.toLocaleString(), eCols[3], y, { align: 'right' });
-      doc.text(totFloor.toLocaleString(), eCols[4], y, { align: 'right' });
-      doc.text(totSolar.toLocaleString(), eCols[5], y, { align: 'right' });
-      doc.text(totInfil.toLocaleString(), eCols[6], y, { align: 'right' });
-      doc.text(totVent.toLocaleString(), eCols[7], y, { align: 'right' });
-      doc.text(totDuct.toLocaleString(), eCols[8], y, { align: 'right' });
+      doc.text(fmt(totWall), eCols[1], y, { align: 'right' });
+      doc.text(fmt(totWin), eCols[2], y, { align: 'right' });
+      doc.text(fmt(totCeil), eCols[3], y, { align: 'right' });
+      doc.text(fmt(totFloor), eCols[4], y, { align: 'right' });
+      doc.text(fmt(totSolar), eCols[5], y, { align: 'right' });
+      doc.text(fmt(totInfil), eCols[6], y, { align: 'right' });
+      doc.text(fmt(totVent), eCols[7], y, { align: 'right' });
+      doc.text(fmt(totDuct), eCols[8], y, { align: 'right' });
 
-      drawFooter();
-      drawStamp();
+      drawFooter(); drawStamp();
     }
 
-    // ── Notes page (if pdfIncludeNotes) ──────────────────────────────
+    // ═════════════════════════════════════════════════════════════════════
+    // PAGE 6: Notes, Methodology & Disclaimers
+    // ═════════════════════════════════════════════════════════════════════
     if (prefs.pdfIncludeNotes !== false) {
       doc.addPage(); pageNum++; y = 50;
-
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(0);
-      doc.text('Notes & Disclaimers', margin, y); y += 24;
+      sectionHead('Methodology & Disclaimers');
 
       doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(60);
       const notes = [
-        '1. All calculations follow ACCA Manual J 8th Edition methodology (ANSI/ACCA 2-2016).',
-        '2. Ventilation rates calculated per ASHRAE Standard 62.2-2022.',
-        '3. Internal gains include per-room occupancy, appliance, lighting, and miscellaneous loads.',
-        '4. Solar heat gain calculated using SHGC method with orientation-specific irradiance values.',
-        '5. Duct losses applied using Manual J Table 7 multipliers adjusted for insulation and leakage.',
-        '6. This document is generated by HVAC DesignPro and is intended as a preliminary engineering reference.',
-        '7. Final equipment selection and installation shall comply with all applicable codes and standards.',
-        '8. A licensed Professional Engineer should verify all calculations before use in permit applications.',
+        'Calculation Methodology:',
+        '  \u2022 All calculations follow ACCA Manual J 8th Edition methodology (ANSI/ACCA 2-2016).',
+        '  \u2022 Wall cooling loads use CLTD method with construction-group-specific thermal mass factors.',
+        '  \u2022 Solar heat gain calculated using SHGC method with latitude-interpolated ASHRAE SHGF values.',
+        '  \u2022 Ventilation rates per ASHRAE Standard 62.2-2022.',
+        '  \u2022 Duct losses per Manual J Table 7, adjusted for insulation R-value and measured/estimated leakage.',
+        '  \u2022 Slab-on-grade floors use perimeter method (F × P × \u0394T) per ASHRAE 90.1 / Manual J Table 4A.',
+        '  \u2022 AED evaluation per Manual J Section N (2016); excursion penalty applied if ratio exceeds 130%.',
+        '  \u2022 Infiltration via default ACH table or LBL blower door method (ASHRAE 136) when test data provided.',
+        '',
+        'Standards Referenced:',
+        '  \u2022 ACCA Manual J 8th Edition (ANSI/ACCA 2-2016) — Residential Load Calculation',
+        '  \u2022 ASHRAE Standard 62.2-2022 — Ventilation for Acceptable Indoor Air Quality',
+        '  \u2022 ASHRAE Handbook of Fundamentals — Climate Data, Solar Heat Gain Factors',
+        '  \u2022 ASHRAE Standard 90.1 — Slab-on-Grade F-Factors (Table A6.3.1)',
+        '  \u2022 ASHRAE Standard 136 — Method for Determining Natural Infiltration',
+        '',
+        'Disclaimers:',
+        '  \u2022 This report is generated by HVAC DesignPro and is intended as an engineering reference.',
+        '  \u2022 Final equipment selection shall comply with ACCA Manual S and all applicable codes.',
+        '  \u2022 A licensed Professional Engineer should review and seal this document before permit submission.',
+        '  \u2022 Software version and calculation engine version should be recorded for audit traceability.',
       ];
       notes.forEach(note => {
-        doc.text(note, margin, y, { maxWidth: pw - margin * 2 });
-        y += 16;
+        if (y > ph - 40) { drawFooter(); doc.addPage(); pageNum++; y = 50; }
+        if (note.startsWith('Calculation') || note.startsWith('Standards') || note.startsWith('Disclaimers')) {
+          doc.setFont('helvetica', 'bold'); doc.setTextColor(0);
+        } else {
+          doc.setFont('helvetica', 'normal'); doc.setTextColor(60);
+        }
+        doc.text(note, margin, y, { maxWidth: contentWidth });
+        y += note === '' ? 8 : 14;
       });
 
-      drawFooter();
-      drawStamp();
+      drawFooter(); drawStamp();
     }
 
-    doc.save(`ManualJ_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
+    doc.save(`ManualJ_Report_${safeProjectName}_${new Date().toISOString().slice(0, 10)}.pdf`);
   };
 
   return (
@@ -895,20 +1037,20 @@ export default function ManualJCalculator() {
                 color="orange" icon={<Thermometer className="w-5 h-5" />} unit="BTU/hr" />
               <SummaryCard label="Total Cooling" value={`${totalCooling.toLocaleString()}`} sub={`${tonnageFromBtu(totalCooling)} tons`}
                 color="sky" icon={<Droplets className="w-5 h-5" />} unit="BTU/hr" />
-              <SummaryCard label="Recommended" value={`${wholeHouse.recommendedTons} Ton`} sub={`SHR: ${wholeHouse.sensibleHeatRatio}`}
+              <SummaryCard label="Recommended" value={`${wholeHouse.recommendedTons} Ton`} sub={`SHR: ${roundForDisplay(wholeHouse.sensibleHeatRatio, 2)}`}
                 color="emerald" icon={<Wind className="w-5 h-5" />} />
-              <SummaryCard label="Ventilation" value={`${wholeHouse.ventilationCFM} CFM`} sub="ASHRAE 62.2"
+              <SummaryCard label="Ventilation" value={`${fmt(wholeHouse.ventilationCFM)} CFM`} sub="ASHRAE 62.2"
                 color="violet" icon={<Shield className="w-5 h-5" />} />
             </div>
 
             {/* Advanced Breakdown */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              <MiniStat label="Duct Loss (Heating)" value={`${wholeHouse.ductLossHeating.toLocaleString()} BTU/hr`} />
-              <MiniStat label="Duct Loss (Cooling)" value={`${wholeHouse.ductLossCooling.toLocaleString()} BTU/hr`} />
-              <MiniStat label="Sensible Heat Ratio" value={`${wholeHouse.sensibleHeatRatio}`} />
-              <MiniStat label="Ventilation Sensible" value={`${wholeHouse.ventilationSensible.toLocaleString()} BTU/hr`} />
-              <MiniStat label="Ventilation Latent" value={`${wholeHouse.ventilationLatent.toLocaleString()} BTU/hr`} />
-              <MiniStat label="Cooling Latent Total" value={`${wholeHouse.totalCoolingLatent.toLocaleString()} BTU/hr`} />
+              <MiniStat label="Duct Loss (Heating)" value={`${fmt(wholeHouse.ductLossHeating)} BTU/hr`} />
+              <MiniStat label="Duct Loss (Cooling)" value={`${fmt(wholeHouse.ductLossCooling)} BTU/hr`} />
+              <MiniStat label="Sensible Heat Ratio" value={`${roundForDisplay(wholeHouse.sensibleHeatRatio, 2)}`} />
+              <MiniStat label="Ventilation Sensible" value={`${fmt(wholeHouse.ventilationSensible)} BTU/hr`} />
+              <MiniStat label="Ventilation Latent" value={`${fmt(wholeHouse.ventilationLatent)} BTU/hr`} />
+              <MiniStat label="Cooling Latent Total" value={`${fmt(wholeHouse.totalCoolingLatent)} BTU/hr`} />
             </div>
 
             {/* Export / Print Buttons */}
@@ -957,17 +1099,17 @@ export default function ManualJCalculator() {
                     {results.map(r => (
                       <tr key={r.roomId} className="border-b border-slate-800/30 hover:bg-slate-800/20 transition-colors">
                         <td className="p-4 font-semibold text-white">{r.roomName}</td>
-                        <td className="p-4 text-right text-orange-400 font-mono">{r.heatingBtu.toLocaleString()}</td>
-                        <td className="p-4 text-right text-sky-400 font-mono">{r.coolingBtuSensible.toLocaleString()}</td>
-                        <td className="p-4 text-right text-sky-300 font-mono">{r.coolingBtuLatent.toLocaleString()}</td>
-                        <td className="p-4 text-right text-emerald-400 font-bold font-mono">{r.coolingBtuTotal.toLocaleString()}</td>
+                        <td className="p-4 text-right text-orange-400 font-mono">{fmt(r.heatingBtu)}</td>
+                        <td className="p-4 text-right text-sky-400 font-mono">{fmt(r.coolingBtuSensible)}</td>
+                        <td className="p-4 text-right text-sky-300 font-mono">{fmt(r.coolingBtuLatent)}</td>
+                        <td className="p-4 text-right text-emerald-400 font-bold font-mono">{fmt(r.coolingBtuTotal)}</td>
                       </tr>
                     ))}
                     <tr className="bg-slate-800/30 font-bold">
                       <td className="p-4 text-white">TOTAL</td>
                       <td className="p-4 text-right text-orange-400 font-mono">{totalHeating.toLocaleString()}</td>
-                      <td className="p-4 text-right text-sky-400 font-mono">{wholeHouse.totalCoolingSensible.toLocaleString()}</td>
-                      <td className="p-4 text-right text-sky-300 font-mono">{wholeHouse.totalCoolingLatent.toLocaleString()}</td>
+                      <td className="p-4 text-right text-sky-400 font-mono">{fmt(wholeHouse.totalCoolingSensible)}</td>
+                      <td className="p-4 text-right text-sky-300 font-mono">{fmt(wholeHouse.totalCoolingLatent)}</td>
                       <td className="p-4 text-right text-emerald-400 font-mono">{totalCooling.toLocaleString()}</td>
                     </tr>
                   </tbody>
