@@ -12,7 +12,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Search, X, FileText, Home, Thermometer, PenTool, Settings, Users,
+  Search, X, FileText, Home, Thermometer, PenTool, Settings, Users, Sun, GitBranch,
   MapPin, Star, Wrench, Package, Navigation,
   ArrowRight, FolderOpen, Zap, Gauge, FileDown, Shield
 } from 'lucide-react';
@@ -45,6 +45,8 @@ function getPageResults(navigate: (path: string) => void): SearchResult[] {
   return [
     { id: 'page-dashboard', category: 'page', title: 'Project Workspace', subtitle: 'Dashboard — manage projects', icon: <Home className="w-4 h-4" />, action: () => navigate('/dashboard') },
     { id: 'page-calculator', category: 'page', title: 'Manual J Calculator', subtitle: 'Heating & cooling load calculations', icon: <Thermometer className="w-4 h-4" />, action: () => navigate('/calculator') },
+    { id: 'page-manuald', category: 'page', title: 'Manual D Calculator', subtitle: 'Duct sizing & friction rate design', icon: <GitBranch className="w-4 h-4" />, action: () => navigate('/manual-d') },
+    { id: 'page-aed', category: 'page', title: 'AED Analysis', subtitle: 'Adequate Exposure Diversity — Section N', icon: <Sun className="w-4 h-4" />, action: () => navigate('/aed') },
     { id: 'page-cad', category: 'page', title: 'CAD Workspace', subtitle: 'Floor plan design & duct layout', icon: <PenTool className="w-4 h-4" />, action: () => navigate('/cad') },
     { id: 'page-settings', category: 'page', title: 'Settings', subtitle: 'Theme, units, preferences', icon: <Settings className="w-4 h-4" />, action: () => navigate('/settings') },
     { id: 'page-team', category: 'page', title: 'Team Management', subtitle: 'Manage team members', icon: <Users className="w-4 h-4" />, action: () => navigate('/team') },

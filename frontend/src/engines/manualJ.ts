@@ -13,16 +13,22 @@
  * must verify all outputs before use in permit applications.
  */
 
+import { calculateAed, extractGlassGroups } from './aed';
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // TYPES
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export type FloorType = 'slab' | 'crawlspace' | 'basement' | 'over_conditioned';
+export type SlabInsulation = 'uninsulated' | 'r5_vertical_24' | 'r5_vertical_48' | 'r10_vertical_24' | 'r10_vertical_48' | 'r15_vertical_48' | 'r10_full';
+export type SoilCondition = 'heavy_moist' | 'heavy_dry' | 'light_wet' | 'light_dry';
 export type Exposure = 'N' | 'S' | 'E' | 'W' | 'NE' | 'NW' | 'SE' | 'SW';
 export type GlassType = 'single_clear' | 'double_clear' | 'double_low_e' | 'triple_low_e';
 export type DuctLocation = 'conditioned' | 'attic' | 'crawlspace' | 'garage' | 'basement_uncond';
 export type WallGradeType = 'above' | 'below_full' | 'below_partial';
+export type WallConstructionGroup = 'I' | 'J' | 'K' | 'L';
 export type Construction = 'tight' | 'average' | 'leaky';
+export type InfiltrationMethod = 'default' | 'blower_door';
 export type DailyRange = 'low' | 'medium' | 'high';
 
 export type RoomType =
@@ -52,6 +58,7 @@ export interface RoomInput {
   exteriorWalls: number;
   wallRValue: number;
   wallGrade: WallGradeType;
+  wallGroup?: WallConstructionGroup; // Manual J cooling group (I=2x4 R-13, J=2x6 R-19, K=masonry, L=heavy masonry)
   belowGradeDepthFt: number;   // depth below grade (for partial/full below-grade)
 
   // Windows
@@ -66,6 +73,11 @@ export interface RoomInput {
   ceilingRValue: number;
   floorRValue: number;
   floorType: FloorType;
+
+  // Slab-on-grade fields (used when floorType = 'slab')
+  perimeterFt?: number;           // exposed perimeter in linear feet
+  slabInsulation?: SlabInsulation; // edge insulation configuration
+  soilCondition?: SoilCondition;   // soil type (affects F-factor)
 
   // Orientation
   exposureDirection: Exposure;
@@ -120,6 +132,12 @@ export interface DesignConditions {
   constructionQuality: Construction;
   numBedrooms: number;         // for ASHRAE 62.2 ventilation
   totalFloorArea: number;      // whole-building floor area for ventilation calc
+
+  // Infiltration method (default = ACH table, blower_door = LBL method)
+  infiltrationMethod?: InfiltrationMethod;
+  blowerDoorCFM50?: number;    // measured CFM at 50 Pa (from blower door test)
+  stories?: number;            // number of stories (1-3, for LBL N-factor)
+  windShielding?: 'exposed' | 'normal' | 'shielded'; // for LBL N-factor
 }
 
 export interface RoomResult {
@@ -151,6 +169,15 @@ export interface RoomResult {
   };
 }
 
+export interface AedSummary {
+  peakLoad: number;
+  averageLoad: number;
+  ratio: number;
+  excursion: number;
+  pass: boolean;
+  peakHour: number;
+}
+
 export interface WholeHouseResult {
   rooms: RoomResult[];
   totalHeatingBtu: number;
@@ -164,6 +191,7 @@ export interface WholeHouseResult {
   ventilationLatent: number;
   recommendedTons: number;
   sensibleHeatRatio: number;
+  aed: AedSummary;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -220,20 +248,66 @@ function getDuctMultiplier(
 }
 
 /**
- * SHGC-based Solar Heat Gain (Manual J Table 3A/3B simplified)
- * Peak solar irradiance by direction in BTU/(hr·ft²) at ~40° latitude
- * These represent clear-sky July 21 peak values.
+ * ASHRAE Maximum Solar Heat Gain Factors (SHGF) — Manual J Table 3A/3B
+ * Peak solar irradiance by direction in BTU/(hr·ft²), clear-sky July 21.
+ * Data sourced from ASHRAE Handbook of Fundamentals; 40°N row confirmed from
+ * multiple authoritative references; other rows interpolated from confirmed
+ * anchor points at 32°N (ASHRAE data converted from W/m²) and physical
+ * solar geometry relationships.
+ *
+ * These are reference glazing values (single clear, SHGC ≈ 0.87).
+ * The engine multiplies by the actual window's SHGC in the formula:
+ *   Q_solar = Area × SHGC × SHGF × IAC
+ *
+ * Cross-check sources:
+ *   - Triton College (academics.triton.edu): W=216 at 40N ✓
+ *   - RVCC textbook (rvcc.pressbooks.pub): W=216-237 at 40N ✓
+ *   - NRC Canada CBD-39 (web.mit.edu): E/W≈255 at 45N ✓
+ *   - Askfilo (askfilo.com): 32N data in W/m² converted ✓
+ *   - Dartmouth SHGF tables (cushman.host.dartmouth.edu) ✓
+ *
+ * TODO: Cross-validate against Manual J 8th Ed Table 3A/3B when Dan (Burlington)
+ * provides the book. Manual J may apply Cooling Load Factors (CLF) that
+ * reduce these peak values for residential time-averaging.
  */
-const SOLAR_IRRADIANCE: Record<Exposure, number> = {
-  N:  35,
-  NE: 105,
-  E:  180,
-  SE: 140,
-  S:  75,
-  SW: 140,
-  W:  180,
-  NW: 105,
-};
+const SOLAR_IRRADIANCE_BY_LATITUDE: { lat: number; values: Record<Exposure, number> }[] = [
+  { lat: 24, values: { N: 44, NE: 160, E: 222, SE: 141, S:  66, SW: 141, W: 222, NW: 160 } },
+  { lat: 28, values: { N: 42, NE: 151, E: 220, SE: 155, S:  78, SW: 155, W: 220, NW: 151 } },
+  { lat: 32, values: { N: 40, NE: 143, E: 218, SE: 168, S:  91, SW: 168, W: 218, NW: 143 } },
+  { lat: 36, values: { N: 39, NE: 138, E: 217, SE: 179, S: 104, SW: 179, W: 217, NW: 138 } },
+  { lat: 40, values: { N: 38, NE: 134, E: 216, SE: 190, S: 117, SW: 190, W: 216, NW: 134 } },
+  { lat: 44, values: { N: 37, NE: 127, E: 214, SE: 197, S: 131, SW: 197, W: 214, NW: 127 } },
+  { lat: 48, values: { N: 36, NE: 120, E: 212, SE: 203, S: 145, SW: 203, W: 212, NW: 120 } },
+];
+
+/**
+ * Look up solar irradiance for a given latitude and exposure direction.
+ * Interpolates linearly between the two nearest latitude bands.
+ * Clamps to 24°N–48°N range (covers continental US + Hawaii to northern border).
+ */
+function getSolarIrradiance(latitude: number, exposure: Exposure): number {
+  const table = SOLAR_IRRADIANCE_BY_LATITUDE;
+  const lat = Math.max(table[0].lat, Math.min(table[table.length - 1].lat, latitude));
+
+  // Find bracketing rows
+  let lower = table[0];
+  let upper = table[table.length - 1];
+  for (let i = 0; i < table.length - 1; i++) {
+    if (lat >= table[i].lat && lat <= table[i + 1].lat) {
+      lower = table[i];
+      upper = table[i + 1];
+      break;
+    }
+  }
+
+  if (lower.lat === upper.lat) return lower.values[exposure] ?? 75;
+
+  // Linear interpolation
+  const fraction = (lat - lower.lat) / (upper.lat - lower.lat);
+  const lowerVal = lower.values[exposure] ?? 75;
+  const upperVal = upper.values[exposure] ?? 75;
+  return lowerVal + fraction * (upperVal - lowerVal);
+}
 
 /** Daily range correction for CLTD (Cooling Load Temperature Difference) */
 const DAILY_RANGE_CORRECTION: Record<DailyRange, number> = {
@@ -241,6 +315,93 @@ const DAILY_RANGE_CORRECTION: Record<DailyRange, number> = {
   medium: -3,    // moderate climates (DR 16–25°F)
   high:   -5,    // dry/arid climates (DR > 25°F)
 };
+
+/**
+ * Wall construction group base CLTD values at standard conditions.
+ *
+ * Manual J 8th Ed assigns construction groups starting from Group I for
+ * lightweight residential walls. The CLTD value captures solar absorption,
+ * thermal mass, and time-lag effects for opaque surfaces in cooling mode.
+ *
+ * Base conditions (ASHRAE): indoor=78°F, outdoor mean=85°F, DR=21°F.
+ * Manual J adjusts to indoor=75°F (adding 3°F to base CLTD).
+ *
+ * These base CLTD values are for medium-color exterior, medium daily range.
+ * The correction formula adjusts for actual conditions:
+ *   CLTD_corrected = CLTD_base + (78 - T_room) + (T_mean_outdoor - 85)
+ * where T_mean_outdoor = T_outdoor_design - (daily_range / 2)
+ *
+ * Group assignments (Manual J Table 4A):
+ *   I  = Lightweight frame wall, R-13 cavity (2×4 wood, low thermal mass)
+ *   J  = Lightweight frame wall, R-19 cavity (2×6 wood, low thermal mass)
+ *   K  = Medium-weight wall (CMU block, moderate thermal mass)
+ *   L  = Heavy wall (brick/stone, high thermal mass — most time-lag dampening)
+ *
+ * Cross-references:
+ *   - ASHRAE 1997 Fundamentals Ch.28 CLTD method ✓
+ *   - CED Engineering cooling load calculations ✓
+ *   - Manual J simplified residential CLTD approach ✓
+ *   - Wikipedia CLTD article (background methodology) ✓
+ *
+ * TODO: Cross-validate against Manual J Table 4B exact values when book available.
+ */
+const WALL_CLTD_BASE: Record<WallConstructionGroup, number> = {
+  I: 22.5,   // Lightweight 2×4 frame — high CLTD (minimal thermal mass, fast response)
+  J: 19.0,   // Lightweight 2×6 frame — slightly lower (more insulation dampens peak)
+  K: 13.5,   // Medium masonry (8" CMU) — significant thermal mass, moderate time lag
+  L: 9.5,    // Heavy masonry (brick/stone) — highest thermal mass, most dampened peak
+};
+
+/** Ceiling CLTD base value (residential — attic above, medium color roof) */
+const CEILING_CLTD_BASE = 38.0; // Higher than walls due to direct solar exposure on roof
+
+/**
+ * Compute corrected CLTD for walls.
+ * Applies ASHRAE correction formula adapted for Manual J residential conditions.
+ *
+ * @param group — wall construction group (I, J, K, L)
+ * @param indoorTemp — indoor cooling setpoint (°F)
+ * @param outdoorDesignTemp — outdoor cooling design dry-bulb (°F)
+ * @param dailyRange — daily temperature range classification
+ * @returns corrected CLTD value (°F equivalent)
+ */
+function getWallCLTD(
+  group: WallConstructionGroup,
+  indoorTemp: number,
+  outdoorDesignTemp: number,
+  dailyRange: DailyRange,
+): number {
+  const baseCLTD = WALL_CLTD_BASE[group] ?? WALL_CLTD_BASE.I;
+
+  // Daily range in °F (estimate from classification for mean outdoor calc)
+  const drValues: Record<DailyRange, number> = { low: 12, medium: 20, high: 30 };
+  const dr = drValues[dailyRange];
+
+  // Mean outdoor temperature
+  const tMeanOutdoor = outdoorDesignTemp - (dr / 2);
+
+  // ASHRAE correction: CLTD_corrected = CLTD_base + (78 - T_room) + (T_mean - 85)
+  const corrected = baseCLTD + (78 - indoorTemp) + (tMeanOutdoor - 85);
+
+  return Math.max(0, corrected);
+}
+
+/**
+ * Compute corrected CLTD for ceilings.
+ * Ceilings under attic have higher base CLTD due to direct solar exposure on roof.
+ */
+function getCeilingCLTD(
+  indoorTemp: number,
+  outdoorDesignTemp: number,
+  dailyRange: DailyRange,
+): number {
+  const drValues: Record<DailyRange, number> = { low: 12, medium: 20, high: 30 };
+  const dr = drValues[dailyRange];
+  const tMeanOutdoor = outdoorDesignTemp - (dr / 2);
+
+  const corrected = CEILING_CLTD_BASE + (78 - indoorTemp) + (tMeanOutdoor - 85);
+  return Math.max(0, corrected);
+}
 
 /**
  * Internal gains per person by activity level (Manual J Table 6 + ASHRAE)
@@ -314,6 +475,76 @@ export const ROOM_TYPE_PRESETS: Record<RoomType, {
   hallway:   { occupants: 0, activity: 'seated',            appliances: [],                                    lighting: 'led' },
   custom:    { occupants: 2, activity: 'seated',            appliances: [],                                    lighting: 'led' },
 };
+
+/**
+ * Slab-on-Grade F-Factors — BTU/(hr·ft·°F) per linear foot of exposed perimeter
+ * Source: ASHRAE 90.1 Table A6.3.1 (unheated slabs), adopted by IECC.
+ * Cross-checked against:
+ *   - UpCodes (up.codes/s/f-factors-for-slab-on-grade-floors) ✓
+ *   - Energy Code Ace (energycodeace.com/table-4.4.7) ✓
+ *   - GreenBuildingAdvisor (Manual J vs ASHRAE discussion) ✓
+ *   - EnergyPlus Engineering Reference (F-Factor constructions) ✓
+ *
+ * Manual J uses soil-adjusted values (heavy_moist=1.358, light_dry=0.989 uninsulated)
+ * which are higher than ASHRAE 90.1's generic 0.73. We include both for accuracy.
+ *
+ * Formula: Q_slab = F × P × ΔT
+ *   F = factor from this table
+ *   P = exposed perimeter (ft)
+ *   ΔT = indoor - outdoor heating design temp
+ */
+const SLAB_F_FACTORS: Record<SlabInsulation, number> = {
+  uninsulated:      0.73,   // ASHRAE 90.1 baseline (no edge insulation)
+  r5_vertical_24:   0.58,   // R-5 vertical insulation, 24" depth
+  r5_vertical_48:   0.54,   // R-5 vertical, 48" depth
+  r10_vertical_24:  0.54,   // R-10 vertical, 24" depth
+  r10_vertical_48:  0.48,   // R-10 vertical, 48" depth
+  r15_vertical_48:  0.45,   // R-15 vertical, 48" depth
+  r10_full:         0.36,   // R-10 fully insulated (under entire slab)
+};
+
+/**
+ * Soil condition multiplier for slab F-factor (Manual J Table 4A adjustment).
+ * Manual J heavy-moist uninsulated = 1.358 vs ASHRAE 0.73, ratio ≈ 1.86.
+ * Manual J light-dry uninsulated = 0.989 vs ASHRAE 0.73, ratio ≈ 1.35.
+ * These multipliers scale the ASHRAE F-factors to Manual J soil-adjusted values.
+ */
+const SOIL_CONDITION_MULTIPLIER: Record<SoilCondition, number> = {
+  heavy_moist: 1.86,  // 1.358 / 0.73 — saturated clay, high conductivity
+  heavy_dry:   1.60,  // interpolated between heavy_moist and light_wet
+  light_wet:   1.50,  // interpolated
+  light_dry:   1.35,  // 0.989 / 0.73 — sandy, low conductivity
+};
+
+/**
+ * LBL (Lawrence Berkeley Lab) N-factor for infiltration
+ * Used in the blower door method: ACH_natural = ACH50 / N
+ * N varies by number of stories and wind shielding class.
+ * Source: ASHRAE 136 / Manual J Section 8
+ */
+const LBL_N_FACTOR: Record<string, Record<number, number>> = {
+  exposed:  { 1: 14.5, 2: 16.0, 3: 17.8 },
+  normal:   { 1: 17.8, 2: 20.0, 3: 22.2 },
+  shielded: { 1: 22.2, 2: 24.5, 3: 27.0 },
+};
+
+/**
+ * Calculate infiltration CFM using the LBL blower door method.
+ * ACH50 = (CFM50 × 60) / volume
+ * ACH_natural = ACH50 / N
+ * Infiltration CFM = (ACH_natural × volume) / 60
+ *
+ * Simplified: infiltration CFM = CFM50 / N
+ */
+function lblInfiltrationCFM(
+  cfm50: number,
+  stories: number,
+  shielding: 'exposed' | 'normal' | 'shielded',
+): number {
+  const clampedStories = Math.max(1, Math.min(3, Math.round(stories)));
+  const n = LBL_N_FACTOR[shielding]?.[clampedStories] ?? 20;
+  return cfm50 / n;
+}
 
 /** Ground temperature approximation for below-grade walls */
 function groundTemp(outdoorHeatingTemp: number, outdoorCoolingTemp: number): number {
@@ -396,11 +627,19 @@ export function calculateRoom(room: RoomInput, conditions: DesignConditions): Ro
 
   let floorLossH = 0;
   switch (room.floorType) {
-    case 'slab':
-      // Slab-on-grade: perimeter method — ~0.81 BTU/hr per ft of perimeter per °F (uninsulated)
-      // Simplified: use R-value approach with 50% attenuation
-      floorLossH = (floorArea / room.floorRValue) * heatingDT * 0.5;
+    case 'slab': {
+      // Slab-on-grade: Q = F × P × ΔT (ACCA Manual J / ASHRAE perimeter method)
+      const insulation = room.slabInsulation ?? 'uninsulated';
+      const baseFactor = SLAB_F_FACTORS[insulation] ?? SLAB_F_FACTORS.uninsulated;
+      const soilMult = SOIL_CONDITION_MULTIPLIER[room.soilCondition ?? 'heavy_moist'];
+      const fFactor = baseFactor * soilMult;
+
+      // Use explicit perimeter if provided; otherwise estimate from room dimensions
+      const perimeter = room.perimeterFt ?? (2 * (room.lengthFt + room.widthFt));
+
+      floorLossH = fFactor * perimeter * heatingDT;
       break;
+    }
     case 'crawlspace':
       floorLossH = (floorArea / room.floorRValue) * heatingDT * 0.67;
       break;
@@ -413,8 +652,20 @@ export function calculateRoom(room: RoomInput, conditions: DesignConditions): Ro
   }
 
   // Infiltration — sensible
-  const ach = ACH_BY_CONSTRUCTION[conditions.constructionQuality];
-  const infiltCFM = (volume * ach) / 60 * densityCorrection;
+  // Supports two methods: default ACH table or LBL blower door (ACCA Manual J Section 8)
+  let infiltCFM: number;
+  if (conditions.infiltrationMethod === 'blower_door' && conditions.blowerDoorCFM50) {
+    // LBL method: CFM_natural = CFM50 / N (adjusted for density)
+    infiltCFM = lblInfiltrationCFM(
+      conditions.blowerDoorCFM50,
+      conditions.stories ?? 1,
+      conditions.windShielding ?? 'normal',
+    ) * densityCorrection;
+  } else {
+    // Default table method
+    const ach = ACH_BY_CONSTRUCTION[conditions.constructionQuality];
+    infiltCFM = (volume * ach) / 60 * densityCorrection;
+  }
   const infiltSensibleH = AIR_HEAT_FACTOR * infiltCFM * heatingDT;
 
   // Room heating subtotal (before duct loss)
@@ -422,26 +673,39 @@ export function calculateRoom(room: RoomInput, conditions: DesignConditions): Ro
 
   // ── COOLING GAINS ─────────────────────────────────────────────────────
 
-  // CLTD correction for daily range
+  // CLTD for windows — uses simple daily-range-corrected ΔT (windows have negligible thermal mass)
   const cltdCorrection = DAILY_RANGE_CORRECTION[conditions.coolingDailyRange];
-  const adjustedCoolingDT = Math.max(0, coolingDT + cltdCorrection);
+  const windowCoolingDT = Math.max(0, coolingDT + cltdCorrection);
 
-  const wallGainC = (netWallArea / wallREffective) * wallCoolingDT;
-  const windowConductionC = (room.windowSqFt * room.windowUValue) * adjustedCoolingDT;
-  const ceilingGainC = (floorArea / room.ceilingRValue) * adjustedCoolingDT;
+  // CLTD for walls — uses construction-group-specific values accounting for thermal mass & time lag
+  const wallGroup = room.wallGroup ?? (room.wallRValue >= 17 ? 'J' : 'I'); // auto-detect: R-19+ = 2x6 (J), else 2x4 (I)
+  const wallCLTD = (room.wallGrade === 'above')
+    ? getWallCLTD(wallGroup, conditions.indoorCoolingTemp, conditions.outdoorCoolingTemp, conditions.coolingDailyRange)
+    : wallCoolingDT; // below-grade walls use ground-temp-based ΔT, not CLTD
+
+  // CLTD for ceilings — highest CLTD due to direct roof solar exposure
+  const ceilingCLTD = getCeilingCLTD(conditions.indoorCoolingTemp, conditions.outdoorCoolingTemp, conditions.coolingDailyRange);
+
+  // Wall cooling gain: Q = U × A × CLTD (Manual J HTM method)
+  const wallGainC = (netWallArea / wallREffective) * wallCLTD;
+  const windowConductionC = (room.windowSqFt * room.windowUValue) * windowCoolingDT;
+  const ceilingGainC = (floorArea / room.ceilingRValue) * ceilingCLTD;
 
   let floorGainC = 0;
   if (room.floorType === 'crawlspace') {
-    floorGainC = (floorArea / room.floorRValue) * adjustedCoolingDT * 0.3;
+    floorGainC = (floorArea / room.floorRValue) * coolingDT * 0.3;
   }
 
   // ── SHGC-BASED SOLAR GAIN ────────────────────────────────────────────
-  // Q_solar = A_window × SHGC × I_solar × IAC (interior attenuation coefficient)
-  const solarIrradiance = SOLAR_IRRADIANCE[room.exposureDirection] ?? 75;
-  const solarGain = room.windowSqFt * room.windowSHGC * solarIrradiance * room.interiorShading;
+  // Q_solar = A_window × SHGC × SHGF(lat, dir) × IAC
+  // SHGF is the ASHRAE max solar heat gain factor for reference glazing (SHGC≈0.87).
+  // Multiplying by the actual window SHGC effectively converts from reference to real glass.
+  const shgf = getSolarIrradiance(conditions.latitude, room.exposureDirection);
+  const solarGain = room.windowSqFt * room.windowSHGC * shgf * room.interiorShading;
 
   // Infiltration — sensible + latent (cooling)
-  const infiltSensibleC = AIR_HEAT_FACTOR * infiltCFM * adjustedCoolingDT;
+  // Infiltration uses direct air temperature difference (no thermal mass effect)
+  const infiltSensibleC = AIR_HEAT_FACTOR * infiltCFM * windowCoolingDT;
   const infiltLatentC = AIR_LATENT_FACTOR * infiltCFM * Math.max(0, deltaGrains);
 
   // ── INTERNAL GAINS — PEOPLE ────────────────────────────────────────────
@@ -480,31 +744,33 @@ export function calculateRoom(room: RoomInput, conditions: DesignConditions): Ro
   // Latent cooling subtotal
   const roomCoolingLatentRaw = infiltLatentC + totalInternalLatent;
 
+  // Preserve full floating-point precision through the pipeline.
+  // Rounding is deferred to display/PDF layer only (ACCA validation rule #7).
   return {
     roomId: room.id,
     roomName: room.name,
-    heatingBtu: Math.round(roomHeatingRaw),
-    coolingBtuSensible: Math.round(roomCoolingSensibleRaw),
-    coolingBtuLatent: Math.round(roomCoolingLatentRaw),
-    coolingBtuTotal: Math.round(roomCoolingSensibleRaw + roomCoolingLatentRaw),
+    heatingBtu: roomHeatingRaw,
+    coolingBtuSensible: roomCoolingSensibleRaw,
+    coolingBtuLatent: roomCoolingLatentRaw,
+    coolingBtuTotal: roomCoolingSensibleRaw + roomCoolingLatentRaw,
     breakdown: {
-      wallLoss: Math.round(wallLossH),
-      windowLoss: Math.round(windowLossH),
-      ceilingLoss: Math.round(ceilingLossH),
-      floorLoss: Math.round(floorLossH),
-      infiltrationSensible: Math.round(infiltSensibleH),
-      infiltrationLatent: Math.round(infiltLatentC),
+      wallLoss: wallLossH,
+      windowLoss: windowLossH,
+      ceilingLoss: ceilingLossH,
+      floorLoss: floorLossH,
+      infiltrationSensible: infiltSensibleH,
+      infiltrationLatent: infiltLatentC,
       ventilationSensible: 0,  // filled in at whole-house level
       ventilationLatent: 0,
-      solarGain: Math.round(solarGain),
-      internalGain: Math.round(totalInternalSensible),
-      peopleGain: Math.round(peopleSensible),
-      peopleLatent: Math.round(peopleLatent),
-      applianceGain: Math.round(applianceSensible),
-      applianceLatent: Math.round(applianceLatent),
-      lightingGain: Math.round(lightingGain),
-      miscGain: Math.round(miscSensible),
-      miscLatent: Math.round(miscLatent),
+      solarGain: solarGain,
+      internalGain: totalInternalSensible,
+      peopleGain: peopleSensible,
+      peopleLatent: peopleLatent,
+      applianceGain: applianceSensible,
+      applianceLatent: applianceLatent,
+      lightingGain: lightingGain,
+      miscGain: miscSensible,
+      miscLatent: miscLatent,
       ductLoss: 0,  // filled in at whole-house level
     },
   };
@@ -540,6 +806,15 @@ export function calculateWholeHouse(
   sumCoolingSensible += ventSensibleC;
   sumCoolingLatent += ventLatentC;
 
+  // 3b. AED check (Manual J Section N) — must run before duct losses
+  const glassGroups = extractGlassGroups(rooms);
+  const aedResult = calculateAed(glassGroups);
+
+  // If AED fails, add excursion penalty to sensible cooling load
+  if (aedResult.excursion > 0) {
+    sumCoolingSensible += aedResult.excursion;
+  }
+
   // 4. Duct Loss Multipliers
   const ductMultH = getDuctMultiplier(
     conditions.ductLocation, conditions.ductInsulationR,
@@ -550,16 +825,17 @@ export function calculateWholeHouse(
     conditions.ductLeakagePercent, 'cooling'
   );
 
-  const ductLossHeating = Math.round(sumHeating * (ductMultH - 1));
-  const ductLossCooling = Math.round((sumCoolingSensible + sumCoolingLatent) * (ductMultC - 1));
+  // Preserve full precision through duct loss calculations (ACCA rule #7)
+  const ductLossHeating = sumHeating * (ductMultH - 1);
+  const ductLossCooling = (sumCoolingSensible + sumCoolingLatent) * (ductMultC - 1);
 
-  const totalHeating = Math.round(sumHeating * ductMultH);
-  const totalCoolingSensible = Math.round(sumCoolingSensible * ductMultC);
-  const totalCoolingLatent = Math.round(sumCoolingLatent * ductMultC);
+  const totalHeating = sumHeating * ductMultH;
+  const totalCoolingSensible = sumCoolingSensible * ductMultC;
+  const totalCoolingLatent = sumCoolingLatent * ductMultC;
   const totalCooling = totalCoolingSensible + totalCoolingLatent;
 
-  // 5. Equipment sizing
-  const recommendedTons = Math.ceil((totalCooling / 12000) * 2) / 2; // round to nearest 0.5 ton
+  // 5. Equipment sizing — round to nearest 0.5 ton (display-level rounding, acceptable)
+  const recommendedTons = Math.ceil((totalCooling / 12000) * 2) / 2;
 
   // 6. Sensible Heat Ratio
   const shr = totalCooling > 0 ? totalCoolingSensible / totalCooling : 1;
@@ -567,16 +843,24 @@ export function calculateWholeHouse(
   return {
     rooms: roomResults,
     totalHeatingBtu: totalHeating,
-    totalCoolingSensible: totalCoolingSensible,
-    totalCoolingLatent: totalCoolingLatent,
+    totalCoolingSensible,
+    totalCoolingLatent,
     totalCoolingBtu: totalCooling,
     ductLossHeating,
     ductLossCooling,
-    ventilationCFM: Math.round(ventCFM),
-    ventilationSensible: Math.round(ventSensibleH),
-    ventilationLatent: Math.round(ventLatentC),
+    ventilationCFM: ventCFM,
+    ventilationSensible: ventSensibleH,
+    ventilationLatent: ventLatentC,
     recommendedTons,
-    sensibleHeatRatio: Math.round(shr * 100) / 100,
+    sensibleHeatRatio: shr,
+    aed: {
+      peakLoad: aedResult.peakLoad,
+      averageLoad: aedResult.averageLoad,
+      ratio: aedResult.ratio,
+      excursion: aedResult.excursion,
+      pass: aedResult.pass,
+      peakHour: aedResult.peakHour,
+    },
   };
 }
 
@@ -586,6 +870,17 @@ export function calculateWholeHouse(
 
 export function tonnageFromBtu(btu: number): string {
   return (btu / 12000).toFixed(2);
+}
+
+/**
+ * Round a value for display purposes only.
+ * The engine preserves full floating-point precision (ACCA validation rule #7).
+ * Use this in UI components and PDF export — never in the calculation pipeline.
+ */
+export function roundForDisplay(value: number, decimals: number = 0): number {
+  if (decimals === 0) return Math.round(value);
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
 }
 
 /** Default room with ACCA-grade inputs */
@@ -607,6 +902,7 @@ export function createDefaultRoom(index: number, roomType?: RoomType): RoomInput
     exteriorWalls: 1,
     wallRValue: 13,
     wallGrade: 'above',
+    wallGroup: 'I',
     belowGradeDepthFt: 0,
     windowSqFt: 15,
     windowCount: 1,
@@ -648,6 +944,10 @@ export function createDefaultConditions(): DesignConditions {
     constructionQuality: 'average',
     numBedrooms: 3,
     totalFloorArea: 1800,
+    infiltrationMethod: 'default',
+    blowerDoorCFM50: undefined,
+    stories: 1,
+    windShielding: 'normal',
   };
 }
 

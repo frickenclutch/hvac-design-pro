@@ -1,11 +1,14 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
-import { Home, Compass, Settings, Users, LogOut, Thermometer, PenTool, Menu, X, Search, BookOpen, GitBranch } from 'lucide-react';
+import { Home, Compass, Settings, Users, LogOut, Thermometer, PenTool, Menu, X, Search, BookOpen, GitBranch, Sun } from 'lucide-react';
 import LandingPage from './pages/LandingPage';
 import OnboardingPage from './pages/OnboardingPage';
 import AuthPage from './pages/AuthPage';
 import TermsPage from './pages/TermsPage';
 import DemoPage from './pages/DemoPage';
+import VerifyEmailPage from './pages/VerifyEmailPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import AuthCallbackPage from './pages/AuthCallbackPage';
 import UserAvatarMenu from './components/UserAvatarMenu';
 import ErrorBoundary from './components/ErrorBoundary';
 import ToastContainer from './components/ToastContainer';
@@ -15,6 +18,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const CadWorkspace = lazy(() => import('./pages/CadWorkspace'));
 const ManualJCalculator = lazy(() => import('./pages/ManualJCalculator'));
 const ManualDCalculator = lazy(() => import('./pages/ManualDCalculator'));
+const AedAnalysis = lazy(() => import('./pages/AedAnalysis'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const UserGuidePage = lazy(() => import('./pages/UserGuidePage'));
 import { useAuthStore } from './features/auth/store/useAuthStore';
@@ -49,7 +53,7 @@ function AppLayout() {
   const showSidebar = isAuthenticated && !isCadRoute;
 
   // Public pages that need full-page scroll (not locked in app shell)
-  const isPublicScrollPage = ['/', '/terms', '/login', '/onboarding', '/landing', '/demo'].includes(location.pathname);
+  const isPublicScrollPage = ['/', '/terms', '/login', '/onboarding', '/landing', '/demo', '/verify-email', '/forgot-password', '/auth/callback'].includes(location.pathname);
 
   return (
     <div className="flex flex-col md:flex-row bg-slate-950 text-slate-100 font-sans min-h-screen md:h-screen md:overflow-hidden">
@@ -83,6 +87,7 @@ function AppLayout() {
             <MobileNavLink to="/dashboard" icon={<Home className="w-5 h-5" />} label="Projects" onClick={() => setMobileNavOpen(false)} />
             <MobileNavLink to="/calculator" icon={<Thermometer className="w-5 h-5" />} label="Manual J" onClick={() => setMobileNavOpen(false)} />
             <MobileNavLink to="/manual-d" icon={<GitBranch className="w-5 h-5" />} label="Manual D" onClick={() => setMobileNavOpen(false)} />
+            <MobileNavLink to="/aed" icon={<Sun className="w-5 h-5" />} label="AED" onClick={() => setMobileNavOpen(false)} />
             <MobileNavLink to="/cad" icon={<PenTool className="w-5 h-5" />} label="CAD" onClick={() => setMobileNavOpen(false)} />
             <div className="h-px bg-slate-800/60 my-2" />
             <MobileNavLink to="/team" icon={<Users className="w-5 h-5" />} label="Team" onClick={() => setMobileNavOpen(false)} />
@@ -118,6 +123,7 @@ function AppLayout() {
               <NavigationLink to="/dashboard" icon={<Home className="w-5 h-5" />} label="Projects" collapsed={sidebarCollapsed} />
               <NavigationLink to="/calculator" icon={<Thermometer className="w-5 h-5" />} label="Manual J" collapsed={sidebarCollapsed} />
               <NavigationLink to="/manual-d" icon={<GitBranch className="w-5 h-5" />} label="Manual D" collapsed={sidebarCollapsed} />
+              <NavigationLink to="/aed" icon={<Sun className="w-5 h-5" />} label="AED" collapsed={sidebarCollapsed} />
               <NavigationLink to="/cad" icon={<PenTool className="w-5 h-5" />} label="CAD" collapsed={sidebarCollapsed} />
 
               <div className="h-px bg-slate-800/60 my-2" />
@@ -172,12 +178,16 @@ function AppLayout() {
           <Route path="/landing" element={<LandingPage />} />
           <Route path="/demo" element={<DemoPage />} />
           <Route path="/onboarding" element={<OnboardingPage />} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/terms" element={<TermsPage />} />
 
           {/* App Routes — redirect to sign-in if not authenticated */}
           <Route path="/dashboard" element={isAuthenticated ? <Dashboard /> : <Navigate to="/" />} />
           <Route path="/calculator" element={isAuthenticated ? <ManualJCalculator /> : <Navigate to="/" />} />
           <Route path="/manual-d" element={isAuthenticated ? <ManualDCalculator /> : <Navigate to="/" />} />
+          <Route path="/aed" element={isAuthenticated ? <AedAnalysis /> : <Navigate to="/" />} />
           <Route path="/settings" element={isAuthenticated ? <SettingsPage /> : <Navigate to="/" />} />
           <Route path="/guide" element={isAuthenticated ? <UserGuidePage /> : <Navigate to="/" />} />
           <Route path="/cad" element={isAuthenticated ? <CadWorkspace /> : <Navigate to="/" />} />

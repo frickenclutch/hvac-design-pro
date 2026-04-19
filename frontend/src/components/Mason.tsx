@@ -10,7 +10,7 @@ import { api } from '../lib/api';
 // Unified across CAD workspace and Manual J Calculator.
 
 // ── Context mode determines which knowledge is prioritized ─────────────────────
-export type MasonContext = 'cad' | 'manualj' | 'manual-d';
+export type MasonContext = 'cad' | 'manualj' | 'manual-d' | 'aed';
 
 // ── Knowledge base ─────────────────────────────────────────────────────────────
 interface KBEntry {
@@ -795,6 +795,262 @@ What persists between sessions:
 
 **Per-project isolation:** Each project saves its own calculator data. Switch projects and your workspace updates automatically.`,
   },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // AED (Adequate Exposure Diversity) — Manual J Section N
+  // ═══════════════════════════════════════════════════════════════════════════
+  {
+    keywords: ['what is aed', 'adequate exposure diversity', 'section n', 'aed check', 'aed analysis', 'what is adequate'],
+    contexts: ['aed', 'manualj', 'cad'],
+    answer: `**Adequate Exposure Diversity (AED) — Manual J Section N**
+
+AED is a mandatory check under ACCA Manual J 8th Edition (2016 revision, Section N) for any residential cooling system design.
+
+**What it checks:** Whether a single-zone HVAC system can adequately serve a building whose windows are concentrated on one side. If solar loads are too uneven through the day, the system will short-cycle on one side while struggling on another.
+
+**The rule:** The **peak hourly glass load** cannot exceed the **12-hour average glass load by more than 30%**.
+
+- Ratio ≤ 130% → **PASS** (single-zone OK)
+- Ratio > 130% → **FAIL** (excursion penalty applied, zoning recommended)
+
+**Why it matters for ACCA certification:** This is one of the non-negotiable validation rules. Every residential cooling calc must include an AED evaluation.
+
+Tap the AED tool in the sidebar to run it — it auto-imports your Manual J window data.`,
+  },
+  {
+    keywords: ['aed pass', 'aed fail', 'aed ratio', 'peak glass load', '12 hour average', 'aed threshold', '130%'],
+    contexts: ['aed', 'manualj'],
+    answer: `**AED Pass/Fail Criteria**
+
+The engine computes hourly solar loads from 8 AM to 7 PM across all your windows (by orientation, area, SHGC, and shading).
+
+**The math:**
+- **Peak hour** = maximum hourly glass load across those 12 hours
+- **Average** = sum of all 12 hourly loads ÷ 12
+- **Ratio** = Peak ÷ Average
+
+**Thresholds:**
+| Ratio | Status | Action |
+|---|---|---|
+| ≤ 130% | **PASS** | Single-zone system is adequate |
+| > 130% | **FAIL** | Excursion penalty added; zoning recommended |
+
+**Excursion formula (if failing):**
+\`excursion = max(0, peak − 1.3 × average)\`
+
+The excursion value (in BTU/hr) is **added directly to your total cooling load** as a penalty for the uneven distribution.`,
+  },
+  {
+    keywords: ['excursion', 'aed penalty', 'cooling load penalty', 'excursion value', 'what is excursion'],
+    contexts: ['aed', 'manualj'],
+    answer: `**AED Excursion Penalty**
+
+If AED fails (ratio > 130%), an **excursion penalty** is added to your total cooling load to account for the uneven solar distribution the system cannot balance.
+
+**Formula:** \`excursion = max(0, peak − 1.3 × average)\`
+
+- Peak = your highest hourly glass load
+- Average = your 12-hour average glass load
+- If the subtraction gives a negative number, floor it to zero
+
+**Example:**
+- Peak = 12,000 BTU/hr at 4 PM (west-facing bay window)
+- Average = 8,000 BTU/hr
+- 1.3 × 8,000 = 10,400
+- Excursion = 12,000 − 10,400 = **1,600 BTU/hr** added to cooling load
+
+**What this means practically:** Your nominal 3-ton AC may actually need 3.5 tons, OR you need zoning, VAV devices, or motorized dampers to balance the unequal solar exposure.`,
+  },
+  {
+    keywords: ['aed fail solution', 'zoning', 'vav', 'motorized damper', 'how to fix aed', 'aed recommendations'],
+    contexts: ['aed', 'manualj', 'cad'],
+    answer: `**What to Do When AED Fails**
+
+An AED failure means your house has uneven solar loading that a single-zone system can't balance well. Options:
+
+**1. Zoning (most common fix)**
+- Split the house into 2+ zones with separate thermostats
+- Motorized dampers in the ductwork direct airflow to the zone calling for cooling
+- Typical split: east/west rooms on separate zones
+
+**2. Variable Air Volume (VAV) devices**
+- Air handlers that modulate airflow to individual registers
+- Each room gets what it needs, when it needs it
+- More expensive but excellent comfort
+
+**3. Multiple small systems (mini-splits)**
+- Ductless heads per zone
+- Independent operation, no ductwork penalty
+- Great for retrofits or additions
+
+**4. Exterior shading**
+- Awnings, overhangs, or solar screens on the problem orientations
+- Reduces peak glass load → may bring ratio under 130%
+- Often the cheapest solution to evaluate first
+
+**5. Window upgrades**
+- Low-E coatings reduce SHGC → lower peak glass load
+- Tinted glazing on west/south orientations`,
+  },
+  {
+    keywords: ['aed input', 'aed fenestration', 'aed glass groups', 'aed window', 'aed orientation', 'how to fill out aed'],
+    contexts: ['aed'],
+    answer: `**Filling Out the AED Analysis**
+
+The AED tool needs 4 fields per fenestration group:
+
+**1. Orientation** — cardinal direction the window faces
+- N, NE, E, SE, S, SW, W, NW
+- Group windows by the orientation they face
+
+**2. Area (ft²)** — total glass area for that orientation
+- Combine all windows facing the same direction with the same SHGC
+- Example: 3 south-facing windows @ 15 sq ft each = 45 sq ft total south
+
+**3. SHGC** — Solar Heat Gain Coefficient (0.0–1.0)
+- Single pane clear: 0.86
+- Double pane clear: 0.56
+- Double pane Low-E: 0.25
+- Triple pane Low-E: 0.22
+
+**4. Shading (IAC)** — Interior Attenuation Coefficient (0.0–1.0)
+- No shading: 1.0
+- Light blinds: 0.65
+- Medium shades: 0.55
+- Dark drapes: 0.40
+
+**Shortcut:** Click "Import from Manual J" to auto-populate from your existing room data.`,
+  },
+  {
+    keywords: ['aed import', 'aed auto import', 'import from manual j to aed', 'aed manual j'],
+    contexts: ['aed', 'manualj'],
+    answer: `**Importing AED Data from Manual J**
+
+The AED tool auto-imports fenestration data from your Manual J calculator — no manual entry needed.
+
+**How it works:**
+1. Fill out room inputs in Manual J (windows, SHGC, exposure direction)
+2. Open the AED tool
+3. Window groups are pre-populated by orientation
+
+**What gets imported:**
+- Window area per orientation (summed across rooms with matching SHGC/shading)
+- SHGC from each room's window entry
+- Interior shading coefficient from each room
+
+**If it doesn't auto-populate:**
+- Click the **"Import from Manual J"** button at the top of the AED table
+- Make sure you're in the same project context (AED is project-scoped)
+
+**After AED runs:** Results feed back into Manual J automatically. If AED fails, the excursion penalty is added to your cooling load when you re-run Manual J.`,
+  },
+  {
+    keywords: ['aed hourly', 'solar irradiance', 'hourly solar', 'aed chart', 'aed peak hour', 'when does aed peak'],
+    contexts: ['aed', 'manualj'],
+    answer: `**When Does AED Peak?**
+
+Peak hour depends on where your glass is concentrated:
+
+| Orientation | Peak Hour |
+|---|---|
+| East-facing glass | 8-10 AM |
+| South-facing glass | 12-2 PM |
+| West-facing glass | 4-6 PM |
+| Mixed orientations | varies by dominant exposure |
+
+**Why this matters:**
+- **East-heavy houses** peak in the morning — the cooling system gets hit before it's fully ramped up
+- **West-heavy houses** peak late afternoon — the hottest outdoor temperature compounds the solar load
+- **South-heavy houses** peak at solar noon — typically less problematic because everything is working in sync
+- **Balanced exposure** (N+S+E+W roughly equal) tends to pass AED naturally
+
+**Reading the bar chart:** Peak hour is highlighted in orange/red. Bars show hourly total glass load. The longer the bar, the higher the solar gain that hour.`,
+  },
+  {
+    keywords: ['aed latitude', 'latitude effect', 'solar by latitude', 'solar angle'],
+    contexts: ['aed', 'manualj'],
+    answer: `**Latitude Matters for AED**
+
+The engine uses **latitude-specific solar irradiance** from ASHRAE tables (24°N through 48°N, interpolated).
+
+**Why this matters:**
+- **Low latitude (24-32°N)** — Miami, Phoenix, Houston: East/West glass is the main AED failure mode. Sun is high, south glass gets less direct intensity in summer.
+- **Mid latitude (36-42°N)** — Denver, St. Louis, Philadelphia: Balanced risk across all orientations.
+- **High latitude (44-48°N)** — Minneapolis, Seattle, Burlington VT: South glass becomes increasingly problematic in summer as the sun traverses further south.
+
+The engine looks up your project's latitude from the ASHRAE weather data (via ZIP code) and interpolates SHGF values between the 4-degree latitude bands. This means Miami (25.8°N) and Minneapolis (44.9°N) get different solar gain calcs for the same window area and SHGC.`,
+  },
+  {
+    keywords: ['aed report', 'aed pdf', 'export aed', 'aed documentation'],
+    contexts: ['aed'],
+    answer: `**AED Report Export**
+
+The AED tool generates a standalone PDF with:
+- **Pass/Fail badge** at the top
+- **Summary table** — peak load, 12-hr average, ratio, threshold
+- **Excursion penalty** (if applicable) — BTU/hr added to cooling load
+- **Hourly distribution bar chart** — 12 hours showing glass load pattern
+- **Peak hour callout** — highlighted in the hourly list
+
+**How to export:**
+1. Click "Run AED Check" to generate results
+2. Click "Export PDF" button at the bottom right
+
+**Filename format:** \`AED_Analysis_YYYY-MM-DD.pdf\`
+
+**For permit applications:** The main Manual J PDF automatically includes an AED status section on page 1 with the pass/fail verdict, ratio, and excursion. You don't need to submit the separate AED report unless specifically requested by the plans examiner.`,
+  },
+  {
+    keywords: ['aed acca', 'aed certification', 'aed required', 'is aed mandatory', 'aed manual j 2016'],
+    contexts: ['aed', 'manualj'],
+    answer: `**AED & ACCA Certification**
+
+Yes, AED is **mandatory** for ACCA Manual J compliance on residential cooling systems.
+
+**Why:**
+- Added to Manual J in the 2016 revision (Section N)
+- Part of the ACCA-approved software certification criteria
+- Required for permit submission in jurisdictions that mandate Manual J reports
+- HERS raters check for it during energy code verification
+
+**Our implementation:**
+- Runs automatically inside \`calculateWholeHouse()\` — every Manual J calc includes AED
+- Excursion penalty auto-adds to sensible cooling load if ratio > 130%
+- AED status appears on page 1 of the Manual J PDF
+- Standalone AED analysis page for detailed evaluation
+
+**Standards referenced:**
+- ACCA Manual J 8th Edition, Section N (2016)
+- ASHRAE Fundamentals — hourly solar irradiance tables
+- ANSI/ACCA 2-2016 — the full Manual J standard`,
+  },
+  {
+    keywords: ['aed interop', 'aed integration', 'aed with cad', 'aed with manual d', 'aed workflow'],
+    contexts: ['aed', 'manualj', 'manual-d', 'cad'],
+    answer: `**How AED Fits the Workflow**
+
+AED sits in the middle of your calculation pipeline:
+
+\`\`\`
+CAD Workspace → Manual J → AED → Manual D
+     ↓             ↓         ↓        ↓
+  (windows)   (rooms/loads) (penalty) (duct sizes)
+\`\`\`
+
+**Data flow:**
+1. **CAD** — Draw windows on walls, auto-assign orientation
+2. **Manual J** — Each room has windows with SHGC and direction
+3. **AED** — Auto-extracts all fenestration, runs diversity check
+4. **Excursion penalty** (if fail) — flows back into Manual J cooling total
+5. **Manual D** — Uses the AED-adjusted cooling load for CFM distribution
+
+**Key point:** You don't have to visit the AED page for it to run. Manual J calls \`calculateAed()\` internally on every load calculation. The dedicated AED page is for **detailed inspection, tuning, and standalone reporting**.
+
+**Standalone use cases:**
+- Evaluating a retrofit before modifying Manual J inputs
+- Testing "what if" scenarios (add exterior shade? change SHGC?)
+- Generating an AED-only PDF for plans examiner questions`,
+  },
 ];
 
 function findAnswer(query: string, context: MasonContext): string {
@@ -819,6 +1075,10 @@ function findAnswer(query: string, context: MasonContext): string {
 
   const contextHelp = context === 'manualj'
     ? `I can help you fill out the Manual J calculator. Try asking about:\n\n- **How to measure** rooms and windows\n- **Design temperatures** for your city\n- **R-values** — what's in your walls\n- **Window types** — U-factor and SHGC\n- **Construction quality** and air leakage\n- **Duct location** impact\n- **Understanding results** — BTU and tonnage\n- **Daily range** and humidity grains`
+    : context === 'aed'
+    ? `I'll walk you through Adequate Exposure Diversity. Ask me about:\n\n- **What is AED** and why it matters\n- **Pass/fail criteria** — the 130% threshold\n- **Excursion penalty** — how it affects cooling load\n- **What to do when AED fails** — zoning, VAV, shading\n- **How to fill out** the AED inputs (SHGC, IAC, orientation)\n- **Import from Manual J** — auto-populate fenestration\n- **When AED peaks** — east vs west vs south\n- **Latitude effects** on solar irradiance\n- **ACCA certification** requirements`
+    : context === 'manual-d'
+    ? `I can help you size ducts per Manual D. Try asking about:\n\n- **Duct sizing basics** — the friction rate method\n- **Equal friction** design approach\n- **Fitting equivalent lengths** — elbows, wyes, boots\n- **Supply vs return** sizing rules\n- **Trunk & branch** layout\n- **Velocity limits** — 900 fpm residential max\n- **Static pressure budget** — how to calculate ASP\n- **Import from Manual J** to auto-load room CFMs`
     : `I'm your complete guide to HVAC DesignPro. Try asking about:\n\n- **Getting started** — first steps, canvas navigation\n- **Drawing walls**, placing windows & doors\n- **HVAC placement** — registers, grilles, equipment\n- **3D View** — orbit, pan, zoom, inspect\n- **Keyboard shortcuts** — every hotkey\n- **Search** (Ctrl+K) — find any asset instantly\n- **Labels & text** — fonts, colors, styling\n- **Import images** — underlays for tracing\n- **Export PDF** — multi-page engineering docs\n- **Room detection**, multi-floor, layers\n- **Appearance** — customize colors and theme\n- **R-values**, insulation, CFM, equipment sizing`;
 
   return contextHelp;
@@ -853,6 +1113,29 @@ function processCommands(query: string, context: MasonContext): string | null {
       }
     } catch { /* */ }
 
+    let aedStatus = '';
+    try {
+      // AED is embedded in Manual J results; also check standalone AED inputs
+      const aedRaw = localStorage.getItem(`hvac_aed_inputs_${projectId || 'draft'}`);
+      const mjResultsRaw = localStorage.getItem(`hvac_manualj_results_${projectId || 'draft'}`);
+      if (mjResultsRaw) {
+        const r = JSON.parse(mjResultsRaw);
+        if (r.aed) {
+          const pct = Math.round(r.aed.ratio * 100 * 10) / 10;
+          aedStatus = `\n- **AED**: ${r.aed.pass ? 'PASS' : 'FAIL'} (${pct}% ratio${r.aed.excursion > 0 ? `, +${Math.round(r.aed.excursion).toLocaleString()} BTU/hr penalty` : ''})`;
+        }
+      }
+      if (!mjResultsRaw && aedRaw) {
+        const groups = JSON.parse(aedRaw);
+        aedStatus = `\n- **AED**: ${groups.length || 0} fenestration groups configured (not yet run)`;
+      }
+    } catch { /* */ }
+
+    const workspaceLabel = context === 'manualj' ? 'Manual J Calculator'
+      : context === 'manual-d' ? 'Manual D Calculator'
+      : context === 'aed' ? 'AED Analysis'
+      : 'CAD Workspace';
+
     return `**Live Workspace Status**
 
 - **Project**: ${projStore.activeProjectName || 'No project (draft mode)'}
@@ -860,8 +1143,8 @@ function processCommands(query: string, context: MasonContext): string | null {
 - **Current Floor**: ${cadStore.floors.find(f => f.id === cadStore.activeFloorId)?.name || 'N/A'}
 - **Total Floors**: ${cadStore.floors.length}
 - **Detected Rooms in CAD**: ${numRooms}
-- **Walls Drawn**: ${numWalls}${mjStatus}${mdStatus}
-- **Current Workspace**: ${context === 'manualj' ? 'Manual J Calculator' : context === 'manual-d' ? 'Manual D Calculator' : 'CAD Workspace'}`;
+- **Walls Drawn**: ${numWalls}${mjStatus}${mdStatus}${aedStatus}
+- **Current Workspace**: ${workspaceLabel}`;
   }
 
   // ── /navigate — workspace navigation ───────────────────────────────
@@ -874,6 +1157,9 @@ function processCommands(query: string, context: MasonContext): string | null {
       'manual-d':   ['/manual-d', 'Manual D Calculator'],
       'manuald':    ['/manual-d', 'Manual D Calculator'],
       'duct':       ['/manual-d', 'Manual D Calculator'],
+      'aed':        ['/aed', 'AED Analysis'],
+      'exposure':   ['/aed', 'AED Analysis'],
+      'diversity':  ['/aed', 'AED Analysis'],
       'cad':        ['/cad', 'CAD Workspace'],
       'workspace':  ['/cad', 'CAD Workspace'],
       'drawing':    ['/cad', 'CAD Workspace'],
@@ -890,7 +1176,7 @@ function processCommands(query: string, context: MasonContext): string | null {
       setTimeout(() => { window.location.href = match[0]; }, 500);
       return `Navigating to **${match[1]}**...`;
     }
-    return `I don't recognize "${target}". Try: manual-j, manual-d, cad, settings, dashboard, guide, or team.`;
+    return `I don't recognize "${target}". Try: manual-j, manual-d, aed, cad, settings, dashboard, guide, or team.`;
   }
 
   // ── /calculate — trigger Manual J calculation ──────────────────────
@@ -909,7 +1195,14 @@ function processCommands(query: string, context: MasonContext): string | null {
       }, 300);
       return `Running **Manual D duct sizing**... Check results below.`;
     }
-    return `The /calculate command works on the Manual J and Manual D pages. Navigate there first with \`/navigate manual-j\`.`;
+    if (context === 'aed') {
+      setTimeout(() => {
+        const btn = Array.from(document.querySelectorAll('button')).find(b => b.textContent?.includes('Run AED Check'));
+        if (btn) (btn as HTMLButtonElement).click();
+      }, 300);
+      return `Running **AED check**... Check the hourly distribution below.`;
+    }
+    return `The /calculate command works on Manual J, Manual D, and AED pages. Navigate there first with \`/navigate manual-j\`.`;
   }
 
   // ── /export — trigger exports ──────────────────────────────────────
@@ -928,16 +1221,18 @@ function processCommands(query: string, context: MasonContext): string | null {
     return `Opening **Export to CAD** dialog...`;
   }
 
-  // ── /import — trigger Manual J import in Manual D ──────────────────
+  // ── /import — trigger Manual J import in Manual D or AED ───────────
   if (q === '/import' || q === '/import manual-j' || q === '/import mj') {
-    if (context === 'manual-d') {
+    if (context === 'manual-d' || context === 'aed') {
       setTimeout(() => {
         const btn = Array.from(document.querySelectorAll('button, span')).find(b => b.textContent?.includes('Import from Manual J'));
         if (btn) (btn as HTMLElement).click();
       }, 300);
-      return `Importing rooms from **Manual J** results...`;
+      return context === 'aed'
+        ? `Importing **fenestration groups** from Manual J window data...`
+        : `Importing **rooms** from Manual J results...`;
     }
-    return `The /import command works on the Manual D page. Navigate there with \`/navigate manual-d\`.`;
+    return `The /import command works on Manual D and AED pages. Navigate there with \`/navigate manual-d\` or \`/navigate aed\`.`;
   }
 
   // ── Smart queries about current results ────────────────────────────
@@ -1113,6 +1408,18 @@ const QUICK_TOPICS: Record<MasonContext, string[]> = {
     'Velocity limits',
     'Static pressure budget',
   ],
+  aed: [
+    'What is AED?',
+    'AED pass/fail criteria',
+    'What is excursion?',
+    'What to do when AED fails',
+    'How to fill out AED',
+    'Import from Manual J',
+    'When does AED peak?',
+    'Latitude effect on AED',
+    'AED & ACCA certification',
+    'AED workflow & interop',
+  ],
 };
 
 // ── Props ───────────────────────────────────────────────────────────────────
@@ -1278,7 +1585,10 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
           <div>
             <h3 className="text-sm font-bold text-slate-100 tracking-tight">Mason</h3>
             <p className="text-[10px] text-slate-500 font-medium">
-              {context === 'manualj' ? 'Manual J Assistant' : 'CAD & HVAC Assistant'}
+              {context === 'manualj' ? 'Manual J Assistant'
+                : context === 'manual-d' ? 'Manual D Assistant'
+                : context === 'aed' ? 'AED Analysis Assistant'
+                : 'CAD & HVAC Assistant'}
             </p>
           </div>
           <span className="text-[8px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wider ml-1">Online</span>
@@ -1322,6 +1632,10 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
               <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl rounded-tl-sm px-3 py-2.5 text-xs text-slate-300 leading-relaxed">
                 {context === 'manualj' ? (
                   <>Hey, I'm <strong className="text-amber-400">Mason</strong>. I'll help you fill out this Manual J calculator — room measurements, design temps, insulation values, all of it. Ask me anything or tap a topic below.</>
+                ) : context === 'aed' ? (
+                  <>Hey, I'm <strong className="text-amber-400">Mason</strong>. I'll walk you through Adequate Exposure Diversity — what it means, why ACCA requires it, and what to do when it fails. I can also auto-import your Manual J windows. Tap a topic or ask.</>
+                ) : context === 'manual-d' ? (
+                  <>Hey, I'm <strong className="text-amber-400">Mason</strong>. I'll help you size ducts per Manual D — friction rates, critical paths, fitting lengths, velocity limits. Import your Manual J loads with <code className="text-amber-400">/import</code>. Tap a topic or ask.</>
                 ) : (
                   <>Hey, I'm <strong className="text-amber-400">Mason</strong> — your HVAC engineering assistant. I know every tool, shortcut, and feature in this platform inside and out. Ask me anything — drawing walls, 3D view, keyboard shortcuts, load calcs, duct sizing, you name it. Tap a topic below or just ask.</>
                 )}
@@ -1619,7 +1933,12 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
                 type="text"
                 value={input}
                 onChange={e => setInput(e.target.value)}
-                placeholder={context === 'manualj' ? "Ask Mason or type /status..." : "Ask Mason about HVAC, or type /status..."}
+                placeholder={
+                  context === 'manualj' ? "Ask Mason or type /status..."
+                  : context === 'aed' ? "Ask about AED, or type /import..."
+                  : context === 'manual-d' ? "Ask about duct sizing, or type /import..."
+                  : "Ask Mason about HVAC, or type /status..."
+                }
                 className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-amber-500/50 transition-colors placeholder:text-slate-600"
               />
               {input === '/' && (
