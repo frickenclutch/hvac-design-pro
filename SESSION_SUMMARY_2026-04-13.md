@@ -51,7 +51,7 @@
 - HelpCenter: +3 sections (Manual J/D references, Project Management)
 
 ### 8. Full Stack Deployment
-- Workers API deployed to Cloudflare (hvac-api.c4-parent-account.workers.dev)
+- Workers API deployed to Cloudflare (hvac-api.c4tech.workers.dev)
 - Frontend deployed to Cloudflare Pages (hvac-design-pro.pages.dev)
 - D1 database migrated (28 tables including feedback)
 - R2 bucket bound for file storage
@@ -64,7 +64,7 @@
 | Component | Status | URL |
 |-----------|--------|-----|
 | Frontend | Live | https://hvac-design-pro.pages.dev |
-| Workers API | Live | https://hvac-api.c4-parent-account.workers.dev |
+| Workers API | Live | https://hvac-api.c4tech.workers.dev |
 | D1 Database | 28 tables | hvac-design-pro |
 | R2 Bucket | Active | hvac-assets |
 | GitHub | Up to date | github.com/frickenclutch/hvac-design-pro |

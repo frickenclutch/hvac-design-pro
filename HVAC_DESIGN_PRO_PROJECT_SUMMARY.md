@@ -479,7 +479,7 @@ frontend/src/
 
 ```
 Production:    https://hvac-design-pro.pages.dev (Cloudflare Pages)
-Backend:       https://hvac-api.c4-parent-account.workers.dev (Cloudflare Workers — scaffolded)
+Backend:       https://hvac-api.c4tech.workers.dev (Cloudflare Workers — scaffolded)
 Database:      Cloudflare D1 (SQL — scaffolded)
 File Storage:  Cloudflare R2 (S3-compatible — scaffolded)
 CI/CD:         GitHub Actions (deploy.yml — needs hardening)
