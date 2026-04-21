@@ -23,15 +23,29 @@ export default function Toolbox() {
   const [pos, setPos] = useState<{ x: number; y: number }>({ x: savedPos?.x ?? 24, y: savedPos?.y ?? -1 });
   const [autoCentered, setAutoCentered] = useState(false);
 
-  // Auto-center vertically on first mount (y=-1 sentinel)
+  // Auto-center vertically on first mount (y=-1 sentinel) or clamp to viewport
   useEffect(() => {
-    if (pos.y === -1 && panelRef.current && !autoCentered) {
-      const h = panelRef.current.getBoundingClientRect().height;
+    if (!panelRef.current) return;
+    const h = panelRef.current.getBoundingClientRect().height;
+    const w = panelRef.current.getBoundingClientRect().width;
+
+    if (pos.y === -1 && !autoCentered) {
+      // First mount — center vertically
       const vy = Math.max(EDGE_MARGIN, (window.innerHeight - h) / 2);
       setPos(p => ({ ...p, y: vy }));
       setAutoCentered(true);
+    } else if (!autoCentered) {
+      // Saved position — clamp to current viewport so toolbox is always visible
+      const maxX = Math.max(EDGE_MARGIN, window.innerWidth - w - EDGE_MARGIN);
+      const maxY = Math.max(EDGE_MARGIN, window.innerHeight - h - EDGE_MARGIN);
+      const clampedX = Math.max(EDGE_MARGIN, Math.min(maxX, pos.x));
+      const clampedY = Math.max(EDGE_MARGIN, Math.min(maxY, pos.y));
+      if (clampedX !== pos.x || clampedY !== pos.y) {
+        setPos({ x: clampedX, y: clampedY });
+      }
+      setAutoCentered(true);
     }
-  }, [pos.y, autoCentered]);
+  }, [pos.x, pos.y, autoCentered]);
 
   // ── Drag handling ───────────────────────────────────────────────────────
   const dragging = useRef(false);
