@@ -278,17 +278,38 @@ export default function CadCanvas() {
       });
 
       // Build arc + door leaf as an SVG path
-      const r = widthPx;
-      const isRight = o.swingDirection === 'right';
-      const hx = isRight ? widthPx / 2 : -widthPx / 2;
-      const tipX = hx;
-      const tipY = r;
-      const sweep = isRight ? 1 : 0;
-      const pathData = [
-        `M ${isRight ? hx - r : hx + r} 0`,
-        `A ${r} ${r} 0 0 ${sweep} ${tipX} ${tipY}`,
-        `M ${hx} 0 L ${tipX} ${tipY}`,
-      ].join(' ');
+      let pathData: string;
+
+      if (o.swingDirection === 'double') {
+        // Double door: two half-width leaves mirrored from center
+        const halfR = widthPx / 2;
+        // Left leaf: hinge at -halfR, swings down
+        // Right leaf: hinge at +halfR, swings down
+        pathData = [
+          // Left leaf arc (hinge at left edge, sweeps to perpendicular)
+          `M 0 0`,
+          `A ${halfR} ${halfR} 0 0 0 ${-halfR} ${halfR}`,
+          // Left leaf line
+          `M ${-halfR} 0 L ${-halfR} ${halfR}`,
+          // Right leaf arc (hinge at right edge, sweeps to perpendicular)
+          `M 0 0`,
+          `A ${halfR} ${halfR} 0 0 1 ${halfR} ${halfR}`,
+          // Right leaf line
+          `M ${halfR} 0 L ${halfR} ${halfR}`,
+        ].join(' ');
+      } else {
+        const r = widthPx;
+        const isRight = o.swingDirection === 'right';
+        const hx = isRight ? widthPx / 2 : -widthPx / 2;
+        const tipX = hx;
+        const tipY = r;
+        const sweep = isRight ? 1 : 0;
+        pathData = [
+          `M ${isRight ? hx - r : hx + r} 0`,
+          `A ${r} ${r} 0 0 ${sweep} ${tipX} ${tipY}`,
+          `M ${hx} 0 L ${tipX} ${tipY}`,
+        ].join(' ');
+      }
 
       const doorPath = new fabric.Path(pathData, {
         left: 0,
