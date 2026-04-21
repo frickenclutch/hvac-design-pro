@@ -262,58 +262,49 @@ export default function CadCanvas() {
     }
 
     if (o.type === 'door' || o.type === 'sliding_door') {
-      // Door gap (break in wall) — drawn directly on canvas, not in a group
+      // Door gap (break in wall) — local coordinates (0,0 = group center)
       const gap = new fabric.Rect({
-        left: cx,
-        top: cy,
+        left: 0,
+        top: 0,
         width: widthPx,
         height: 12,
         fill: '#0f172a',
         stroke: 'transparent',
         originX: 'center',
         originY: 'center',
-        angle,
         selectable: false,
         evented: false,
         name: `${PREFIX.opening}${o.id}-gap`,
       });
 
-      // Build arc + door leaf as an SVG path (avoids Fabric.js Group bounds issues)
+      // Build arc + door leaf as an SVG path
       const r = widthPx;
       const isRight = o.swingDirection === 'right';
-      // Hinge at one edge, arc sweeps perpendicular to wall
-      // In local space: wall runs along X, perpendicular is +Y
       const hx = isRight ? widthPx / 2 : -widthPx / 2;
-      const tipX = isRight ? hx : hx;
+      const tipX = hx;
       const tipY = r;
-      // SVG path: arc from closed-door tip to open-door tip + door-leaf line
-      // We only draw arc + door-leaf line (no filled area)
       const sweep = isRight ? 1 : 0;
       const pathData = [
-        // Arc from closed-door tip to open-door tip
         `M ${isRight ? hx - r : hx + r} 0`,
         `A ${r} ${r} 0 0 ${sweep} ${tipX} ${tipY}`,
-        // Door leaf line from hinge to open tip
         `M ${hx} 0 L ${tipX} ${tipY}`,
       ].join(' ');
 
       const doorPath = new fabric.Path(pathData, {
-        left: cx,
-        top: cy,
+        left: 0,
+        top: 0,
         originX: 'center',
         originY: 'center',
-        angle,
         fill: 'transparent',
         stroke: '#fb923c',
         strokeWidth: 1.5,
         strokeDashArray: [4, 3],
-        selectable: true,
-        evented: true,
-        name: `${PREFIX.opening}${o.id}`,
-        hasControls: false,
+        selectable: false,
+        evented: false,
+        name: `${PREFIX.opening}${o.id}-arc`,
       });
 
-      // Add gap behind the door path (gap is non-interactive overlay)
+      // Group handles world-space positioning; children use local coords
       const doorGroup = new fabric.Group([gap, doorPath], {
         left: cx,
         top: cy,
