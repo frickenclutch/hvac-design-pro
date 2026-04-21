@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useCadStore } from '../store/useCadStore';
 import { api } from '../../../lib/api';
 import { toast } from '../../../stores/useToastStore';
+import { scopedKey } from '../../../utils/storage';
 
 export function useAutoSave() {
   const isDirty = useCadStore(s => s.isDirty);
@@ -26,7 +27,7 @@ export function useAutoSave() {
 
       // Always save to localStorage as fallback
       try {
-        localStorage.setItem(`hvac_cad_${projectId || 'draft'}`, JSON.stringify(data));
+        localStorage.setItem(scopedKey(`hvac_cad_${projectId || 'draft'}`), JSON.stringify(data));
       } catch {}
 
       // Save to D1 if we have a project backed by the database.
@@ -90,7 +91,7 @@ export async function loadDrawing(projectId: string): Promise<any | null> {
 
   // Fall back to localStorage
   try {
-    const local = localStorage.getItem(`hvac_cad_${projectId}`);
+    const local = localStorage.getItem(scopedKey(`hvac_cad_${projectId}`));
     if (local) return { canvasJson: JSON.parse(local), id: null };
   } catch {}
 

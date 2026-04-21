@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import * as fabric from 'fabric';
+import { scopedKey } from '../../../utils/storage';
 
 // ── Tool Types ──────────────────────────────────────────────────────────────────
 export type ToolType =
@@ -1087,11 +1088,11 @@ export const useCadStore = create<CadState>((set, get) => {
 });
 
 // ── LocalStorage Persistence ─────────────────────────────────────────────────
-const CAD_STORAGE_KEY = 'hvac_cad_drawing';
+const CAD_STORAGE_KEY_BASE = 'hvac_cad_drawing';
 
 // Load persisted drawing + workspace state on startup
 try {
-  const saved = localStorage.getItem(CAD_STORAGE_KEY);
+  const saved = localStorage.getItem(scopedKey(CAD_STORAGE_KEY_BASE));
   if (saved) {
     const data = JSON.parse(saved);
     const hasGeometry = data.floors?.some(
@@ -1121,7 +1122,7 @@ useCadStore.subscribe((state, prevState) => {
     _cadSaveTimer = setTimeout(() => {
       try {
         const drawing = useCadStore.getState().serializeDrawing();
-        localStorage.setItem(CAD_STORAGE_KEY, JSON.stringify(drawing));
+        localStorage.setItem(scopedKey(CAD_STORAGE_KEY_BASE), JSON.stringify(drawing));
       } catch { /* storage full */ }
     }, 500);
   }

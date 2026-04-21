@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { ArrowLeft, Save, Undo2, Redo2, Download, Zap, Box, Search, ChevronDown, ChevronUp, HelpCircle, Pencil, X, ArrowRight, Building2, Home, MapPin, Briefcase, Check } from 'lucide-react';
 import AssetSearch from './AssetSearch';
 import ErrorBoundary from '../../../components/ErrorBoundary';
+import { scopedKey } from '../../../utils/storage';
 import UserAvatarMenu from '../../../components/UserAvatarMenu';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useCadStore } from '../store/useCadStore';
@@ -103,7 +104,7 @@ export default function TopNavigationBar({ onHelpOpen }: { onHelpOpen?: () => vo
     const store = useCadStore.getState();
     try {
       const data = store.serializeDrawing();
-      localStorage.setItem(`hvac_cad_${activeProjectId}`, JSON.stringify(data));
+      localStorage.setItem(scopedKey(`hvac_cad_${activeProjectId}`), JSON.stringify(data));
       store.markSaved(store.drawingId || 'local');
     } catch {
       store.markDirty();
@@ -122,7 +123,7 @@ export default function TopNavigationBar({ onHelpOpen }: { onHelpOpen?: () => vo
     // Immediately persist current drawing to localStorage under the new project key
     try {
       const data = store.serializeDrawing();
-      localStorage.setItem(`hvac_cad_${newId}`, JSON.stringify(data));
+      localStorage.setItem(scopedKey(`hvac_cad_${newId}`), JSON.stringify(data));
       store.markSaved(store.drawingId || 'local');
     } catch {
       store.markDirty();

@@ -8,21 +8,22 @@ import Mason from '../components/Mason';
 import { useProjectStore } from '../stores/useProjectStore';
 import { useCadStore } from '../features/cad/store/useCadStore';
 import { toast } from '../stores/useToastStore';
+import { scopedKey } from '../utils/storage';
 
 // ── Display formatting ──────────────────────────────────────────────────────
 function fmt(value: number): string {
   return roundForDisplay(value).toLocaleString();
 }
 
-// ── Persistence (project-scoped, ACCA-compliant isolation) ──────────────────
+// ── Persistence (user + project scoped) ──────────────────────────────────────
 function getInputsKey(projectId: string | null): string {
-  return `hvac_aed_inputs_${projectId || 'draft'}`;
+  return scopedKey(`hvac_aed_inputs_${projectId || 'draft'}`);
 }
 function getResultsKey(projectId: string | null): string {
-  return `hvac_aed_results_${projectId || 'draft'}`;
+  return scopedKey(`hvac_aed_results_${projectId || 'draft'}`);
 }
 function getMjResultsKey(projectId: string | null): string {
-  return `hvac_manualj_results_${projectId || 'draft'}`;
+  return scopedKey(`hvac_manualj_results_${projectId || 'draft'}`);
 }
 
 function loadSavedInputs(projectId: string | null): GlassGroup[] | null {
@@ -75,7 +76,7 @@ function createDefaultGroups(): GlassGroup[] {
 // ── Auto-import from Manual J data ──────────────────────────────────────────
 function tryImportFromManualJ(projectId: string | null): GlassGroup[] | null {
   try {
-    const mjKey = `hvac_manualj_inputs_${projectId || 'draft'}`;
+    const mjKey = scopedKey(`hvac_manualj_inputs_${projectId || 'draft'}`);
     const raw = localStorage.getItem(mjKey);
     if (!raw) return null;
     const data = JSON.parse(raw);

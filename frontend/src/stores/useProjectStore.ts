@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { scopedKey } from '../utils/storage';
 
 // ── Project Store ─────────────────────────────────────────────────────────────
 // Single source of truth for the currently open project's identity.
@@ -47,7 +48,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   setActiveProject: (id: string) => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(scopedKey(STORAGE_KEY));
       if (raw) {
         const projects: Project[] = JSON.parse(raw);
         const project = projects.find((p) => p.id === id);
@@ -90,7 +91,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // Persist changed fields to localStorage project record
     if (id) {
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
+        const raw = localStorage.getItem(scopedKey(STORAGE_KEY));
         if (raw) {
           const projects: Project[] = JSON.parse(raw);
           const idx = projects.findIndex(p => p.id === id);
@@ -99,7 +100,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             if (patch.type !== undefined) projects[idx].type = patch.type;
             if (patch.address !== undefined) projects[idx].address = patch.address;
             if (patch.city !== undefined) projects[idx].city = patch.city;
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+            localStorage.setItem(scopedKey(STORAGE_KEY), JSON.stringify(projects));
           }
         }
       } catch { /* ignore */ }
@@ -128,10 +129,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       status: 'In Progress',
     };
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(scopedKey(STORAGE_KEY));
       const projects: Project[] = raw ? JSON.parse(raw) : [];
       projects.unshift(project);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+      localStorage.setItem(scopedKey(STORAGE_KEY), JSON.stringify(projects));
     } catch { /* ignore */ }
     set({
       activeProjectId: id,
@@ -144,7 +145,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   getProjectList: () => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(scopedKey(STORAGE_KEY));
       return raw ? JSON.parse(raw) : [];
     } catch {
       return [];

@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
+import { scopedKey } from '../utils/storage';
 import CadCanvas from '../features/cad/components/CadCanvas';
 import Toolbox from '../features/cad/components/Toolbox';
 import PropertyInspector from '../features/cad/components/PropertyInspector';
@@ -79,7 +80,7 @@ export default function CadWorkspace() {
       );
       if (!hasGeometry) {
         try {
-          const saved = localStorage.getItem('hvac_cad_drawing');
+          const saved = localStorage.getItem(scopedKey('hvac_cad_drawing'));
           if (saved) {
             const data = JSON.parse(saved);
             const savedHasGeometry = data.floors?.some(

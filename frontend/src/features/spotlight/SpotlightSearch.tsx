@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { ALL_RETAILERS } from '../retailer/data/retailers';
 import { getDirectionsUrl } from '../retailer/utils/geolocation';
+import { scopedKey } from '../../utils/storage';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -138,7 +139,7 @@ function searchAll(
 
   // 1. Search saved projects
   try {
-    const raw = localStorage.getItem('hvac_projects');
+    const raw = localStorage.getItem(scopedKey('hvac_projects'));
     if (raw) {
       const projects = JSON.parse(raw) as { id: string; name: string; address: string; city: string; status: string }[];
       projects.forEach(p => {
@@ -276,12 +277,12 @@ function searchAll(
 
   // 8. Search Manual J rooms in active project
   try {
-    const projRaw = localStorage.getItem('hvac_projects');
+    const projRaw = localStorage.getItem(scopedKey('hvac_projects'));
     if (projRaw) {
       const projects = JSON.parse(projRaw);
       // Check each project for Manual J rooms
       for (const proj of projects) {
-        const mjRaw = localStorage.getItem(`hvac_manualj_inputs_${proj.id}`);
+        const mjRaw = localStorage.getItem(scopedKey(`hvac_manualj_inputs_${proj.id}`));
         if (!mjRaw) continue;
         const mj = JSON.parse(mjRaw);
         if (!mj.rooms) continue;
@@ -298,10 +299,10 @@ function searchAll(
               action: () => {
                 // Set active project and navigate to calculator
                 try {
-                  const raw = localStorage.getItem('hvac_projects');
+                  const raw = localStorage.getItem(scopedKey('hvac_projects'));
                   if (raw) {
                     // Signal project selection via localStorage (the calculator will pick it up)
-                    localStorage.setItem('hvac_spotlight_project', proj.id);
+                    localStorage.setItem(scopedKey('hvac_spotlight_project'), proj.id);
                   }
                 } catch { /* */ }
                 navigate('/calculator');

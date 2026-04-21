@@ -13,16 +13,17 @@ import { useProjectStore } from '../stores/useProjectStore';
 import Mason from '../components/Mason';
 import ProjectContextBar from '../components/ProjectContextBar';
 import ProjectGateDialog from '../components/ProjectGateDialog';
+import { scopedKey } from '../utils/storage';
 
-// ── Project-scoped persistence ───────────────────────────────────────────────
+// ── User + project scoped persistence ────────────────────────────────────────
 function getStorageKey(projectId: string | null): string {
-  return `hvac_manuald_inputs_${projectId || 'draft'}`;
+  return scopedKey(`hvac_manuald_inputs_${projectId || 'draft'}`);
 }
 function getMjResultsKey(projectId: string | null): string {
-  return `hvac_manualj_results_${projectId || 'draft'}`;
+  return scopedKey(`hvac_manualj_results_${projectId || 'draft'}`);
 }
 function getMjInputsKey(projectId: string | null): string {
-  return `hvac_manualj_inputs_${projectId || 'draft'}`;
+  return scopedKey(`hvac_manualj_inputs_${projectId || 'draft'}`);
 }
 
 // One-time migration

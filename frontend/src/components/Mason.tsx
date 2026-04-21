@@ -4,6 +4,7 @@ import { useProjectStore } from '../stores/useProjectStore';
 import { useCadStore } from '../features/cad/store/useCadStore';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { api } from '../lib/api';
+import { scopedKey } from '../utils/storage';
 
 // ── Mason — your AI HVAC engineering assistant ───────────────────────────────
 // Named after the masons who've built the world's buildings, brick by brick.
@@ -1097,7 +1098,7 @@ function processCommands(query: string, context: MasonContext): string | null {
 
     let mjStatus = '';
     try {
-      const resultsRaw = localStorage.getItem(`hvac_manualj_results_${projectId || 'draft'}`);
+      const resultsRaw = localStorage.getItem(scopedKey(`hvac_manualj_results_${projectId || 'draft'}`));
       if (resultsRaw) {
         const r = JSON.parse(resultsRaw);
         mjStatus = `\n- **Manual J**: ${r.rooms?.length || 0} rooms, ${r.totalHeatingBtu?.toLocaleString() || 0} BTU/hr heating, ${r.totalCoolingBtu?.toLocaleString() || 0} cooling, ${r.recommendedTons || '?'} ton recommended`;
@@ -1106,7 +1107,7 @@ function processCommands(query: string, context: MasonContext): string | null {
 
     let mdStatus = '';
     try {
-      const mdRaw = localStorage.getItem(`hvac_manuald_inputs_${projectId || 'draft'}`);
+      const mdRaw = localStorage.getItem(scopedKey(`hvac_manuald_inputs_${projectId || 'draft'}`));
       if (mdRaw) {
         const d = JSON.parse(mdRaw);
         mdStatus = `\n- **Manual D**: ${d.rooms?.length || 0} duct runs, ${d.equipmentCfm || '?'} CFM equipment`;
@@ -1116,8 +1117,8 @@ function processCommands(query: string, context: MasonContext): string | null {
     let aedStatus = '';
     try {
       // AED is embedded in Manual J results; also check standalone AED inputs
-      const aedRaw = localStorage.getItem(`hvac_aed_inputs_${projectId || 'draft'}`);
-      const mjResultsRaw = localStorage.getItem(`hvac_manualj_results_${projectId || 'draft'}`);
+      const aedRaw = localStorage.getItem(scopedKey(`hvac_aed_inputs_${projectId || 'draft'}`));
+      const mjResultsRaw = localStorage.getItem(scopedKey(`hvac_manualj_results_${projectId || 'draft'}`));
       if (mjResultsRaw) {
         const r = JSON.parse(mjResultsRaw);
         if (r.aed) {
@@ -1240,7 +1241,7 @@ function processCommands(query: string, context: MasonContext): string | null {
 
   if (q.includes('biggest') || q.includes('largest') || q.includes('highest') || q.includes('most')) {
     try {
-      const raw = localStorage.getItem(`hvac_manualj_results_${projId || 'draft'}`);
+      const raw = localStorage.getItem(scopedKey(`hvac_manualj_results_${projId || 'draft'}`));
       if (raw) {
         const r = JSON.parse(raw);
         if (r.rooms?.length) {
@@ -1258,7 +1259,7 @@ function processCommands(query: string, context: MasonContext): string | null {
 
   if (q.includes('tonnage') || q.includes('recommended') || q.includes('equipment size')) {
     try {
-      const raw = localStorage.getItem(`hvac_manualj_results_${projId || 'draft'}`);
+      const raw = localStorage.getItem(scopedKey(`hvac_manualj_results_${projId || 'draft'}`));
       if (raw) {
         const r = JSON.parse(raw);
         return `**Recommended equipment:** ${r.recommendedTons} Ton\n\n- Heating: ${r.totalHeatingBtu?.toLocaleString()} BTU/hr (${(r.totalHeatingBtu / 12000).toFixed(1)} tons)\n- Cooling: ${r.totalCoolingBtu?.toLocaleString()} BTU/hr (${(r.totalCoolingBtu / 12000).toFixed(1)} tons)\n- SHR: ${r.sensibleHeatRatio}\n- Ventilation: ${r.ventilationCFM} CFM`;
@@ -1269,7 +1270,7 @@ function processCommands(query: string, context: MasonContext): string | null {
 
   if (q.includes('how many rooms') || q.includes('room count')) {
     try {
-      const raw = localStorage.getItem(`hvac_manualj_inputs_${projId || 'draft'}`);
+      const raw = localStorage.getItem(scopedKey(`hvac_manualj_inputs_${projId || 'draft'}`));
       if (raw) {
         const d = JSON.parse(raw);
         const rooms = d.rooms || [];
@@ -1899,9 +1900,9 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
                         userEmail: user?.email || 'unknown',
                         orgName: organisation?.name || 'unknown',
                       };
-                      const existing = JSON.parse(localStorage.getItem('hvac_feedback') || '[]');
+                      const existing = JSON.parse(localStorage.getItem(scopedKey('hvac_feedback')) || '[]');
                       existing.push(fallbackData);
-                      localStorage.setItem('hvac_feedback', JSON.stringify(existing));
+                      localStorage.setItem(scopedKey('hvac_feedback'), JSON.stringify(existing));
                       setFeedbackText('');
                       setFeedbackFiles([]);
                       setFeedbackSubmitted(true);

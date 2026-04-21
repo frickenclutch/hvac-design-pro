@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { registerAuthGetter } from '../../../utils/storage';
 
 export type UserRole = 'admin' | 'engineer' | 'tech' | 'viewer';
 export type OrgType = 'individual' | 'company' | 'municipality';
@@ -389,3 +390,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   clearError: () => set({ authError: null }),
 }));
+
+// Register user getter for scoped localStorage keys
+registerAuthGetter(() => useAuthStore.getState().user);

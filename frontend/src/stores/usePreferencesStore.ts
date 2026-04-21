@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { scopedKey } from '../utils/storage';
 
 export type ThemeMode = 'dark' | 'midnight' | 'light';
 export type UIDensity = 'compact' | 'comfortable' | 'spacious';
@@ -94,7 +95,7 @@ const defaults: UserPreferences = {
 
 function load(): UserPreferences {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(scopedKey(STORAGE_KEY));
     if (!raw) return defaults;
     const parsed = JSON.parse(raw);
     // Deep-merge panelSizes so new fields (e.g. toolboxPos) get defaults
@@ -106,7 +107,7 @@ function load(): UserPreferences {
 }
 
 function persist(prefs: UserPreferences) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
+  localStorage.setItem(scopedKey(STORAGE_KEY), JSON.stringify(prefs));
   applyTheme(prefs);
 }
 

@@ -22,6 +22,7 @@ import ProjectContextBar from '../components/ProjectContextBar';
 import ProjectGateDialog from '../components/ProjectGateDialog';
 import { useProjectStore } from '../stores/useProjectStore';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
+import { scopedKey } from '../utils/storage';
 
 // ── Display formatting (engine values are full-precision floats) ─────────────
 /** Round to integer and format with locale separators for display */
@@ -29,12 +30,12 @@ function fmt(value: number): string {
   return roundForDisplay(value).toLocaleString();
 }
 
-// ── Persistence helpers (project-scoped) ─────────────────────────────────────
+// ── Persistence helpers (user + project scoped) ──────────────────────────────
 function getInputsKey(projectId: string | null): string {
-  return `hvac_manualj_inputs_${projectId || 'draft'}`;
+  return scopedKey(`hvac_manualj_inputs_${projectId || 'draft'}`);
 }
 function getResultsKey(projectId: string | null): string {
-  return `hvac_manualj_results_${projectId || 'draft'}`;
+  return scopedKey(`hvac_manualj_results_${projectId || 'draft'}`);
 }
 
 // One-time migration: move old global keys to draft if no scoped data exists

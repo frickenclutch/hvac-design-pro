@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, MapPin, Calendar, ArrowRight, Pencil, Check, X, Trash2, Building2, Home, GripVertical, ChevronDown, ChevronRight, RotateCcw, Minus } from 'lucide-react';
 import NewProjectModal from '../features/projects/components/NewProjectModal';
+import { scopedKey } from '../utils/storage';
 
 interface Project {
   id: string;
@@ -24,7 +25,7 @@ const LAYOUT_KEY = 'hvac_project_layout';
 
 function loadProjects(): Project[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(scopedKey(STORAGE_KEY));
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
@@ -32,12 +33,12 @@ function loadProjects(): Project[] {
 }
 
 function saveProjects(projects: Project[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+  localStorage.setItem(scopedKey(STORAGE_KEY), JSON.stringify(projects));
 }
 
 function loadLayout(): TileLayout {
   try {
-    const raw = localStorage.getItem(LAYOUT_KEY);
+    const raw = localStorage.getItem(scopedKey(LAYOUT_KEY));
     if (!raw) return { order: [], collapsed: {}, tileScale: 1 };
     const parsed = JSON.parse(raw);
     return { order: parsed.order ?? [], collapsed: parsed.collapsed ?? {}, tileScale: parsed.tileScale ?? 1 };
@@ -47,7 +48,7 @@ function loadLayout(): TileLayout {
 }
 
 function saveLayout(layout: TileLayout) {
-  localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
+  localStorage.setItem(scopedKey(LAYOUT_KEY), JSON.stringify(layout));
 }
 
 /** Reconcile saved order with actual project IDs — new projects at top, deleted ones removed */

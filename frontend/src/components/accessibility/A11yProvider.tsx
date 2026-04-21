@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { scopedKey } from '../../utils/storage';
 
 interface A11yPreferences {
   reducedMotion: boolean;
@@ -28,13 +29,13 @@ const STORAGE_KEY = 'hvac_a11y_prefs';
 
 function loadPrefs(): Partial<A11yPreferences> {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = localStorage.getItem(scopedKey(STORAGE_KEY));
     return stored ? JSON.parse(stored) : {};
   } catch { return {}; }
 }
 
 function savePrefs(prefs: Partial<A11yPreferences>) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({
+  localStorage.setItem(scopedKey(STORAGE_KEY), JSON.stringify({
     reducedMotion: prefs.reducedMotion,
     highContrast: prefs.highContrast,
     focusVisible: prefs.focusVisible,
