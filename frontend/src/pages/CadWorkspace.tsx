@@ -44,9 +44,18 @@ export default function CadWorkspace() {
     const store = useCadStore.getState();
 
     if (projectId) {
-      // Reset to a clean slate FIRST — prevents data from a previous project
-      // bleeding into this one. Each project is its own entity.
+      // Reset geometry to a clean slate — prevents data from a previous
+      // project bleeding in. Preserve panel UI state (user preference).
+      const preserveUI = {
+        panelToolbox: store.panelToolbox,
+        panelProperties: store.panelProperties,
+        panelFloors: store.panelFloors,
+        panelNavBar: store.panelNavBar,
+        ghostingEnabled: store.ghostingEnabled,
+      };
       store.loadDrawing({});
+      // Restore panel state immediately so toolbox doesn't vanish
+      useCadStore.setState(preserveUI);
       store.setProjectId(projectId);
       store.setDrawingId(null);
 
