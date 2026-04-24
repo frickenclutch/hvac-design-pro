@@ -1445,6 +1445,7 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
   const [feedbackText, setFeedbackText] = useState('');
   const [feedbackFiles, setFeedbackFiles] = useState<File[]>([]);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+  const [feedbackRoutedTo, setFeedbackRoutedTo] = useState<string[]>([]);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const [feedbackSending, setFeedbackSending] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -1777,8 +1778,13 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
                 <Check className="w-5 h-5 text-emerald-400" />
               </div>
               <p className="text-sm font-bold text-emerald-400">Feedback Submitted</p>
-              <p className="text-[10px] text-slate-500">Sent to support@c4tech.co — our team will review this.</p>
-              <button onClick={() => { setShowFeedback(false); setFeedbackSubmitted(false); setFeedbackError(null); }} className="text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 mx-auto mt-2">
+              <p className="text-[10px] text-slate-500">
+                {feedbackRoutedTo.length > 0
+                  ? <>Sent to <span className="text-slate-400 font-mono">{feedbackRoutedTo.join(', ')}</span> — our team will review this.</>
+                  : <>Our team will review this shortly.</>
+                }
+              </p>
+              <button onClick={() => { setShowFeedback(false); setFeedbackSubmitted(false); setFeedbackError(null); setFeedbackRoutedTo([]); }} className="text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 mx-auto mt-2">
                 <ArrowLeft className="w-3 h-3" /> Back to Chat
               </button>
             </div>
@@ -1876,7 +1882,7 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
                   setFeedbackError(null);
                   try {
                     // Try API first
-                    await api.submitFeedback({
+                    const resp = await api.submitFeedback({
                       type: feedbackType,
                       text: feedbackText,
                       context,
@@ -1885,6 +1891,7 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
                     });
                     setFeedbackText('');
                     setFeedbackFiles([]);
+                    setFeedbackRoutedTo(resp?.routedTo || []);
                     setFeedbackSubmitted(true);
                   } catch {
                     // Fallback to localStorage if API unreachable

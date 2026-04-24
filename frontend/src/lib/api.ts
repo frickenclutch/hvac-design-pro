@@ -243,7 +243,7 @@ class ApiClient {
       formData.append('files', file);
     }
 
-    return this.request<{ id: string; status: string; attachmentCount: number }>('/api/feedback', {
+    return this.request<{ id: string; status: string; attachmentCount: number; routedTo?: string[] }>('/api/feedback', {
       method: 'POST',
       body: formData,
     });

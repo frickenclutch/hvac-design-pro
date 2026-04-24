@@ -4,24 +4,38 @@
  * Requires RESEND_API_KEY environment variable in wrangler.toml.
  * Free tier: 100 emails/day, 3,000/month — more than enough for onboarding.
  *
- * If RESEND_API_KEY is not set, emails are silently skipped (logged to console).
+ * If RESEND_API_KEY is not set, sendEmail() throws loudly (caller decides).
+ * This replaces the previous silent-skip behavior which caused feedback emails
+ * to vanish without warning when the key was missing in production.
  */
 
 const RESEND_API = 'https://api.resend.com/emails';
-// Resend requires a verified domain. Use onboarding@resend.dev for free tier,
-// or configure a custom domain (e.g., noreply@c4tech.co) in the Resend dashboard.
-const FROM_ADDRESS = 'HVAC DesignPro <noreply@c4tech.co>';
+// Default FROM address. Can be overridden by env var FEEDBACK_FROM_ADDRESS.
+const DEFAULT_FROM_ADDRESS = 'HVAC DesignPro <noreply@c4tech.co>';
 
-interface EmailPayload {
-  to: string;
+export interface EmailPayload {
+  /** Single address or array of addresses. Resend supports up to 50 recipients per request. */
+  to: string | string[];
   subject: string;
   html: string;
+  /** Optional override for the From address (falls back to DEFAULT_FROM_ADDRESS). */
+  from?: string;
 }
 
-export async function sendEmail(apiKey: string | undefined, payload: EmailPayload): Promise<boolean> {
+export interface EmailSendResult {
+  ok: boolean;
+  status: number;
+  error?: string;
+  id?: string;
+}
+
+export async function sendEmail(apiKey: string | undefined, payload: EmailPayload): Promise<EmailSendResult> {
+  const toLabel = Array.isArray(payload.to) ? payload.to.join(', ') : payload.to;
+
   if (!apiKey) {
-    console.log(`[email] No RESEND_API_KEY — skipping email to ${payload.to}: "${payload.subject}"`);
-    return false;
+    const msg = `No RESEND_API_KEY configured — email "${payload.subject}" to ${toLabel} was NOT sent.`;
+    console.error(`[email] ${msg}`);
+    return { ok: false, status: 0, error: msg };
   }
 
   try {
@@ -32,8 +46,8 @@ export async function sendEmail(apiKey: string | undefined, payload: EmailPayloa
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: FROM_ADDRESS,
-        to: payload.to,
+        from: payload.from || DEFAULT_FROM_ADDRESS,
+        to: payload.to, // Resend accepts both string and array
         subject: payload.subject,
         html: payload.html,
       }),
@@ -41,16 +55,36 @@ export async function sendEmail(apiKey: string | undefined, payload: EmailPayloa
 
     if (!res.ok) {
       const body = await res.text();
-      console.error(`[email] Resend API error ${res.status}: ${body}`);
-      return false;
+      console.error(`[email] Resend API error ${res.status} sending "${payload.subject}" to ${toLabel}: ${body}`);
+      return { ok: false, status: res.status, error: body };
     }
 
-    console.log(`[email] Sent "${payload.subject}" to ${payload.to}`);
-    return true;
+    const data = await res.json().catch(() => ({})) as { id?: string };
+    console.log(`[email] Sent "${payload.subject}" to ${toLabel}${data.id ? ` (id=${data.id})` : ''}`);
+    return { ok: true, status: res.status, id: data.id };
   } catch (err) {
-    console.error(`[email] Failed to send:`, err);
-    return false;
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[email] Failed to send "${payload.subject}" to ${toLabel}:`, msg);
+    return { ok: false, status: 0, error: msg };
   }
+}
+
+/**
+ * Parse a comma-separated env var into a clean array of email addresses.
+ * Trims whitespace, filters out empty entries, deduplicates.
+ */
+export function parseEmailList(raw: string | undefined, fallback: string[] = []): string[] {
+  if (!raw) return fallback;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw.split(',')) {
+    const addr = part.trim().toLowerCase();
+    if (addr && !seen.has(addr)) {
+      seen.add(addr);
+      out.push(addr);
+    }
+  }
+  return out.length > 0 ? out : fallback;
 }
 
 // ── Feedback Email ────────────────────────────────────────────────────────────
