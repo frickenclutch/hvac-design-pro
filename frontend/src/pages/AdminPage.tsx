@@ -255,7 +255,7 @@ function OrgDetailPanel({ id, onClose }: { id: string; onClose: () => void }) {
                 className="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-900/40 border border-slate-800/40 text-xs"
               >
                 <div className="flex-1">
-                  <span className="font-bold text-slate-200">{u.first_name} {u.last_name}</span>
+                  <span className="font-bold text-slate-200">{u.first_name as string} {u.last_name as string}</span>
                   <span className="text-slate-500 ml-2 font-mono">{u.email as string}</span>
                 </div>
                 <span className="text-slate-500">{u.role as string}</span>

@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, FolderOpen, Home, Building2 } from 'lucide-react';
 import { useProjectStore } from '../stores/useProjectStore';
+import { getCachedProjects, type Project } from '../features/projects/projectStorage';
 
 export default function ProjectContextBar() {
-  const { activeProjectId, activeProjectName, activeProjectType, setActiveProject, getProjectList } = useProjectStore();
+  const { activeProjectId, activeProjectName, activeProjectType, setActiveProject } = useProjectStore();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -19,7 +20,7 @@ export default function ProjectContextBar() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [dropdownOpen]);
 
-  const projects = getProjectList();
+  const projects: Project[] = getCachedProjects();
 
   if (!activeProjectId) {
     return (

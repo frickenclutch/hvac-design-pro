@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { FolderOpen, Plus, FileText, Home, Building2 } from 'lucide-react';
 import { useProjectStore } from '../stores/useProjectStore';
+import { getCachedProjects, type Project } from '../features/projects/projectStorage';
 
 interface ProjectGateDialogProps {
   onProjectSelected: (projectId: string) => void;
@@ -8,27 +9,33 @@ interface ProjectGateDialogProps {
 }
 
 export default function ProjectGateDialog({ onProjectSelected, onDraft }: ProjectGateDialogProps) {
-  const { setActiveProject, createProject, getProjectList } = useProjectStore();
-  const projects = getProjectList();
+  const { setActiveProject, createProject } = useProjectStore();
+  const projects: Project[] = getCachedProjects();
   const [mode, setMode] = useState<'select' | 'create'>('select');
   const [newName, setNewName] = useState('');
   const [newType, setNewType] = useState<'residential' | 'commercial'>('residential');
   const [newAddress, setNewAddress] = useState('');
+  const [creating, setCreating] = useState(false);
 
   const handleSelectProject = (id: string) => {
     setActiveProject(id);
     onProjectSelected(id);
   };
 
-  const handleCreateProject = () => {
-    if (!newName.trim()) return;
-    const id = createProject({
-      name: newName.trim(),
-      type: newType,
-      address: newAddress.trim(),
-      city: '',
-    });
-    onProjectSelected(id);
+  const handleCreateProject = async () => {
+    if (!newName.trim() || creating) return;
+    setCreating(true);
+    try {
+      const id = await createProject({
+        name: newName.trim(),
+        type: newType,
+        address: newAddress.trim(),
+        city: '',
+      });
+      onProjectSelected(id);
+    } finally {
+      setCreating(false);
+    }
   };
 
   return (
@@ -134,11 +141,11 @@ export default function ProjectGateDialog({ onProjectSelected, onDraft }: Projec
 
               {/* Create button */}
               <button
-                disabled={!newName.trim()}
+                disabled={!newName.trim() || creating}
                 onClick={handleCreateProject}
                 className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed"
               >
-                <Plus className="w-4 h-4 inline mr-1.5" /> Create Project
+                <Plus className="w-4 h-4 inline mr-1.5" /> {creating ? 'Creating…' : 'Create Project'}
               </button>
             </div>
           )}
