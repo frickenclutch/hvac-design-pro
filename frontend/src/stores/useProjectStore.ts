@@ -1,43 +1,65 @@
 import { create } from 'zustand';
-import { scopedKey } from '../utils/storage';
+import {
+  createProject as createProjectSynced,
+  updateProject as updateProjectSynced,
+  getCachedProject,
+  type Project,
+  type ProjectCreateInput,
+  type SyncStatus,
+} from '../features/projects/projectStorage';
 
 // ── Project Store ─────────────────────────────────────────────────────────────
 // Single source of truth for the currently open project's identity.
-// Hydrated by CadWorkspace when a project route is loaded.
-
-const STORAGE_KEY = 'hvac_projects';
-
-interface Project {
-  id: string;
-  name: string;
-  address: string;
-  city: string;
-  date: string;
-  status: string;
-  type: string;
-}
+// Hydrated by CadWorkspace when a project route is loaded. All mutating ops
+// route through projectStorage so they sync to D1 with localStorage fallback.
 
 interface ProjectState {
   activeProjectId: string | null;
   activeProjectName: string | null;
   activeProjectType: string | null;
   activeProjectAddress: string | null;
+  activeProjectSyncStatus: SyncStatus | null;
 
-  // Set from route + localStorage lookup
+  // Set from route + cache lookup
   setActiveProject: (id: string) => void;
   clearActiveProject: () => void;
 
-  // Rename the active project (persists to localStorage)
+  // Rename the active project (optimistic local + D1 sync)
   renameProject: (newName: string) => void;
 
-  // Update any project metadata field (name, type, address) — persists to localStorage
-  updateProjectDetails: (patch: { name?: string; type?: string; address?: string; city?: string }) => void;
+  // Update any project metadata field — optimistic local + D1 sync
+  updateProjectDetails: (patch: {
+    name?: string;
+    type?: string;
+    address?: string;
+    city?: string;
+  }) => void;
 
-  // Create a new project from inside CAD and make it active
-  createProject: (project: { name: string; type: string; address: string; city: string }) => string;
+  // Create a new project. Awaited so callers can navigate with the real ID.
+  // Returns the created project (cloud-backed ID when online, `proj-*` when offline).
+  createProject: (details: ProjectCreateInput) => Promise<string>;
+}
 
-  // Read-only access to the project list (for selectors/dialogs)
-  getProjectList: () => Project[];
+function hydrateFromCache(
+  id: string
+): Partial<ProjectState> {
+  const project = getCachedProject(id);
+  if (!project) {
+    return {
+      activeProjectId: id,
+      activeProjectName: null,
+      activeProjectType: null,
+      activeProjectAddress: null,
+      activeProjectSyncStatus: null,
+    };
+  }
+  return {
+    activeProjectId: project.id,
+    activeProjectName: project.name,
+    activeProjectType: project.type,
+    activeProjectAddress: `${project.address}${project.city ? `, ${project.city}` : ''}`,
+    activeProjectSyncStatus: project.syncStatus,
+  };
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -45,33 +67,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   activeProjectName: null,
   activeProjectType: null,
   activeProjectAddress: null,
+  activeProjectSyncStatus: null,
 
   setActiveProject: (id: string) => {
-    try {
-      const raw = localStorage.getItem(scopedKey(STORAGE_KEY));
-      if (raw) {
-        const projects: Project[] = JSON.parse(raw);
-        const project = projects.find((p) => p.id === id);
-        if (project) {
-          set({
-            activeProjectId: project.id,
-            activeProjectName: project.name,
-            activeProjectType: project.type,
-            activeProjectAddress: `${project.address}${project.city ? `, ${project.city}` : ''}`,
-          });
-          return;
-        }
-      }
-    } catch {
-      /* localStorage unavailable */
-    }
-    // Fallback: we have an id but no project record
-    set({
-      activeProjectId: id,
-      activeProjectName: null,
-      activeProjectType: null,
-      activeProjectAddress: null,
-    });
+    set(hydrateFromCache(id));
   },
 
   clearActiveProject: () =>
@@ -80,6 +79,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       activeProjectName: null,
       activeProjectType: null,
       activeProjectAddress: null,
+      activeProjectSyncStatus: null,
     }),
 
   renameProject: (newName: string) => {
@@ -88,67 +88,41 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   updateProjectDetails: (patch) => {
     const id = get().activeProjectId;
-    // Persist changed fields to localStorage project record
-    if (id) {
-      try {
-        const raw = localStorage.getItem(scopedKey(STORAGE_KEY));
-        if (raw) {
-          const projects: Project[] = JSON.parse(raw);
-          const idx = projects.findIndex(p => p.id === id);
-          if (idx !== -1) {
-            if (patch.name !== undefined) projects[idx].name = patch.name;
-            if (patch.type !== undefined) projects[idx].type = patch.type;
-            if (patch.address !== undefined) projects[idx].address = patch.address;
-            if (patch.city !== undefined) projects[idx].city = patch.city;
-            localStorage.setItem(scopedKey(STORAGE_KEY), JSON.stringify(projects));
-          }
-        }
-      } catch { /* ignore */ }
-    }
-    // Update in-memory store
+    if (!id) return;
+
+    // Optimistic in-memory update
     const updates: Partial<ProjectState> = {};
     if (patch.name !== undefined) updates.activeProjectName = patch.name;
     if (patch.type !== undefined) updates.activeProjectType = patch.type;
     if (patch.address !== undefined || patch.city !== undefined) {
-      const addr = patch.address ?? '';
-      const city = patch.city ?? '';
+      const cached = getCachedProject(id);
+      const addr = patch.address ?? cached?.address ?? '';
+      const city = patch.city ?? cached?.city ?? '';
       updates.activeProjectAddress = `${addr}${city ? `, ${city}` : ''}`;
     }
     set(updates);
-  },
 
-  createProject: (details) => {
-    const id = `proj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const project: Project = {
-      id,
-      name: details.name,
-      type: details.type,
-      address: details.address,
-      city: details.city,
-      date: new Date().toISOString(),
-      status: 'In Progress',
-    };
-    try {
-      const raw = localStorage.getItem(scopedKey(STORAGE_KEY));
-      const projects: Project[] = raw ? JSON.parse(raw) : [];
-      projects.unshift(project);
-      localStorage.setItem(scopedKey(STORAGE_KEY), JSON.stringify(projects));
-    } catch { /* ignore */ }
-    set({
-      activeProjectId: id,
-      activeProjectName: project.name,
-      activeProjectType: project.type,
-      activeProjectAddress: `${project.address}${project.city ? `, ${project.city}` : ''}`,
+    // Sync to D1 (non-blocking — projectStorage handles local fallback + toasts)
+    void updateProjectSynced(id, patch).then((synced) => {
+      if (synced && synced.syncStatus !== get().activeProjectSyncStatus) {
+        set({ activeProjectSyncStatus: synced.syncStatus });
+      }
     });
-    return id;
   },
 
-  getProjectList: () => {
-    try {
-      const raw = localStorage.getItem(scopedKey(STORAGE_KEY));
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
+  createProject: async (details) => {
+    const created = await createProjectSynced(details);
+    set({
+      activeProjectId: created.id,
+      activeProjectName: created.name,
+      activeProjectType: created.type,
+      activeProjectAddress: `${created.address}${created.city ? `, ${created.city}` : ''}`,
+      activeProjectSyncStatus: created.syncStatus,
+    });
+    return created.id;
   },
 }));
+
+// Re-export the Project type so other modules can depend on the store without
+// reaching into the feature folder directly.
+export type { Project };

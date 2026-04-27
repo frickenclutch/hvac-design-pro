@@ -1,39 +1,42 @@
 import { useState } from 'react';
 import { X, ArrowRight, ArrowLeft, Building2, Home, MapPin, Briefcase } from 'lucide-react';
 import { SecureInput } from '../../auth/components/SecurityComponents';
+import { createProject as createProjectSynced, type Project } from '../projectStorage';
 
 interface NewProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (project: any) => void;
+  onSuccess: (project: Project) => void;
 }
 
 export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProjectModalProps) {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
-  
+
   // Project State
   const [name, setName] = useState('');
   const [type, setType] = useState('Residential');
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
-  
+
   if (!isOpen) return null;
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (loading || !name.trim()) return;
     setLoading(true);
-    const newProject = {
-      id: `proj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      name,
-      type,
-      address,
-      city,
-      date: new Date().toISOString(),
-      status: 'In Progress',
-    };
-    onSuccess(newProject);
-    onClose();
-    setLoading(false);
+    try {
+      const project = await createProjectSynced({ name: name.trim(), type, address, city });
+      onSuccess(project);
+      // Reset form for next use
+      setStep(1);
+      setName('');
+      setAddress('');
+      setCity('');
+      setType('Residential');
+      onClose();
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -131,12 +134,12 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
                 Continue <ArrowRight className="w-5 h-5" />
               </button>
             ) : (
-              <button 
-                disabled={loading}
+              <button
+                disabled={loading || !name.trim()}
                 onClick={handleSubmit}
-                className="flex-[2] py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all flex items-center justify-center gap-2"
+                className="flex-[2] py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all flex items-center justify-center gap-2 disabled:opacity-60"
               >
-                {loading ? "Generating..." : "Initialize Workspace"} <ArrowRight className="w-5 h-5" />
+                {loading ? "Syncing to cloud…" : "Initialize Workspace"} <ArrowRight className="w-5 h-5" />
               </button>
             )}
           </div>

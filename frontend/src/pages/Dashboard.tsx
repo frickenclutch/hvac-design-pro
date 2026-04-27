@@ -1,18 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, MapPin, Calendar, ArrowRight, Pencil, Check, X, Trash2, Building2, Home, GripVertical, ChevronDown, ChevronRight, RotateCcw, Minus } from 'lucide-react';
+import { Plus, Search, MapPin, Calendar, ArrowRight, Pencil, Check, X, Trash2, Building2, Home, GripVertical, ChevronDown, ChevronRight, RotateCcw, Minus, Cloud, CloudOff, UploadCloud, AlertTriangle } from 'lucide-react';
 import NewProjectModal from '../features/projects/components/NewProjectModal';
+import {
+  loadProjects as loadProjectsSynced,
+  updateProject as updateProjectSynced,
+  deleteProject as deleteProjectSynced,
+  migrateLocalProjectToCloud,
+  getCachedProjects,
+  type Project,
+} from '../features/projects/projectStorage';
 import { scopedKey } from '../utils/storage';
-
-interface Project {
-  id: string;
-  name: string;
-  address: string;
-  city: string;
-  date: string;
-  status: string;
-  type: string;
-}
 
 interface TileLayout {
   order: string[];
@@ -20,21 +18,7 @@ interface TileLayout {
   tileScale: number;
 }
 
-const STORAGE_KEY = 'hvac_projects';
 const LAYOUT_KEY = 'hvac_project_layout';
-
-function loadProjects(): Project[] {
-  try {
-    const raw = localStorage.getItem(scopedKey(STORAGE_KEY));
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveProjects(projects: Project[]) {
-  localStorage.setItem(scopedKey(STORAGE_KEY), JSON.stringify(projects));
-}
 
 function loadLayout(): TileLayout {
   try {
@@ -81,21 +65,35 @@ export default function Dashboard() {
   const [overId, setOverId] = useState<string | null>(null);
 
   useEffect(() => {
-    const loaded = loadProjects();
+    // Optimistic hydrate from cache first so the UI paints immediately…
+    const cached = getCachedProjects();
     const savedLayout = loadLayout();
-    const reconciled = reconcileLayout(savedLayout, loaded);
-    setProjects(loaded);
+    const reconciled = reconcileLayout(savedLayout, cached);
+    setProjects(cached);
     setLayout(reconciled);
     saveLayout(reconciled);
+
+    // …then fetch from D1 in the background and reconcile.
+    let cancelled = false;
+    (async () => {
+      const remote = await loadProjectsSynced();
+      if (cancelled) return;
+      setProjects(remote);
+      setLayout(prev => {
+        const next = reconcileLayout(prev, remote);
+        saveLayout(next);
+        return next;
+      });
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   // ── Project CRUD ───────────────────────────────────────────────────────
   const handleNewProjectSuccess = (newProject: Project) => {
-    const updated = [newProject, ...projects];
+    const updated = [newProject, ...projects.filter(p => p.id !== newProject.id)];
     setProjects(updated);
-    saveProjects(updated);
     setLayout(prev => {
-      const next = { ...prev, order: [newProject.id, ...prev.order] };
+      const next = { ...prev, order: [newProject.id, ...prev.order.filter(oid => oid !== newProject.id)] };
       saveLayout(next);
       return next;
     });
@@ -112,15 +110,18 @@ export default function Dashboard() {
     setTimeout(() => editNameRef.current?.focus(), 50);
   };
 
-  const saveEdit = () => {
+  const saveEdit = async () => {
     if (!editingId) return;
-    const updated = projects.map(p =>
-      p.id === editingId ? { ...p, ...editDraft } : p
-    );
-    setProjects(updated);
-    saveProjects(updated);
+    const id = editingId;
+    const patch = { ...editDraft };
+    // Optimistic in-memory update — util handles cache + remote sync
+    setProjects(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
     setEditingId(null);
     setEditDraft({});
+    const synced = await updateProjectSynced(id, patch);
+    if (synced) {
+      setProjects(prev => prev.map(p => p.id === id ? synced : p));
+    }
   };
 
   const cancelEdit = () => {
@@ -128,14 +129,28 @@ export default function Dashboard() {
     setEditDraft({});
   };
 
-  const deleteProject = (id: string) => {
-    const updated = projects.filter(p => p.id !== id);
-    setProjects(updated);
-    saveProjects(updated);
+  const deleteProject = async (id: string) => {
+    setProjects(prev => prev.filter(p => p.id !== id));
     if (editingId === id) cancelEdit();
     setLayout(prev => {
       const next = { ...prev, order: prev.order.filter(oid => oid !== id), collapsed: { ...prev.collapsed } };
       delete next.collapsed[id];
+      saveLayout(next);
+      return next;
+    });
+    await deleteProjectSynced(id);
+  };
+
+  const migrateToCloud = async (id: string) => {
+    const synced = await migrateLocalProjectToCloud(id);
+    if (!synced) return;
+    setProjects(prev => prev.map(p => p.id === id ? synced : p));
+    setLayout(prev => {
+      const next = { ...prev, order: prev.order.map(oid => oid === id ? synced.id : oid), collapsed: { ...prev.collapsed } };
+      if (prev.collapsed[id]) {
+        next.collapsed[synced.id] = true;
+        delete next.collapsed[id];
+      }
       saveLayout(next);
       return next;
     });
@@ -349,6 +364,7 @@ export default function Dashboard() {
                   <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full flex-shrink-0 ${proj.status === 'Completed' ? 'bg-slate-800 text-slate-300' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}>
                     {proj.status}
                   </span>
+                  <SyncStatusChip project={proj} onMigrate={migrateToCloud} />
 
                   {/* Collapse/expand toggle */}
                   {!isEditing && (
@@ -488,5 +504,69 @@ export default function Dashboard() {
         </div>
       )}
     </div>
+  );
+}
+
+// ── Sync status chip ─────────────────────────────────────────────────────────
+// One-click migration for `local_only` projects to D1. Shows the current sync
+// state so the user always knows whether a project is safe in the cloud.
+function SyncStatusChip({
+  project,
+  onMigrate,
+}: {
+  project: Project;
+  onMigrate: (id: string) => void | Promise<void>;
+}) {
+  const status = project.syncStatus;
+
+  if (status === 'synced') {
+    return (
+      <span
+        title="Synced to cloud"
+        className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full flex-shrink-0 bg-slate-800/60 text-slate-400 border border-slate-700/50"
+      >
+        <Cloud className="w-3 h-3" />
+        <span className="hidden lg:inline">Cloud</span>
+      </span>
+    );
+  }
+
+  if (status === 'pending') {
+    return (
+      <span
+        title="Syncing…"
+        className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full flex-shrink-0 bg-amber-500/10 text-amber-400 border border-amber-500/20"
+      >
+        <UploadCloud className="w-3 h-3 animate-pulse" />
+        <span className="hidden lg:inline">Syncing</span>
+      </span>
+    );
+  }
+
+  if (status === 'error') {
+    return (
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onMigrate(project.id); }}
+        title="Sync failed — click to retry"
+        className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full flex-shrink-0 bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20 transition-colors"
+      >
+        <AlertTriangle className="w-3 h-3" />
+        <span className="hidden lg:inline">Retry</span>
+      </button>
+    );
+  }
+
+  // local_only — offer migration
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onMigrate(project.id); }}
+      title="Saved locally only — click to sync to cloud"
+      className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full flex-shrink-0 bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 transition-colors"
+    >
+      <CloudOff className="w-3 h-3" />
+      <span className="hidden lg:inline">Local</span>
+    </button>
   );
 }

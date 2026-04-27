@@ -43,12 +43,17 @@ projectRoutes.post('/', async (c) => {
   const body = await c.req.json();
   const id = generateId();
 
+  if (!body.name || typeof body.name !== 'string' || !body.name.trim()) {
+    return c.json({ error: 'Project name is required' }, 400);
+  }
+
   await c.env.DB.prepare(
-    `INSERT INTO projects (id, org_id, name, address, city, state, zip, country, climate_zone, standard, status, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(id, user.orgId, body.name, body.address || null, body.city || null,
+    `INSERT INTO projects (id, org_id, name, address, city, state, zip, country, climate_zone, standard, project_type, status, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(id, user.orgId, body.name.trim(), body.address || null, body.city || null,
          body.state || null, body.zip || null, body.country || 'US', body.climateZone || null,
-         body.standard || 'ACCA', body.status || 'active', user.id).run();
+         body.standard || 'ACCA', body.projectType || 'Residential',
+         body.status || 'active', user.id).run();
 
   const project = await c.env.DB.prepare('SELECT * FROM projects WHERE id = ?').bind(id).first();
   return c.json({ project }, 201);
@@ -60,14 +65,32 @@ projectRoutes.put('/:id', async (c) => {
   const id = c.req.param('id');
   const body = await c.req.json();
 
-  await c.env.DB.prepare(
-    `UPDATE projects SET name = ?, address = ?, city = ?, state = ?, zip = ?,
-     climate_zone = ?, standard = ?, status = ?, updated_at = datetime('now')
-     WHERE id = ? AND org_id = ?`
-  ).bind(body.name, body.address, body.city, body.state, body.zip,
-         body.climateZone, body.standard, body.status || 'active', id, user.orgId).run();
+  // Build dynamic SET so partial updates don't null out other fields
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  if (body.name !== undefined) { updates.push('name = ?'); values.push(body.name); }
+  if (body.address !== undefined) { updates.push('address = ?'); values.push(body.address); }
+  if (body.city !== undefined) { updates.push('city = ?'); values.push(body.city); }
+  if (body.state !== undefined) { updates.push('state = ?'); values.push(body.state); }
+  if (body.zip !== undefined) { updates.push('zip = ?'); values.push(body.zip); }
+  if (body.climateZone !== undefined) { updates.push('climate_zone = ?'); values.push(body.climateZone); }
+  if (body.standard !== undefined) { updates.push('standard = ?'); values.push(body.standard); }
+  if (body.projectType !== undefined) { updates.push('project_type = ?'); values.push(body.projectType); }
+  if (body.status !== undefined) { updates.push('status = ?'); values.push(body.status); }
 
-  const project = await c.env.DB.prepare('SELECT * FROM projects WHERE id = ?').bind(id).first();
+  if (updates.length === 0) {
+    return c.json({ error: 'No fields to update' }, 400);
+  }
+
+  updates.push(`updated_at = datetime('now')`);
+  values.push(id, user.orgId);
+
+  await c.env.DB.prepare(
+    `UPDATE projects SET ${updates.join(', ')} WHERE id = ? AND org_id = ?`
+  ).bind(...values).run();
+
+  const project = await c.env.DB.prepare('SELECT * FROM projects WHERE id = ? AND org_id = ?').bind(id, user.orgId).first();
+  if (!project) return c.json({ error: 'Not found' }, 404);
   return c.json({ project });
 });
 

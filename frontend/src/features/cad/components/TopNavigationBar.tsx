@@ -34,6 +34,7 @@ export default function TopNavigationBar({ onHelpOpen }: { onHelpOpen?: () => vo
   const [saveType, setSaveType] = useState('Residential');
   const [saveAddress, setSaveAddress] = useState('');
   const [saveCity, setSaveCity] = useState('');
+  const [isSavingProject, setIsSavingProject] = useState(false);
 
   // Derive display name — fall back gracefully when no project route
   const displayName = activeProjectName ?? (id ? `Project ${id}` : 'CAD Workspace');
@@ -111,27 +112,37 @@ export default function TopNavigationBar({ onHelpOpen }: { onHelpOpen?: () => vo
     }
   };
 
-  const handleSaveModalSubmit = () => {
-    if (!saveName.trim()) return;
-    const newId = createProject({ name: saveName.trim(), type: saveType, address: saveAddress, city: saveCity });
-    setShowSaveModal(false);
-
-    // Update the CAD store's projectId so auto-save targets this project
-    const store = useCadStore.getState();
-    store.setProjectId(newId);
-
-    // Immediately persist current drawing to localStorage under the new project key
+  const handleSaveModalSubmit = async () => {
+    if (!saveName.trim() || isSavingProject) return;
+    setIsSavingProject(true);
     try {
-      const data = store.serializeDrawing();
-      localStorage.setItem(scopedKey(`hvac_cad_${newId}`), JSON.stringify(data));
-      store.markSaved(store.drawingId || 'local');
-    } catch {
-      store.markDirty();
-    }
+      const newId = await createProject({
+        name: saveName.trim(),
+        type: saveType,
+        address: saveAddress,
+        city: saveCity,
+      });
+      setShowSaveModal(false);
 
-    // Navigate to the project-specific CAD route.
-    // The layout route in App.tsx keeps CadWorkspace mounted (no canvas destruction).
-    navigate(`/project/${newId}/cad`, { replace: true });
+      // Update the CAD store's projectId so auto-save targets this project
+      const store = useCadStore.getState();
+      store.setProjectId(newId);
+
+      // Immediately persist current drawing to localStorage under the new project key
+      try {
+        const data = store.serializeDrawing();
+        localStorage.setItem(scopedKey(`hvac_cad_${newId}`), JSON.stringify(data));
+        store.markSaved(store.drawingId || 'local');
+      } catch {
+        store.markDirty();
+      }
+
+      // Navigate to the project-specific CAD route.
+      // The layout route in App.tsx keeps CadWorkspace mounted (no canvas destruction).
+      navigate(`/project/${newId}/cad`, { replace: true });
+    } finally {
+      setIsSavingProject(false);
+    }
   };
 
   const handleExport = async () => {
@@ -430,11 +441,11 @@ export default function TopNavigationBar({ onHelpOpen }: { onHelpOpen?: () => vo
                   </button>
                 ) : (
                   <button
-                    disabled={!saveName.trim()}
+                    disabled={!saveName.trim() || isSavingProject}
                     onClick={handleSaveModalSubmit}
                     className="flex-[2] py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all flex items-center justify-center gap-2 disabled:opacity-40"
                   >
-                    <Check className="w-5 h-5" /> Create &amp; Save
+                    <Check className="w-5 h-5" /> {isSavingProject ? 'Saving…' : 'Create & Save'}
                   </button>
                 )}
               </div>
