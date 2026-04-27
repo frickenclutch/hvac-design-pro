@@ -21,6 +21,7 @@ const ManualDCalculator = lazy(() => import('./pages/ManualDCalculator'));
 const AedAnalysis = lazy(() => import('./pages/AedAnalysis'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const UserGuidePage = lazy(() => import('./pages/UserGuidePage'));
+const AdminPage = lazy(() => import('./pages/AdminPage'));
 import { useAuthStore } from './features/auth/store/useAuthStore';
 import { usePreferencesStore } from './stores/usePreferencesStore';
 import SpotlightSearch, { SpotlightTrigger } from './features/spotlight/SpotlightSearch';
@@ -192,6 +193,9 @@ function AppLayout() {
           <Route path="/guide" element={isAuthenticated ? <UserGuidePage /> : <Navigate to="/" />} />
           <Route path="/cad" element={isAuthenticated ? <CadWorkspace /> : <Navigate to="/" />} />
           <Route path="/project/:id/cad" element={isAuthenticated ? <CadWorkspace /> : <Navigate to="/" />} />
+
+          {/* Platform admin (L0). Hard-gated again inside the page. */}
+          <Route path="/admin" element={isAuthenticated ? <AdminPage /> : <Navigate to="/" />} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" />} />

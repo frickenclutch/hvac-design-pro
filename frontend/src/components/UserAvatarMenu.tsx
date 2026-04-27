@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { Settings, LogOut, ChevronDown } from 'lucide-react';
+import { Settings, LogOut, ChevronDown, ShieldCheck } from 'lucide-react';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 
 interface UserAvatarMenuProps {
@@ -142,6 +142,17 @@ export default function UserAvatarMenu({
 
           {/* Menu items */}
           <div className="p-1.5">
+            {user.isPlatformAdmin && (
+              <Link
+                to="/admin"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-amber-300 hover:bg-amber-500/10 hover:text-amber-200 transition-colors text-sm border border-amber-500/20 mb-1"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span className="font-medium">Platform Admin</span>
+                <span className="ml-auto text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">L0</span>
+              </Link>
+            )}
             <Link
               to="/settings"
               onClick={() => setOpen(false)}

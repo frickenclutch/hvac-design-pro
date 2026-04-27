@@ -226,6 +226,62 @@ class ApiClient {
     return this.request<{ ok: boolean }>(`/api/cad/${id}`, { method: 'DELETE' });
   }
 
+  // ── Platform admin (L0 creator layer) ───────────────────────────────────
+  // All routes here require is_platform_admin = 1 in D1 + a valid session.
+  // 403 on call means the session user is not a platform admin.
+  async platformMe() {
+    return this.request<{
+      id: string;
+      email: string;
+      role: string;
+      isPlatformAdmin: boolean;
+      orgId: string;
+    }>('/api/platform/me');
+  }
+
+  async platformMetrics() {
+    return this.request<{
+      totals: Record<string, number>;
+      recent: Record<string, number>;
+      breakdown: { orgTypes: Array<{ org_type: string; count: number }>; planTiers: Array<{ plan: string; count: number }> };
+      generatedAt: string;
+    }>('/api/platform/metrics');
+  }
+
+  async platformOrgs() {
+    return this.request<{
+      organisations: Array<{
+        id: string;
+        slug: string;
+        name: string;
+        org_type: string;
+        plan: string;
+        seats_limit: number;
+        billing_status: string;
+        region_code: string;
+        created_at: string;
+        user_count: number;
+        project_count: number;
+        last_active_at: string | null;
+      }>;
+    }>('/api/platform/orgs');
+  }
+
+  async platformOrgDetail(id: string) {
+    return this.request<{
+      organisation: Record<string, unknown>;
+      users: Array<Record<string, unknown>>;
+      counts: Record<string, number>;
+    }>(`/api/platform/orgs/${id}`);
+  }
+
+  async platformAudit(limit = 100) {
+    return this.request<{
+      events: Array<Record<string, unknown>>;
+      limit: number;
+    }>(`/api/platform/audit?limit=${limit}`);
+  }
+
   // Feedback
   async submitFeedback(data: {
     type: string;

@@ -23,6 +23,12 @@ export interface User {
   phone?: string;
   address?: Address;
   isVerified: boolean;
+  /**
+   * Creator-layer flag (L0). Orthogonal to `role` — platform admins can
+   * also be regular admins of their own tenant org. When true, the avatar
+   * menu surfaces the /admin link and platform.* API calls are unlocked.
+   */
+  isPlatformAdmin?: boolean;
 }
 
 export interface Organisation {
