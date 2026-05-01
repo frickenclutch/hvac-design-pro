@@ -71,6 +71,7 @@ export {
   getConstruction,
   listConstructions,
   basementWallUAtDepth,
+  REGISTRY_SIZE,
 } from './tables/constructions';
 
 // Lookup
@@ -145,4 +146,4 @@ export { buildFormJ1 } from './formJ1';
  * traceability. Bump when the engine logic changes in a way that affects
  * outputs. See database schema's `calculations.engine_version` column.
  */
-export const MANUAL_J8_ENGINE_VERSION = 'manualJ8-ts-1.0.0';
+export const MANUAL_J8_ENGINE_VERSION = 'manualJ8-ts-1.1.0';
