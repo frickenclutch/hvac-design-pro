@@ -1,8 +1,47 @@
 # Option E — UI Migration Plan
 
-**Status:** Pre-staged for next session. Engine v1.1.0 is ready; calculator UI still calls legacy engine.
+**Status:** **Phase 1 SHIPPED 2026-05-04** (commit `8203e3e`). Calculator now shadow-runs the cert-grade engine alongside legacy on every calc; legacy results still display. Drift telemetry logged to console. Phase 2 (display flip) gated on collecting real-user drift data — see "Phase 2 status" below.
 
 **Goal:** Point `ManualJCalculator.tsx` at `engines/manualJ8/` so real users (Dan, Brian, Daniel) run cert-grade math on production projects. **Zero regressions on existing saved projects.**
+
+---
+
+## Phase 1 — what shipped (2026-05-04)
+
+| Component | File | Status |
+|---|---|---|
+| Adapter shim | `frontend/src/engines/manualJ8/adapters/legacy.ts` | ✅ shipped, ~460 LOC |
+| Feature flags | `frontend/src/stores/usePreferencesStore.ts` (`engineVersion`, `shadowRunManualJ8`) | ✅ shipped, defaults `legacy` + `true` |
+| Calculator wiring | `frontend/src/pages/ManualJCalculator.tsx` `runCalculation` | ✅ shadow-run + drift log |
+| Tests | 30/30 vitest pass (4 cert + 26 unit) | ✅ green |
+| Browser-verified | Smith-like climate produces drift telemetry; default conditions throw on sparse Table 4B ceiling cells (caught + logged) | ✅ verified |
+
+**Phase 1 findings (already surfaced):**
+1. Ceiling registry only populates CTD=15 directCLTD cells — climates outside that envelope cause the new engine to throw, the calculator catches and logs `[engine drift] manualJ8 shadow-run failed`. Need more ceiling variants in Phase 2.
+2. Duct math drift dominates the 3-room toy case (~10–15%). Expected: legacy uses a flat multiplier, Manual J 8 uses Table 7 base × WIF × LCF × SAA. Real-project drift telemetry from Dan/Brian/Daniel will show whether this is acceptable.
+3. **Calc results not yet syncing to D1** — drift telemetry is console-only. Q/A benchmarks panel + cross-user aggregation depend on calc persistence (Priority 1 in `project_layer_priorities.md`).
+
+---
+
+## Phase 2 status — gated on telemetry
+
+**Trigger criteria** (decide before flipping `engineVersion` default to `'manualJ8'`):
+- Real users (Dan, Brian, Daniel) drive ≥10 production projects through the calculator
+- Drift on those projects is captured (requires calc persistence to D1)
+- Drift summary ≤ 5% on every total (heat / sens / latent) on at least 80% of projects
+- ACCA cert review status: APPROVED (currently awaiting; ~3-4 mo SLA from 2026-05-01 filing)
+
+**Phase 2 work to ship when triggered:**
+1. Implement `formJ1ResultToRoomDisplay` (inverse adapter) so per-room cards still display loads from the whole-house engine
+2. Flip `engineVersion` default in `usePreferencesStore.defaults`
+3. PDF export stamps the engine version in the report header
+4. Settings UI exposes the engineVersion toggle (today the prefs exist but no UI)
+5. Update `manual-j-methodology.md` to declare cert-grade is production
+6. Re-send cert flipbook to Glenn Hourahan reflecting the cutover
+
+---
+
+## Reference: original plan (preserved for Phase 2 implementation)
 
 ---
 

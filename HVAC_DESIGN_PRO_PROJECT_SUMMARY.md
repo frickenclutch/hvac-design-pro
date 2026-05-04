@@ -1,5 +1,24 @@
 # HVAC Design Pro — Project Summary & Engineering Roadmap
 
+> ⚠️ **HISTORICAL DOCUMENT — last refreshed 2026-04-08.** Numbers,
+> file counts, phase percentages, and architecture details below are
+> a snapshot from before the cert-grade Manual J 8 engine, the L0
+> admin panel, the Team + Community surfaces, and the calc + duct +
+> 3D fixes that landed across April–May 2026. **Do not cite this as
+> current state.**
+>
+> **Live sources of truth (2026-05-04):**
+> - Architecture, conventions, route map, phase % → [`../CLAUDE.md`](../CLAUDE.md)
+> - Manual J methodology + shadow-run pipeline → [`docs/manual-j-methodology.md`](docs/manual-j-methodology.md)
+> - ACCA cert + validation evidence → [`docs/acca-validation-report.md`](docs/acca-validation-report.md)
+> - Phase 1 → Phase 2 migration plan → [`docs/option-e-ui-migration-plan.md`](docs/option-e-ui-migration-plan.md)
+>
+> Preserved below for historical reference of original product framing
+> and decisions made during 1.0-alpha. Treat as archaeology, not as
+> current spec.
+
+---
+
 **Version:** 1.0-alpha  
 **Last Updated:** April 8, 2026  
 **Platform:** https://hvac-design-pro.pages.dev  

@@ -42,9 +42,57 @@ The engine coexists with a legacy single-file engine at
 new code opts into the cert-grade pipeline via the public API in
 `frontend/src/engines/manualJ8/index.ts`.
 
+### 2.1 Phase 1 shadow-run (active in production)
+
+Since 2026-05-04 (commit `8203e3e`), every Manual J calculation runs
+**both** engines in parallel. The legacy engine's per-room result still
+displays in the UI; the cert-grade engine runs alongside via the
+`adapters/legacy.ts` shim and logs `[engine drift]` to the browser
+console for telemetry. This is a non-disruptive rollout — saved
+projects, displayed numbers, and PDF exports are unchanged.
+
+Pipeline:
+```
+runCalculation() in pages/ManualJCalculator.tsx
+  ├── calculateWholeHouse(rooms, conditions)            ← legacy, displayed
+  └── if shadowRunManualJ8:
+        ├── roomInputsToFormJ1Input(rooms, conditions, aedExcursion)
+        │     ↳ aggregates per-room data into whole-house Form J1 input
+        ├── buildFormJ1(j8Input)
+        └── console.log('[engine drift]', driftPercents, totals)
+```
+
+The adapter at `engines/manualJ8/adapters/legacy.ts` converts the
+legacy `RoomInput[]` model into the `FormJ1Input` whole-house model:
+- Windows aggregated by exposure direction
+- Above-grade walls aggregated by `WallConstructionGroup` (I/J/K/L)
+- Below-grade walls bucketed with average depth
+- Ceilings + floors picked from a representative Construction registry
+  ID by floor type
+- Infiltration mapped from `constructionQuality` to ACH
+- Duct factors set to canonical Smith-equivalent Table 7 values
+
+When the new engine throws (e.g. registry doesn't cover a CTD/DR
+combination), the calculator catches the exception and logs
+`[engine drift] manualJ8 shadow-run failed: ...` — these are
+findings, not failures, and are tracked separately from drift data.
+
+**Phase 2 (display flip)** is gated on real-user drift collection. See
+`docs/option-e-ui-migration-plan.md` for trigger criteria.
+
+### 2.2 Engine version stamping
+
 Every calculation result is stamped with `MANUAL_J8_ENGINE_VERSION` for
 audit traceability, persisted in the `calculations.engine_version`
-column of the D1 database.
+column of the D1 database. Current version: **`manualJ8-ts-1.1.0`**.
+The platform L0 admin panel (`/admin`) shows the distribution of
+engine versions across all persisted calculations under "Q/A
+benchmarks" → "Engine versions in production".
+
+Bump the version stamp whenever engine logic changes in a way that
+affects outputs. The Phase 2 cutover will not require a stamp change
+(the engine itself is unchanged — only the UI flips which one is
+displayed).
 
 ---
 

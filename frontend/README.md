@@ -1,73 +1,60 @@
-# React + TypeScript + Vite
+# HVAC Design Pro — Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React 19 + TypeScript 5.9 + Vite 8 + Tailwind 4. Deployed to Cloudflare
+Pages at [hvac-design-pro.pages.dev](https://hvac-design-pro.pages.dev).
+Auto-deploy on push to `main`.
 
-Currently, two official plugins are available:
+For project-wide architecture, conventions, and roadmap see
+[`../CLAUDE.md`](../CLAUDE.md). This README covers frontend-local
+ergonomics only.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Local development
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev          # Vite on :5173, host=true
+npm run build        # tsc -b && vite build (target ≤660 KB gzip)
+npm run preview      # serve the built bundle
+npm run lint         # ESLint flat config
+npx vitest run       # cert + unit tests (30/30, <1 s)
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Where things live
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+| Concern | Path |
+|---|---|
+| Page components (lazy-loaded routes) | `src/pages/` |
+| Feature modules (auth, cad, projects, retailer, spotlight) | `src/features/` |
+| Pure calculation engines | `src/engines/` |
+| └ Cert-grade Manual J 8 (shadow-running) | `src/engines/manualJ8/` |
+| └ Legacy per-room engine (production display) | `src/engines/manualJ.ts` |
+| Zustand stores (auth, project, preferences, toast, retailer) | `src/stores/` and `src/features/*/store/` |
+| Shared UI primitives | `src/components/` |
+| Typed API client | `src/lib/api.ts` |
+| User-scoped localStorage helpers | `src/utils/storage.ts` |
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+## Conventions worth knowing before editing
+
+- **Project-scoped localStorage keys:** every persisted user-data key
+  is `{userId}__{baseKey}` via `scopedKey()`. Never write to a bare
+  `hvac_*` key — see `src/utils/storage.ts` for the full convention
+  including the orphan-recovery sweep on prefs hydration.
+- **Pure engines, no I/O:** anything in `src/engines/` is a pure
+  function tree. No HTTP, no DOM, no zustand reads.
+- **All API through `lib/api.ts`:** raw `fetch()` is forbidden in
+  components — the wrapper handles bearer injection, retry, 401
+  redirects, and error normalization.
+- **Lazy-load every route:** `App.tsx` uses `React.lazy` for every
+  page component. New pages go through the same pattern.
+- **Tailwind v4 only:** no inline styles, no CSS modules. Custom
+  tokens live in `src/index.css` `@theme` block.
+
+## Testing model
+
+Cert tests (Smith / Walker / Cobb residences) live in
+`src/engines/manualJ8/__tests__/` and run on every commit. They
+validate against ACCA's published reference values within 0.5%
+tolerance. Unit tests for storage, prefs persistence, and the
+Liang-Barsky pipe/duct clip live alongside their modules.
+
+vitest configuration is in the project root (`vitest.config.ts`).

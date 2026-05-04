@@ -1,8 +1,9 @@
 # HVAC Design Pro — ACCA Manual J 8th Edition Validation Report
 
-**Engine version:** `manualJ8-ts-1.0.0`
+**Engine version:** `manualJ8-ts-1.1.0` (registry expanded to ~423 ConstructionVariant entries — see `frontend/src/engines/manualJ8/tables/constructions.ts`)
 **Reference standard:** ACCA Manual J 8th Edition, v2.50
-**Document status:** Submission package for ACCA software certification
+**Document status:** Submission package for ACCA software certification — **filed 2026-05-01** to Glenn Hourahan (`glenn.hourahan@acca.org`); awaiting review (~3-4 mo SLA).
+**Production status:** Engine is **shadow-running in production** as of 2026-05-04 alongside the legacy per-room engine. Display still uses legacy; cert-grade results logged as drift telemetry. Phase 2 (display flip) gated on real-user drift collection — see `docs/option-e-ui-migration-plan.md`.
 
 ---
 
@@ -21,6 +22,8 @@ against **all three ACCA-published reference test cases**:
 Every Form J1 total reproduces ACCA's published reference value within
 **±0.5% cert tolerance**, with the worst drift across all three tests
 being **0.017%** — two orders of magnitude below the tolerance threshold.
+
+**vitest harness:** 30/30 tests pass on every commit (4 cert tests + 7 registry sanity + 19 unit cases for Liang-Barsky clip, storage scoping, prefs persistence). Cert tests run in <1 s.
 
 This report is organized into:
 
