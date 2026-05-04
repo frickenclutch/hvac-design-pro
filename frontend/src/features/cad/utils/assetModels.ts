@@ -1013,6 +1013,13 @@ export function createDuctSegmentModel(
     const geo = new THREE.CylinderGeometry(radius, radius, lengthFt, segments);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.rotation.z = Math.PI / 2;
+    // Shift cylinder so it spans local x = 0 to lengthFt (matching the pipe
+    // and oval-duct convention). Without this, the cylinder is centered at
+    // origin and Viewer3D — which positions the group at the segment START —
+    // ends up rendering the duct half-behind the start, reaching only to the
+    // segment midpoint. Visible as a duct "overhanging" the wall on the
+    // wrong side of where it was drawn.
+    mesh.position.set(lengthFt / 2, 0, 0);
     group.add(mesh);
 
     // Spiral seam rings for sheet metal / spiral duct
@@ -1026,7 +1033,7 @@ export function createDuctSegmentModel(
           seamMat,
         );
         ring.rotation.y = Math.PI / 2;
-        ring.position.set(-lengthFt / 2 + spacing * i + spacing / 2, 0, 0);
+        ring.position.set(spacing * i + spacing / 2, 0, 0);
         group.add(ring);
       }
     }
@@ -1042,12 +1049,12 @@ export function createDuctSegmentModel(
           ridgeMat,
         );
         ridge.rotation.y = Math.PI / 2;
-        ridge.position.set(-lengthFt / 2 + ridgeSpacing * i + ridgeSpacing / 2, 0, 0);
+        ridge.position.set(ridgeSpacing * i + ridgeSpacing / 2, 0, 0);
         group.add(ridge);
       }
     }
 
-    // End collars
+    // End collars — one at each end (local x = 0 and lengthFt)
     const collarMat = makeMat(Colors.ductSilver, { wireframe: wf, metalness: 0.5, roughness: 0.3 });
     for (const s of [-1, 1]) {
       const collar = new THREE.Mesh(
@@ -1055,7 +1062,7 @@ export function createDuctSegmentModel(
         collarMat,
       );
       collar.rotation.z = Math.PI / 2;
-      collar.position.set(s * (lengthFt / 2), 0, 0);
+      collar.position.set(s * (lengthFt / 2) + lengthFt / 2, 0, 0);
       group.add(collar);
     }
 
@@ -1076,8 +1083,12 @@ export function createDuctSegmentModel(
       depth: lengthFt, bevelEnabled: false,
     });
     const mesh = new THREE.Mesh(extrudeGeo, mat);
+    // Extrusion runs +z 0..lengthFt; rotating π/2 around Y maps that to local
+    // x = 0..lengthFt directly. No additional position offset needed (the
+    // prior `mesh.position.set(lengthFt/2, 0, 0)` over-shifted the geometry
+    // to L/2..3L/2 — visible as a duct that started L/2 past where it
+    // should and ran to L/2 past the segment endpoint).
     mesh.rotation.y = Math.PI / 2;
-    mesh.position.set(lengthFt / 2, 0, 0);
     group.add(mesh);
 
     // Edge highlight
@@ -1091,14 +1102,20 @@ export function createDuctSegmentModel(
     const hFt = heightIn / 12;
     const geo = new THREE.BoxGeometry(lengthFt, hFt, wFt);
     const mesh = new THREE.Mesh(geo, mat);
+    // Shift to span local x = 0 to lengthFt (matches pipe + oval convention).
+    // See round-duct comment for the full explanation of the prior bug.
+    mesh.position.set(lengthFt / 2, 0, 0);
     group.add(mesh);
 
     // Edge highlight
     const edges = new THREE.EdgesGeometry(geo);
     const edgeMat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.45 });
-    group.add(new THREE.LineSegments(edges, edgeMat));
+    const edgeMesh = new THREE.LineSegments(edges, edgeMat);
+    edgeMesh.position.set(lengthFt / 2, 0, 0);
+    group.add(edgeMesh);
 
-    // Flange connection plates at ends (sheet metal / spiral)
+    // Flange connection plates at ends (sheet metal / spiral) — placed at
+    // local x = 0 and x = lengthFt to match the shifted box convention.
     if (material === 'sheet_metal' || material === 'spiral') {
       const flangeMat = makeMat(Colors.ductSilver, { wireframe: wf, metalness: 0.55, roughness: 0.3 });
       for (const s of [-1, 1]) {
@@ -1106,7 +1123,7 @@ export function createDuctSegmentModel(
           new THREE.BoxGeometry(0.04, hFt + 0.04, wFt + 0.04),
           flangeMat,
         );
-        flange.position.set(s * (lengthFt / 2), 0, 0);
+        flange.position.set(s * (lengthFt / 2) + lengthFt / 2, 0, 0);
         group.add(flange);
       }
     }
