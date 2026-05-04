@@ -63,6 +63,69 @@ function wallCenter(w: WallSegment, pxPerFt: number): [number, number] {
   ];
 }
 
+/** Axis-aligned bounding box of a list of wall endpoints (pixel space).
+ *  Returns null if the list is empty (no clipping reference available). */
+function wallsBBox(walls: ReadonlyArray<WallSegment>):
+  { minX: number; minY: number; maxX: number; maxY: number } | null
+{
+  if (walls.length === 0) return null;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const w of walls) {
+    if (w.x1 < minX) minX = w.x1;
+    if (w.x2 < minX) minX = w.x2;
+    if (w.x1 > maxX) maxX = w.x1;
+    if (w.x2 > maxX) maxX = w.x2;
+    if (w.y1 < minY) minY = w.y1;
+    if (w.y2 < minY) minY = w.y2;
+    if (w.y1 > maxY) maxY = w.y1;
+    if (w.y2 > maxY) maxY = w.y2;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+/** Liang-Barsky line-segment-to-rectangle clip in pixel space. Returns the
+ *  clipped endpoints, or null if the segment lies entirely outside the box.
+ *  The returned segment is a sub-range of the original parameterised line,
+ *  so direction is preserved (start stays nearer the original start).
+ *
+ *  Used by the 3D viewer to keep pipe (and duct) rendering inside the floor's
+ *  wall envelope when the underlying 2D coordinates were drawn slightly
+ *  past a wall — historically the 2D Fabric stroke order masked the
+ *  overhang, but the 3D extrusion exposes it. Data is unchanged; this only
+ *  affects what the 3D scene draws. */
+function clipSegmentToBBox(
+  x1: number, y1: number, x2: number, y2: number,
+  bbox: { minX: number; minY: number; maxX: number; maxY: number },
+): { x1: number; y1: number; x2: number; y2: number } | null {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const p = [-dx, dx, -dy, dy];
+  const q = [x1 - bbox.minX, bbox.maxX - x1, y1 - bbox.minY, bbox.maxY - y1];
+  let u1 = 0;
+  let u2 = 1;
+  for (let i = 0; i < 4; i++) {
+    if (p[i] === 0) {
+      // Segment is parallel to this edge — outside if q < 0.
+      if (q[i] < 0) return null;
+      continue;
+    }
+    const t = q[i] / p[i];
+    if (p[i] < 0) {
+      if (t > u2) return null;
+      if (t > u1) u1 = t;
+    } else {
+      if (t < u1) return null;
+      if (t < u2) u2 = t;
+    }
+  }
+  return {
+    x1: x1 + u1 * dx,
+    y1: y1 + u1 * dy,
+    x2: x1 + u2 * dx,
+    y2: y1 + u2 * dy,
+  };
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 export default function Viewer3D({ isOpen, onClose }: Viewer3DProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -370,13 +433,23 @@ export default function Viewer3D({ isOpen, onClose }: Viewer3DProps) {
         }
 
         // ── Piping ─────────────────────────────────────────────────────────
+        // Clip every pipe to the floor's wall bbox before rendering. 2D Fabric
+        // stroke order historically masked overhang past wall lines; 3D's
+        // thin extrusion does not. Clipping here keeps the 3D scene tidy
+        // without mutating saved coordinates.
         const pipingLayer = useCadStore.getState().layers.find(l => l.id === 'piping');
+        const floorBBox = wallsBBox(floor.walls);
         if (pipingLayer?.visible && floor.pipes) {
           floor.pipes.forEach((pipe) => {
-            const len = wallLength(pipe as any, pxPerFt);
+            const clipped = floorBBox
+              ? clipSegmentToBBox(pipe.x1, pipe.y1, pipe.x2, pipe.y2, floorBBox)
+              : { x1: pipe.x1, y1: pipe.y1, x2: pipe.x2, y2: pipe.y2 };
+            if (!clipped) return; // pipe lies entirely outside the floor envelope
+            const drawSeg = { x1: clipped.x1, y1: clipped.y1, x2: clipped.x2, y2: clipped.y2 };
+            const len = wallLength(drawSeg as any, pxPerFt);
             if (len < 0.01) return;
-            const angle = wallAngle(pipe as any);
-            const [cx, cz] = wallCenter(pipe as any, pxPerFt);
+            const angle = wallAngle(drawSeg as any);
+            const [cx, cz] = wallCenter(drawSeg as any, pxPerFt);
             
             // Mounting height: default to floor level for now, or HVAC unit height
             const y = floorOffset + 0.1; // slightly above floor to avoid z-fighting
