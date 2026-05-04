@@ -153,6 +153,121 @@ platformRoutes.get('/audit', async (c) => {
   return c.json({ events: results, limit });
 });
 
+// ── GET /api/platform/qa-benchmarks ─────────────────────────────────────────
+// Cross-tenant quality / accuracy / throughput scoreboard for the L0 admin
+// panel. Pulls only from the `calculations` and `audit_log` tables and joins
+// them with static cert facts about the active engine version. No PII.
+//
+// Sections:
+//  - certification: hard-coded ACCA validation results for the engine version
+//    currently shipped (manualJ8 v1.1.0). These travel with the build, not
+//    the DB, because the cert package was filed against a specific revision.
+//  - engineVersions: distribution of engine_version stamped onto persisted
+//    calculations — answers "which engine ran what in prod"
+//  - calcVolume: 24h/7d/30d counts split by status (complete / error /
+//    pending) so an operator sees error rate at a glance
+//  - calcDuration: p50/p95/p99 over the last 30 days for calcs that report
+//    duration_ms. Uses a window-function CTE to avoid pulling rows.
+//  - calcMix: distribution by calc_type so you can tell whether Manual D /
+//    Manual S adoption is moving
+//  - auditVolume: event counts in 24h / 7d / 30d
+platformRoutes.get('/qa-benchmarks', async (c) => {
+  const db = c.env.DB;
+
+  // ── Engine version × calc_type distribution ────────────────────────────
+  const { results: engineVersions } = await db.prepare(
+    `SELECT engine_version, calc_type, COUNT(*) AS count
+     FROM calculations
+     GROUP BY engine_version, calc_type
+     ORDER BY count DESC`
+  ).all();
+
+  // ── Volume by status across windows ────────────────────────────────────
+  const calcVolume = await db.prepare(
+    `SELECT
+       (SELECT COUNT(*) FROM calculations) AS total,
+       (SELECT COUNT(*) FROM calculations WHERE created_at > datetime('now', '-1 day')) AS d24h,
+       (SELECT COUNT(*) FROM calculations WHERE created_at > datetime('now', '-7 days')) AS d7,
+       (SELECT COUNT(*) FROM calculations WHERE created_at > datetime('now', '-30 days')) AS d30,
+       (SELECT COUNT(*) FROM calculations WHERE status = 'complete' AND created_at > datetime('now', '-30 days')) AS d30_complete,
+       (SELECT COUNT(*) FROM calculations WHERE status = 'error'    AND created_at > datetime('now', '-30 days')) AS d30_error,
+       (SELECT COUNT(*) FROM calculations WHERE status = 'pending'  AND created_at > datetime('now', '-30 days')) AS d30_pending`
+  ).first();
+
+  // ── Duration percentiles over last 30d ─────────────────────────────────
+  // SQLite has no built-in PERCENTILE; we synthesise with a window CTE.
+  // Bucketing on duration_ms IS NOT NULL filters out failed/pending rows.
+  const calcDuration = await db.prepare(
+    `WITH ordered AS (
+       SELECT duration_ms,
+              ROW_NUMBER() OVER (ORDER BY duration_ms) AS rn,
+              COUNT(*) OVER () AS cnt
+       FROM calculations
+       WHERE duration_ms IS NOT NULL
+         AND duration_ms > 0
+         AND created_at > datetime('now', '-30 days')
+     )
+     SELECT
+       cnt AS sample_size,
+       MAX(CASE WHEN rn <= cnt * 0.50 THEN duration_ms END) AS p50,
+       MAX(CASE WHEN rn <= cnt * 0.95 THEN duration_ms END) AS p95,
+       MAX(CASE WHEN rn <= cnt * 0.99 THEN duration_ms END) AS p99,
+       MAX(duration_ms) AS p100
+     FROM ordered`
+  ).first();
+
+  // ── Calc-type mix ──────────────────────────────────────────────────────
+  const { results: calcMix } = await db.prepare(
+    `SELECT calc_type, COUNT(*) AS count
+     FROM calculations
+     GROUP BY calc_type
+     ORDER BY count DESC`
+  ).all();
+
+  // ── Audit activity ─────────────────────────────────────────────────────
+  const auditVolume = await db.prepare(
+    `SELECT
+       (SELECT COUNT(*) FROM audit_log) AS total,
+       (SELECT COUNT(*) FROM audit_log WHERE created_at > datetime('now', '-1 day')) AS d24h,
+       (SELECT COUNT(*) FROM audit_log WHERE created_at > datetime('now', '-7 days')) AS d7,
+       (SELECT COUNT(*) FROM audit_log WHERE created_at > datetime('now', '-30 days')) AS d30`
+  ).first();
+
+  // ── Static cert facts (travel with the build) ──────────────────────────
+  // These are the published ACCA reference test results for the engine
+  // version currently shipped. See docs/acca-validation-report.md for the
+  // per-line-item breakdown. Bump these in lockstep with engine releases.
+  const certification = {
+    engineVersion: 'manualJ8-ts-1.1.0',
+    standard: 'ACCA Manual J 8th Ed v2.50',
+    suiteTolerance: 0.005,
+    tests: [
+      { name: 'Smith Residence',  passed: 70, total: 70, maxDriftPct: 0.006 },
+      { name: 'Walker Residence', passed: 72, total: 72, maxDriftPct: 0.017 },
+      { name: 'Cobb Residence',   passed: 42, total: 42, maxDriftPct: 0.0001 },
+    ],
+    aggregate: { passed: 184, total: 184 },
+    frontendUnitTests: { passed: 30, total: 30, framework: 'vitest' },
+    submission: {
+      filed: true,
+      filedAt: '2026-05-01',
+      contact: 'Glenn Hourahan <glenn.hourahan@acca.org>',
+      status: 'awaiting_review',
+      slaMonths: 4,
+    },
+  };
+
+  return c.json({
+    certification,
+    engineVersions,
+    calcVolume,
+    calcDuration,
+    calcMix,
+    auditVolume,
+    generatedAt: new Date().toISOString(),
+  });
+});
+
 // ── GET /api/platform/me ────────────────────────────────────────────────────
 // Sanity echo — confirms the caller is recognized as a platform admin and
 // returns their user_id so the admin UI can label the session.

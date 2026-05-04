@@ -22,7 +22,10 @@ import ProjectContextBar from '../components/ProjectContextBar';
 import ProjectGateDialog from '../components/ProjectGateDialog';
 import { useProjectStore } from '../stores/useProjectStore';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
+import { usePreferencesStore } from '../stores/usePreferencesStore';
 import { scopedKey } from '../utils/storage';
+import { buildFormJ1, MANUAL_J8_ENGINE_VERSION } from '../engines/manualJ8';
+import { roomInputsToFormJ1Input } from '../engines/manualJ8/adapters/legacy';
 
 // ── Display formatting (engine values are full-precision floats) ─────────────
 /** Round to integer and format with locale separators for display */
@@ -251,6 +254,32 @@ export default function ManualJCalculator() {
     try {
       localStorage.setItem(getResultsKey(activeProjectId), JSON.stringify(res));
     } catch { /* storage full */ }
+
+    // ── Phase 1: shadow-run cert-grade engine for drift telemetry ───────
+    // Display values above are unchanged. We run the new engine in parallel
+    // and log drift to console only — real users see legacy results until
+    // we flip `engineVersion` in Phase 2.
+    const prefs = usePreferencesStore.getState();
+    if (prefs.shadowRunManualJ8) {
+      try {
+        const j8Input = roomInputsToFormJ1Input(rooms, conditions, res.aed.excursion);
+        const j8Result = buildFormJ1(j8Input);
+        const drift = (legacyVal: number, j8Val: number) =>
+          legacyVal === 0 ? 0 : ((j8Val - legacyVal) / legacyVal) * 100;
+        // eslint-disable-next-line no-console
+        console.log(
+          `[engine drift] ${MANUAL_J8_ENGINE_VERSION} vs legacy — ` +
+          `heat: ${drift(res.totalHeatingBtu, j8Result.total.heat).toFixed(1)}%, ` +
+          `sens: ${drift(res.totalCoolingSensible, j8Result.total.sens).toFixed(1)}%, ` +
+          `latent: ${drift(res.totalCoolingLatent, j8Result.total.latent).toFixed(1)}%`,
+          { legacy: { heat: res.totalHeatingBtu, sens: res.totalCoolingSensible, latent: res.totalCoolingLatent }, manualJ8: j8Result.total }
+        );
+      } catch (err) {
+        // Adapter or engine threw — log a finding but don't disrupt the user
+        // eslint-disable-next-line no-console
+        console.warn('[engine drift] manualJ8 shadow-run failed:', err);
+      }
+    }
   };
 
   const resetAll = () => {

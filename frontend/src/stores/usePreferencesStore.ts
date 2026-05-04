@@ -5,6 +5,10 @@ export type ThemeMode = 'dark' | 'midnight' | 'light';
 export type UIDensity = 'compact' | 'comfortable' | 'spacious';
 export type UnitSystem = 'imperial' | 'metric';
 export type AccentColor = 'emerald' | 'sky' | 'violet' | 'amber' | 'rose';
+/** Manual J calculation engine selector.
+ *  'legacy'   — production default, per-room aggregated math (`engines/manualJ.ts`).
+ *  'manualJ8' — cert-grade Form J1 whole-house engine. Beta — opt-in. */
+export type EngineVersion = 'legacy' | 'manualJ8';
 
 export interface ToolboxPosition {
   x: number;   // px from left edge of viewport
@@ -61,9 +65,17 @@ export interface UserPreferences {
   firmStampDataUrl: string;
   firmStampPosition: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
   notaryStampDataUrl: string;
+
+  // Calculation engine (Manual J)
+  engineVersion: EngineVersion;
+  /** When true, the calculator runs the Manual J 8 engine alongside legacy
+   *  on every calc and logs `[engine drift]` to console. Display still
+   *  uses `engineVersion`. Phase-1 telemetry; safe to leave on. */
+  shadowRunManualJ8: boolean;
 }
 
 const STORAGE_KEY = 'hvac_preferences';
+const MIGRATION_FLAG = 'hvac_preferences_migrated_v2';
 
 const defaults: UserPreferences = {
   theme: 'midnight',
@@ -91,9 +103,12 @@ const defaults: UserPreferences = {
   firmStampDataUrl: '',
   firmStampPosition: 'bottom-right',
   notaryStampDataUrl: '',
+  engineVersion: 'legacy',
+  shadowRunManualJ8: true,
 };
 
 function load(): UserPreferences {
+  migrateUnscopedOrphan();
   try {
     const raw = localStorage.getItem(scopedKey(STORAGE_KEY));
     if (!raw) return defaults;
@@ -106,9 +121,110 @@ function load(): UserPreferences {
   }
 }
 
+/**
+ * One-shot recovery for orphan unscoped `hvac_preferences` keys created
+ * during the boot-window race (architecturally fixed in storage.ts via
+ * synchronous session-user seed). On real-user machines an orphan can
+ * already exist — most painfully a multi-megabyte one carrying stamp
+ * data URLs uploaded during the race window — so this sweep merges what
+ * it can rescue and frees the quota.
+ *
+ * Behaviour:
+ *  - Guest (scopedKey returns the bare base key) → no-op; nothing to
+ *    rescue and no flag namespace to mark.
+ *  - Already migrated (per-user flag set) → no-op.
+ *  - Orphan absent → just set the flag.
+ *  - Orphan present, scoped absent → promote orphan to scoped key.
+ *  - Both present → preserve scoped, but rescue stamp data URLs from
+ *    the orphan into scoped only when scoped lacks them.
+ *  - Always remove the orphan after processing.
+ *
+ * Bounded to a single run per user via `hvac_preferences_migrated_v2`.
+ */
+function migrateUnscopedOrphan(): void {
+  try {
+    const scoped = scopedKey(STORAGE_KEY);
+    if (scoped === STORAGE_KEY) return; // guest — nothing to migrate
+
+    const flagKey = scopedKey(MIGRATION_FLAG);
+    if (localStorage.getItem(flagKey) === '1') return;
+
+    const orphanRaw = localStorage.getItem(STORAGE_KEY);
+    if (orphanRaw === null) {
+      localStorage.setItem(flagKey, '1');
+      return;
+    }
+
+    const scopedRaw = localStorage.getItem(scoped);
+    if (scopedRaw === null) {
+      // No scoped value yet — promote orphan as-is.
+      try {
+        localStorage.setItem(scoped, orphanRaw);
+      } catch {
+        // Quota — falling through to remove the orphan still frees space;
+        // the user keeps in-memory defaults, which the next persist will
+        // re-seed minus the heavy stamp blobs.
+      }
+    } else {
+      // Both exist — preserve scoped, rescue stamps when missing.
+      try {
+        const orphan = JSON.parse(orphanRaw);
+        const scopedObj = JSON.parse(scopedRaw);
+        let changed = false;
+        if (!scopedObj.firmStampDataUrl && orphan.firmStampDataUrl) {
+          scopedObj.firmStampDataUrl = orphan.firmStampDataUrl;
+          changed = true;
+        }
+        if (!scopedObj.notaryStampDataUrl && orphan.notaryStampDataUrl) {
+          scopedObj.notaryStampDataUrl = orphan.notaryStampDataUrl;
+          changed = true;
+        }
+        if (changed) {
+          try {
+            localStorage.setItem(scoped, JSON.stringify(scopedObj));
+          } catch {
+            // Merged blob exceeds quota — leave scoped untouched.
+            // Removing the orphan below still frees the bulk of the space.
+          }
+        }
+      } catch { /* corrupt orphan — drop it via removal below */ }
+    }
+
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.setItem(flagKey, '1');
+  } catch {
+    // Best-effort migration — never block boot. If localStorage is
+    // unavailable or throws, the boot-time seed in storage.ts still
+    // routes future reads/writes correctly.
+  }
+}
+
 function persist(prefs: UserPreferences) {
-  localStorage.setItem(scopedKey(STORAGE_KEY), JSON.stringify(prefs));
+  // Apply theme regardless of persistence outcome — the in-memory state must
+  // always reflect what the user just clicked, even if writing to localStorage
+  // fails (e.g. quota exceeded from stamp data URLs).
   applyTheme(prefs);
+  try {
+    localStorage.setItem(scopedKey(STORAGE_KEY), JSON.stringify(prefs));
+  } catch (err) {
+    if (err instanceof DOMException && (err.name === 'QuotaExceededError' || err.code === 22)) {
+      // Retry without the heaviest fields (stamp data URLs are typically 1-3 MB
+      // each as base64). User keeps the in-memory toggle they just made; the
+      // stamps are dropped from persistence so future clicks don't re-throw.
+      try {
+        const slim: UserPreferences = { ...prefs, firmStampDataUrl: '', notaryStampDataUrl: '' };
+        localStorage.setItem(scopedKey(STORAGE_KEY), JSON.stringify(slim));
+        // eslint-disable-next-line no-console
+        console.warn('[preferences] localStorage quota exceeded — dropped stamp images from persisted prefs.');
+      } catch {
+        // eslint-disable-next-line no-console
+        console.warn('[preferences] localStorage quota exceeded and slim retry failed — preferences will not persist this session.');
+      }
+    } else {
+      // eslint-disable-next-line no-console
+      console.warn('[preferences] failed to persist:', err);
+    }
+  }
 }
 
 function applyTheme(prefs: UserPreferences) {

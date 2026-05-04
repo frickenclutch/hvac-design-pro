@@ -8,6 +8,7 @@ import { cadRoutes } from './routes/cad';
 import { orgRoutes } from './routes/org';
 import { feedbackRoutes } from './routes/feedback';
 import { platformRoutes } from './routes/platform';
+import { forumRoutes } from './routes/forum';
 import { authMiddleware } from './middleware/auth';
 
 export interface Env {
@@ -47,5 +48,6 @@ app.route('/api/uploads', uploadRoutes);
 app.route('/api/cad', cadRoutes);
 app.route('/api/feedback', feedbackRoutes);
 app.route('/api/platform', platformRoutes);
+app.route('/api/forum', forumRoutes);
 
 export default app;

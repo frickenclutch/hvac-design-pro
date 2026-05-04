@@ -18,6 +18,7 @@ import { Navigate } from 'react-router-dom';
 import {
   ShieldCheck, Activity, Building2, Users, FlaskConical, ChevronRight,
   RefreshCw, Cloud, AlertTriangle, Search, Eye, EyeOff,
+  CheckCircle2, Gauge, Database, BadgeCheck,
 } from 'lucide-react';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { api } from '../lib/api';
@@ -70,6 +71,7 @@ export default function AdminPage() {
 
       <div className="space-y-8 pb-20">
         <MetricsSection />
+        <QaBenchmarksSection />
         <OrgsSection />
         <AuditSection />
         <ActionLabSection />
@@ -111,6 +113,222 @@ function MetricsSection() {
         </>
       )}
     </SectionShell>
+  );
+}
+
+// ── Q/A Benchmarks ───────────────────────────────────────────────────────────
+// Cross-tenant quality + accuracy + throughput scoreboard. Read-only —
+// surfaces the data the L0 admin needs to answer "is the platform sound?"
+// without curl-ing endpoints. Static cert facts join with live D1 telemetry.
+function QaBenchmarksSection() {
+  const [state, refresh] = useLoad(() => api.platformQaBenchmarks());
+
+  return (
+    <SectionShell
+      icon={<BadgeCheck className="w-4 h-4" />}
+      title="Q/A benchmarks"
+      subtitle="Engine integrity · calc telemetry · audit activity"
+      onRefresh={refresh}
+      loading={state.status === 'loading'}
+    >
+      {state.status === 'error' && <ErrorBlock message={state.message} />}
+      {state.status === 'ok' && (
+        <>
+          <CertificationCard cert={state.data.certification} />
+          <CalcTelemetryCards
+            volume={state.data.calcVolume}
+            duration={state.data.calcDuration}
+            audit={state.data.auditVolume}
+          />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+            <BreakdownTable
+              title="Calc-type mix (all-time)"
+              rows={state.data.calcMix.map((r) => [r.calc_type, r.count])}
+            />
+            <EngineVersionTable rows={state.data.engineVersions} />
+          </div>
+          <RawJsonDrawer payload={state.data} />
+        </>
+      )}
+    </SectionShell>
+  );
+}
+
+function CertificationCard({ cert }: { cert: {
+  engineVersion: string;
+  standard: string;
+  suiteTolerance: number;
+  tests: Array<{ name: string; passed: number; total: number; maxDriftPct: number }>;
+  aggregate: { passed: number; total: number };
+  frontendUnitTests: { passed: number; total: number; framework: string };
+  submission: { filed: boolean; filedAt: string; contact: string; status: string; slaMonths: number };
+}}) {
+  const allPass = cert.aggregate.passed === cert.aggregate.total;
+  const submissionStatusMap: Record<string, { label: string; tone: string }> = {
+    awaiting_review: { label: 'Awaiting ACCA review', tone: 'text-amber-400 border-amber-500/30 bg-amber-500/10' },
+    approved: { label: 'Approved', tone: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' },
+    rejected: { label: 'Rejected', tone: 'text-red-400 border-red-500/30 bg-red-500/10' },
+    not_filed: { label: 'Not filed', tone: 'text-slate-400 border-slate-600/30 bg-slate-700/10' },
+  };
+  const sub = submissionStatusMap[cert.submission.status] ?? submissionStatusMap.not_filed;
+
+  return (
+    <div className="rounded-xl border border-slate-800/60 bg-slate-900/40 p-4 mb-3">
+      <div className="flex items-start justify-between mb-3 gap-3 flex-wrap">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <CheckCircle2 className={`w-4 h-4 ${allPass ? 'text-emerald-400' : 'text-amber-400'}`} />
+            <h3 className="font-bold text-white text-sm">Engine certification</h3>
+          </div>
+          <p className="text-[11px] text-slate-500 font-mono">
+            {cert.standard} · {cert.engineVersion} · ±{(cert.suiteTolerance * 100).toFixed(1)}% tolerance
+          </p>
+        </div>
+        <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${sub.tone}`}>
+          {sub.label} · filed {cert.submission.filedAt}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
+        {cert.tests.map((t) => (
+          <div key={t.name} className="rounded-lg bg-slate-950/50 border border-slate-800/50 p-2.5">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">{t.name}</div>
+            <div className="font-bold text-white tabular-nums text-base mt-0.5">
+              {t.passed}/{t.total}
+            </div>
+            <div className="text-[10px] text-slate-500 mt-0.5 font-mono">
+              max drift {(t.maxDriftPct * 100).toFixed(3)}%
+            </div>
+          </div>
+        ))}
+        <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/30 p-2.5">
+          <div className="text-[10px] uppercase tracking-wider text-emerald-500 font-bold">ACCA aggregate</div>
+          <div className="font-bold text-emerald-300 tabular-nums text-base mt-0.5">
+            {cert.aggregate.passed}/{cert.aggregate.total}
+          </div>
+          <div className="text-[10px] text-emerald-500/70 mt-0.5 font-mono">cert checks</div>
+        </div>
+        <div className="rounded-lg bg-slate-950/50 border border-slate-800/50 p-2.5">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Unit tests</div>
+          <div className="font-bold text-white tabular-nums text-base mt-0.5">
+            {cert.frontendUnitTests.passed}/{cert.frontendUnitTests.total}
+          </div>
+          <div className="text-[10px] text-slate-500 mt-0.5 font-mono">{cert.frontendUnitTests.framework}</div>
+        </div>
+      </div>
+
+      <p className="text-[11px] text-slate-500">
+        Submitted to <span className="text-slate-400 font-mono">{cert.submission.contact}</span>; ACCA review SLA ≈ {cert.submission.slaMonths} months.
+      </p>
+    </div>
+  );
+}
+
+function CalcTelemetryCards({
+  volume, duration, audit,
+}: {
+  volume: { total: number; d24h: number; d7: number; d30: number; d30_complete: number; d30_error: number; d30_pending: number };
+  duration: { sample_size: number | null; p50: number | null; p95: number | null; p99: number | null; p100: number | null };
+  audit: { total: number; d24h: number; d7: number; d30: number };
+}) {
+  const errorRate = volume.d30 > 0
+    ? ((volume.d30_error / volume.d30) * 100).toFixed(1)
+    : '0.0';
+  const sloP95Target = 1000; // ms — see CLAUDE.md SLOs
+  const p95Ok = duration.p95 != null && duration.p95 <= sloP95Target;
+
+  const fmtMs = (ms: number | null) => ms == null ? '—' : `${Math.round(ms)} ms`;
+
+  return (
+    <>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+        <div className="rounded-xl border border-slate-800/40 bg-slate-900/40 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1">
+            <Database className="w-3 h-3" /> Calc volume
+          </div>
+          <div className="font-bold text-white tabular-nums text-2xl">{volume.total.toLocaleString()}</div>
+          <div className="text-[10px] text-slate-500 mt-0.5">
+            {volume.d24h} in 24h · {volume.d7} in 7d · {volume.d30} in 30d
+          </div>
+        </div>
+        <div className="rounded-xl border border-slate-800/40 bg-slate-900/40 p-3">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1">Status mix (30d)</div>
+          <div className="text-xs space-y-0.5 mt-1">
+            <div className="flex justify-between">
+              <span className="text-emerald-400">complete</span>
+              <span className="text-slate-300 font-mono">{volume.d30_complete}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-red-400">error</span>
+              <span className="text-slate-300 font-mono">{volume.d30_error}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-amber-400">pending</span>
+              <span className="text-slate-300 font-mono">{volume.d30_pending}</span>
+            </div>
+            <div className="flex justify-between border-t border-slate-800/60 pt-0.5 mt-1">
+              <span className="text-slate-500">error rate</span>
+              <span className={`font-mono font-bold ${parseFloat(errorRate) > 1 ? 'text-red-400' : 'text-emerald-400'}`}>{errorRate}%</span>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-xl border border-slate-800/40 bg-slate-900/40 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1">
+            <Gauge className="w-3 h-3" /> Calc duration (30d)
+          </div>
+          <div className="text-xs space-y-0.5 mt-1">
+            <div className="flex justify-between">
+              <span className="text-slate-500">p50</span>
+              <span className="text-slate-300 font-mono">{fmtMs(duration.p50)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">p95</span>
+              <span className={`font-mono font-bold ${p95Ok ? 'text-emerald-400' : 'text-amber-400'}`}>{fmtMs(duration.p95)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">p99</span>
+              <span className="text-slate-300 font-mono">{fmtMs(duration.p99)}</span>
+            </div>
+            <div className="flex justify-between text-[9px] text-slate-600 border-t border-slate-800/60 pt-0.5 mt-1">
+              <span>SLO p95 ≤ 1000 ms</span>
+              <span>n = {duration.sample_size ?? 0}</span>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-xl border border-slate-800/40 bg-slate-900/40 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1">
+            <Activity className="w-3 h-3" /> Audit events
+          </div>
+          <div className="font-bold text-white tabular-nums text-2xl">{audit.total.toLocaleString()}</div>
+          <div className="text-[10px] text-slate-500 mt-0.5">
+            {audit.d24h} in 24h · {audit.d7} in 7d · {audit.d30} in 30d
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function EngineVersionTable({ rows }: { rows: Array<{ engine_version: string; calc_type: string; count: number }> }) {
+  return (
+    <div className="rounded-xl bg-slate-900/40 border border-slate-800/40 p-3">
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-2">
+        Engine versions in production
+      </div>
+      {rows.length === 0 ? (
+        <span className="text-xs text-slate-600 italic">No persisted calculations yet — telemetry begins as users save.</span>
+      ) : (
+        <div className="space-y-1">
+          {rows.map((r, i) => (
+            <div key={i} className="flex items-center justify-between text-xs gap-3">
+              <span className="text-slate-300 font-mono truncate">{r.engine_version || '(unstamped)'}</span>
+              <span className="text-slate-500 text-[10px] uppercase tracking-wider flex-shrink-0">{r.calc_type}</span>
+              <span className="text-slate-400 font-mono text-right w-12 flex-shrink-0">{r.count}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

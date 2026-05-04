@@ -282,6 +282,155 @@ class ApiClient {
     }>(`/api/platform/audit?limit=${limit}`);
   }
 
+  async platformQaBenchmarks() {
+    return this.request<{
+      certification: {
+        engineVersion: string;
+        standard: string;
+        suiteTolerance: number;
+        tests: Array<{ name: string; passed: number; total: number; maxDriftPct: number }>;
+        aggregate: { passed: number; total: number };
+        frontendUnitTests: { passed: number; total: number; framework: string };
+        submission: {
+          filed: boolean;
+          filedAt: string;
+          contact: string;
+          status: string;
+          slaMonths: number;
+        };
+      };
+      engineVersions: Array<{ engine_version: string; calc_type: string; count: number }>;
+      calcVolume: {
+        total: number;
+        d24h: number;
+        d7: number;
+        d30: number;
+        d30_complete: number;
+        d30_error: number;
+        d30_pending: number;
+      };
+      calcDuration: {
+        sample_size: number | null;
+        p50: number | null;
+        p95: number | null;
+        p99: number | null;
+        p100: number | null;
+      };
+      calcMix: Array<{ calc_type: string; count: number }>;
+      auditVolume: { total: number; d24h: number; d7: number; d30: number };
+      generatedAt: string;
+    }>('/api/platform/qa-benchmarks');
+  }
+
+  // ── Team management ─────────────────────────────────────────────────────
+  async teamList() {
+    return this.request<{
+      members: Array<{
+        id: string; email: string;
+        first_name: string | null; last_name: string | null;
+        role: 'admin' | 'engineer' | 'tech' | 'viewer';
+        is_verified: number; last_seen_at: string | null;
+        created_at: string;
+      }>;
+      invites: Array<{
+        id: string; invited_email: string; invited_role: string;
+        status: string; invited_by: string;
+        expires_at: string; created_at: string;
+      }>;
+      domain: { claimed: string | null; verifiedAt: string | null };
+    }>('/api/org/team');
+  }
+
+  async teamSetDomain(domain: string) {
+    return this.request<{ domain: string | null; verifiedAt: string | null }>(
+      '/api/org/domain',
+      { method: 'PUT', body: JSON.stringify({ domain }) },
+    );
+  }
+
+  async teamInvite(email: string, role: 'admin' | 'engineer' | 'tech' | 'viewer' = 'tech') {
+    return this.request<{
+      id: string; invitedEmail: string; invitedRole: string;
+      token: string; expiresAt: string;
+    }>('/api/org/invite', {
+      method: 'POST',
+      body: JSON.stringify({ email, role }),
+    });
+  }
+
+  async teamRevokeInvite(id: string) {
+    return this.request<{ ok: boolean }>(`/api/org/invites/${id}`, { method: 'DELETE' });
+  }
+
+  async teamSetRole(userId: string, role: 'admin' | 'engineer' | 'tech' | 'viewer') {
+    return this.request<{ ok: boolean; role: string }>(`/api/org/users/${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role }),
+    });
+  }
+
+  async teamRemoveMember(userId: string) {
+    return this.request<{ ok: boolean }>(`/api/org/users/${userId}`, { method: 'DELETE' });
+  }
+
+  // ── Community / forum ───────────────────────────────────────────────────
+  async forumShareProject(projectId: string, isPublic: boolean, summary?: string) {
+    return this.request<{ id: string; isPublic: boolean; summary: string | null }>(
+      `/api/forum/projects/${projectId}/share`,
+      { method: 'POST', body: JSON.stringify({ isPublic, summary }) },
+    );
+  }
+
+  async forumListProjects(params: { sort?: 'recent' | 'oldest' | 'comments'; q?: string; limit?: number } = {}) {
+    const qs = new URLSearchParams();
+    if (params.sort) qs.set('sort', params.sort);
+    if (params.q) qs.set('q', params.q);
+    if (params.limit) qs.set('limit', String(params.limit));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return this.request<{
+      projects: Array<{
+        id: string; name: string; share_summary: string;
+        climate_zone: string | null; standard: string;
+        shared_at: string; org_id: string;
+        org_name: string | null; org_type: string | null;
+        comment_count: number;
+      }>;
+      sort: string; limit: number; q: string;
+    }>(`/api/forum/projects${suffix}`);
+  }
+
+  async forumGetProject(id: string) {
+    return this.request<{
+      project: {
+        id: string; name: string; share_summary: string;
+        climate_zone: string | null; standard: string;
+        shared_at: string; org_id: string;
+        org_name: string | null; org_type: string | null;
+      };
+      comments: Array<{
+        id: string; body: string;
+        created_at: string; updated_at: string | null; deleted_at: string | null;
+        author_user_id: string; author_org_id: string;
+        author_first_name: string | null; author_last_name: string | null;
+        author_org_name: string | null;
+      }>;
+    }>(`/api/forum/projects/${id}`);
+  }
+
+  async forumAddComment(projectId: string, body: string) {
+    return this.request<{
+      id: string; body: string; created_at: string;
+      author_user_id: string; author_org_id: string;
+    }>(`/api/forum/projects/${projectId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ body }),
+    });
+  }
+
+  async forumDeleteComment(id: string) {
+    return this.request<{ ok: boolean }>(`/api/forum/comments/${id}`, { method: 'DELETE' });
+  }
+
   // Feedback
   async submitFeedback(data: {
     type: string;

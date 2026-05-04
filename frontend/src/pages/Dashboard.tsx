@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, MapPin, Calendar, ArrowRight, Pencil, Check, X, Trash2, Building2, Home, GripVertical, ChevronDown, ChevronRight, RotateCcw, Minus, Cloud, CloudOff, UploadCloud, AlertTriangle } from 'lucide-react';
+import { Plus, Search, MapPin, Calendar, ArrowRight, Pencil, Check, X, Trash2, Building2, Home, GripVertical, ChevronDown, ChevronRight, RotateCcw, Minus, Cloud, CloudOff, UploadCloud, AlertTriangle, Globe, Lock, Send } from 'lucide-react';
+import { api } from '../lib/api';
+import { toast } from '../stores/useToastStore';
 import NewProjectModal from '../features/projects/components/NewProjectModal';
 import {
   loadProjects as loadProjectsSynced,
@@ -63,6 +65,29 @@ export default function Dashboard() {
   // ── Drag state ─────────────────────────────────────────────────────────
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
+
+  // ── Share-to-community modal state ─────────────────────────────────────
+  const [shareTarget, setShareTarget] = useState<Project | null>(null);
+  const [shareSummary, setShareSummary] = useState('');
+  const [shareSubmitting, setShareSubmitting] = useState(false);
+
+  const openShare = (proj: Project) => {
+    setShareTarget(proj);
+    setShareSummary('');
+  };
+  const submitShare = async (makePublic: boolean) => {
+    if (!shareTarget) return;
+    setShareSubmitting(true);
+    try {
+      await api.forumShareProject(shareTarget.id, makePublic, shareSummary.trim() || undefined);
+      toast.success(makePublic ? 'Shared to Community.' : 'Sharing turned off.');
+      setShareTarget(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not update sharing.');
+    } finally {
+      setShareSubmitting(false);
+    }
+  };
 
   useEffect(() => {
     // Optimistic hydrate from cache first so the UI paints immediately…
@@ -465,8 +490,15 @@ export default function Dashboard() {
                       </>
                     ) : (
                       <>
-                        {/* Edit button (hover-visible) */}
-                        <div className="flex justify-end -mt-1 mb-2">
+                        {/* Edit + share buttons (hover-visible) */}
+                        <div className="flex justify-end -mt-1 mb-2 gap-1">
+                          <button
+                            onClick={() => openShare(proj)}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-violet-400 hover:bg-violet-500/10 transition-colors opacity-0 group-hover:opacity-100"
+                            title="Share to Community"
+                          >
+                            <Globe className="w-3.5 h-3.5" />
+                          </button>
                           <button
                             onClick={() => startEditing(proj)}
                             className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-slate-700/50 transition-colors opacity-0 group-hover:opacity-100"
@@ -501,6 +533,52 @@ export default function Dashboard() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* ── Share-to-Community modal ─────────────────────────────────────── */}
+      {shareTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" onClick={() => setShareTarget(null)}>
+          <div className="glass-panel rounded-2xl border border-slate-700/60 max-w-lg w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-2">
+              <Globe className="w-5 h-5 text-violet-400" />
+              <h3 className="text-lg font-bold text-white">Share to Community</h3>
+            </div>
+            <p className="text-xs text-slate-400 mb-4">
+              Sharing makes <span className="font-semibold text-slate-200">{shareTarget.name}</span> visible to anyone authenticated on the platform. They can comment but never edit. The summary you write below is what they'll see — your raw client name and address are never exposed.
+            </p>
+            <textarea
+              value={shareSummary}
+              onChange={(e) => setShareSummary(e.target.value)}
+              placeholder="What are you working on? What kind of help would you find useful? (≥ 20 chars, ≤ 2000)"
+              rows={5}
+              className="w-full bg-slate-900/60 border border-slate-700/50 rounded-xl px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/40 resize-y mb-3"
+            />
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-[10px] text-slate-600">{shareSummary.length} / 2000</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => submitShare(false)}
+                  disabled={shareSubmitting}
+                  className="flex items-center gap-1.5 text-slate-400 hover:text-white px-3 py-2 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-slate-800 transition-all disabled:opacity-50"
+                  title="Withdraw sharing"
+                >
+                  <Lock className="w-3 h-3" /> Make private
+                </button>
+                <button
+                  onClick={() => setShareTarget(null)}
+                  className="text-slate-400 hover:text-white px-3 py-2 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-slate-800 transition-all"
+                >Cancel</button>
+                <button
+                  onClick={() => submitShare(true)}
+                  disabled={shareSubmitting || shareSummary.trim().length < 20 || shareSummary.length > 2000}
+                  className="flex items-center gap-1.5 bg-violet-500/10 text-violet-400 border border-violet-500/30 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-violet-500/20 transition-all disabled:opacity-50"
+                >
+                  <Send className="w-3.5 h-3.5" /> {shareSubmitting ? 'Sharing…' : 'Share publicly'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
