@@ -433,16 +433,36 @@ export default function Viewer3D({ isOpen, onClose }: Viewer3DProps) {
         }
 
         // ── Piping ─────────────────────────────────────────────────────────
-        // Clip every pipe to the floor's wall bbox before rendering. 2D Fabric
-        // stroke order historically masked overhang past wall lines; 3D's
-        // thin extrusion does not. Clipping here keeps the 3D scene tidy
-        // without mutating saved coordinates.
+        // Clip every pipe to the floor's wall bbox SHRUNK by half the max
+        // wall thickness so pipe endpoints land at the wall's INNER face
+        // rather than the centerline. Without the shrink, a pipe drawn
+        // exactly to the wall centerline (the natural 2D snap target) ends
+        // up half-buried inside the wall's BoxGeometry — and because walls
+        // render at 0.85 opacity with window cutouts, the buried inner half
+        // is visually mistaken for an outdoor stub. Shrinking guarantees the
+        // pipe terminates fully inside the room envelope.
         const pipingLayer = useCadStore.getState().layers.find(l => l.id === 'piping');
         const floorBBox = wallsBBox(floor.walls);
+        const maxWallThicknessIn = floor.walls.length === 0
+          ? 0
+          : floor.walls.reduce((m, w) => Math.max(m, w.thicknessIn ?? 0), 0);
+        const innerShrinkPx = (maxWallThicknessIn / 12) * pxPerFt / 2;
+        const innerBBox = floorBBox && innerShrinkPx > 0 ? {
+          minX: floorBBox.minX + innerShrinkPx,
+          minY: floorBBox.minY + innerShrinkPx,
+          maxX: floorBBox.maxX - innerShrinkPx,
+          maxY: floorBBox.maxY - innerShrinkPx,
+        } : floorBBox;
+        // Guard against a degenerate shrink that would invert the bbox
+        // (only possible when wall thickness exceeds half the floor extent —
+        // not a real-world floor, but defensive).
+        const clipBBox = innerBBox && innerBBox.maxX > innerBBox.minX
+                         && innerBBox.maxY > innerBBox.minY
+          ? innerBBox : floorBBox;
         if (pipingLayer?.visible && floor.pipes) {
           floor.pipes.forEach((pipe) => {
-            const clipped = floorBBox
-              ? clipSegmentToBBox(pipe.x1, pipe.y1, pipe.x2, pipe.y2, floorBBox)
+            const clipped = clipBBox
+              ? clipSegmentToBBox(pipe.x1, pipe.y1, pipe.x2, pipe.y2, clipBBox)
               : { x1: pipe.x1, y1: pipe.y1, x2: pipe.x2, y2: pipe.y2 };
             if (!clipped) return; // pipe lies entirely outside the floor envelope
             const drawSeg = { x1: clipped.x1, y1: clipped.y1, x2: clipped.x2, y2: clipped.y2 };
@@ -488,10 +508,17 @@ export default function Viewer3D({ isOpen, onClose }: Viewer3DProps) {
             const ductLayer = duct.side === 'supply' ? ductsSupplyLayer : ductsReturnLayer;
             if (!ductLayer?.visible) return;
 
-            const len = wallLength(duct as any, pxPerFt);
+            // Same inner-face clip we apply to pipes — ducts share the same
+            // overhang risk when drawn to wall centerlines.
+            const ductClipped = clipBBox
+              ? clipSegmentToBBox(duct.x1, duct.y1, duct.x2, duct.y2, clipBBox)
+              : { x1: duct.x1, y1: duct.y1, x2: duct.x2, y2: duct.y2 };
+            if (!ductClipped) return;
+            const ductSeg = { x1: ductClipped.x1, y1: ductClipped.y1, x2: ductClipped.x2, y2: ductClipped.y2 };
+            const len = wallLength(ductSeg as any, pxPerFt);
             if (len < 0.01) return;
-            const angle = wallAngle(duct as any);
-            const [cx, cz] = wallCenter(duct as any, pxPerFt);
+            const angle = wallAngle(ductSeg as any);
+            const [cx, cz] = wallCenter(ductSeg as any, pxPerFt);
 
             // Ducts are hung near ceiling
             const y = floorOffset + floor.heightFt - 1.5;
