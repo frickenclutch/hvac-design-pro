@@ -6,6 +6,10 @@ export interface AuthUser {
   orgId: string;
   role: string;
   isPlatformAdmin: boolean;
+  /** Authority flag — orthogonal to role, mirrors `is_platform_admin`.
+   *  When true, the user can act on permit submissions sent to their org
+   *  (claim, approve, deny, request changes, post internal comments). */
+  isPermitAuthority: boolean;
 }
 
 declare module 'hono' {
@@ -24,7 +28,8 @@ export async function authMiddleware(c: Context, next: Next) {
   const db = c.env.DB as D1Database;
 
   const session = await db.prepare(
-    `SELECT s.user_id, s.org_id, u.email, u.role, u.is_platform_admin
+    `SELECT s.user_id, s.org_id, u.email, u.role,
+            u.is_platform_admin, u.is_permit_authority
      FROM sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.token = ? AND s.expires_at > datetime('now')`
@@ -40,6 +45,7 @@ export async function authMiddleware(c: Context, next: Next) {
     orgId: session.org_id as string,
     role: session.role as string,
     isPlatformAdmin: Number(session.is_platform_admin ?? 0) === 1,
+    isPermitAuthority: Number(session.is_permit_authority ?? 0) === 1,
   });
 
   // Update last_seen
@@ -61,6 +67,23 @@ export async function requirePlatformAdmin(c: Context, next: Next) {
   const user = c.get('user') as AuthUser | undefined;
   if (!user || !user.isPlatformAdmin) {
     return c.json({ error: 'Platform admin privilege required' }, 403);
+  }
+  await next();
+}
+
+/**
+ * Permit-authority guard. Must run AFTER `authMiddleware`.
+ *
+ * Mirrors `requirePlatformAdmin` semantics — checks the orthogonal
+ * `is_permit_authority` flag, not the role. Routes that perform
+ * authority-side actions (claim a submission, make a decision, post
+ * internal comments) sit behind this. Authority READS are open to
+ * either party (gated per-record by `isParty()` in the route handler).
+ */
+export async function requirePermitAuthority(c: Context, next: Next) {
+  const user = c.get('user') as AuthUser | undefined;
+  if (!user || !user.isPermitAuthority) {
+    return c.json({ error: 'Permit authority privilege required' }, 403);
   }
   await next();
 }

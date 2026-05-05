@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect } from 'react';
 import { usePreferencesStore, type ThemeMode, type UIDensity, type UnitSystem, type EngineVersion } from '../stores/usePreferencesStore';
-import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck } from 'lucide-react';
+import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck } from 'lucide-react';
+import { api } from '../lib/api';
 import A11yPanel from '../components/accessibility/A11yPanel';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { toast } from '../stores/useToastStore';
@@ -27,6 +28,11 @@ export default function SettingsPage() {
         <div className="space-y-8">
           {/* Organisation Profile */}
           <OrgProfileSection token={token} orgId={organisation?.id} />
+
+          {/* Authority Profile — admin-gated, sits next to Org Profile.
+              Shows whenever the user is an admin so they can configure
+              their tenant as a permit authority. */}
+          {user?.role === 'admin' && <AuthorityProfileSection />}
 
           {/* User Profile */}
           <UserProfileSection token={token} user={user} />
@@ -555,6 +561,165 @@ function UserProfileSection({ token, user }: { token: string | null; user: { id:
         <button onClick={saveProfile} disabled={saving}
           className="flex items-center gap-2 bg-sky-500/10 text-sky-400 border border-sky-500/30 px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-sky-500/20 transition-all disabled:opacity-50">
           <Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save Profile'}
+        </button>
+      </div>
+    </Section>
+  );
+}
+
+// Authority profile — declares the tenant as a permit authority.
+// Admin-only. Shown to any admin so they can opt their tenant in;
+// configuring this does not by itself make existing users authority
+// members — admin still has to flip is_permit_authority on each
+// inspector/reviewer via the Team page.
+function AuthorityProfileSection() {
+  const [authorityType, setAuthorityType] = useState<string | null>(null);
+  const [authorityTitle, setAuthorityTitle] = useState('');
+  const [statesText, setStatesText] = useState('');
+  const [countiesText, setCountiesText] = useState('');
+  const [zipsText, setZipsText] = useState('');
+  const [intakeNotes, setIntakeNotes] = useState('');
+  const [intakeEmail, setIntakeEmail] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.authorityGetProfile()
+      .then((r) => {
+        setAuthorityType(r.authority.authorityType);
+        setAuthorityTitle(r.authority.authorityTitle ?? '');
+        setStatesText(r.authority.jurisdictionStates.join(', '));
+        setCountiesText(r.authority.jurisdictionCounties.join('\n'));
+        setZipsText(r.authority.jurisdictionZips.join(', '));
+        setIntakeNotes(r.authority.intakeNotes ?? '');
+        setIntakeEmail(r.authority.intakeEmail ?? '');
+      })
+      .catch(() => { /* best-effort hydrate; defaults stay */ })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.authorityPutProfile({
+        authorityType,
+        authorityTitle: authorityTitle.trim() || null,
+        jurisdictionStates: statesText.split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
+        jurisdictionCounties: countiesText.split('\n').map(s => s.trim()).filter(Boolean),
+        jurisdictionZips: zipsText.split(',').map(s => s.trim()).filter(s => /^\d{5}$/.test(s)),
+        intakeNotes: intakeNotes.trim() || null,
+        intakeEmail: intakeEmail.trim() || null,
+      });
+      toast.success('Authority profile saved.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save authority profile.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return null;
+
+  const isConfigured = !!authorityType;
+
+  return (
+    <Section icon={<ShieldCheck className="w-5 h-5 text-amber-400" />} title="Authority Profile">
+      <p className="text-xs text-slate-500 mb-4">
+        Configure your tenant as a permit authority — code enforcement, building department, fire marshal, plan reviewer, etc.
+        After saving here, designate which of your team members can act on incoming submissions via the <a href="/team" className="text-amber-400 hover:underline">Team page</a> (toggle "Permit Authority" on each member).
+      </p>
+
+      {!isConfigured && (
+        <div className="flex items-start gap-2 px-3 py-2 mb-4 rounded-lg bg-slate-800/40 border border-slate-700/40 text-xs text-slate-400">
+          <ShieldCheck className="w-4 h-4 text-slate-500 flex-shrink-0 mt-0.5" />
+          <span>Not configured. Pick an authority type below to opt in. Most tenants leave this off — only municipalities and code-enforcement contractors need it.</span>
+        </div>
+      )}
+
+      <OptionGroup label="Authority Type">
+        <select
+          value={authorityType ?? ''}
+          onChange={(e) => setAuthorityType(e.target.value || null)}
+          className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+        >
+          <option value="">Not an authority</option>
+          <option value="building_dept">Building Department</option>
+          <option value="fire_marshal">Fire Marshal</option>
+          <option value="zoning">Zoning</option>
+          <option value="mechanical">Mechanical</option>
+          <option value="plumbing">Plumbing</option>
+          <option value="electrical">Electrical</option>
+          <option value="environmental">Environmental</option>
+          <option value="general">General (multi-discipline)</option>
+        </select>
+      </OptionGroup>
+
+      <OptionGroup label="Display Title (how submitters see your reviewers)">
+        <input
+          value={authorityTitle}
+          onChange={(e) => setAuthorityTitle(e.target.value)}
+          placeholder="e.g. Building Inspector, Code Enforcement Officer, Plan Reviewer"
+          maxLength={120}
+          className="w-full bg-slate-900/60 border border-slate-700/50 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+        />
+      </OptionGroup>
+
+      <OptionGroup label="Jurisdiction — States (2-letter codes, comma-separated)">
+        <input
+          value={statesText}
+          onChange={(e) => setStatesText(e.target.value)}
+          placeholder="NY, NJ, CT"
+          className="w-full bg-slate-900/60 border border-slate-700/50 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40 font-mono"
+        />
+      </OptionGroup>
+
+      <OptionGroup label="Jurisdiction — Counties (one per line, format “County, ST”)">
+        <textarea
+          value={countiesText}
+          onChange={(e) => setCountiesText(e.target.value)}
+          rows={3}
+          placeholder={'Onondaga, NY\nOswego, NY'}
+          className="w-full bg-slate-900/60 border border-slate-700/50 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40 font-mono resize-y"
+        />
+      </OptionGroup>
+
+      <OptionGroup label="Jurisdiction — ZIP codes (5-digit, comma-separated)">
+        <textarea
+          value={zipsText}
+          onChange={(e) => setZipsText(e.target.value)}
+          rows={2}
+          placeholder="13202, 13203, 13204"
+          className="w-full bg-slate-900/60 border border-slate-700/50 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40 font-mono resize-y"
+        />
+      </OptionGroup>
+
+      <OptionGroup label="Intake Process Notes (visible to submitters before they submit)">
+        <textarea
+          value={intakeNotes}
+          onChange={(e) => setIntakeNotes(e.target.value)}
+          rows={4}
+          placeholder="Describe any steps required beyond the digital submission itself — e.g. site visit, hard-copy plans, fee payment, scheduling phone number, response timeline."
+          className="w-full bg-slate-900/60 border border-slate-700/50 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40 resize-y"
+        />
+      </OptionGroup>
+
+      <OptionGroup label="Intake Notification Email (optional — Phase 2 email delivery target)">
+        <input
+          type="email"
+          value={intakeEmail}
+          onChange={(e) => setIntakeEmail(e.target.value)}
+          placeholder="permits@yourdept.gov"
+          className="w-full bg-slate-900/60 border border-slate-700/50 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40 font-mono"
+        />
+      </OptionGroup>
+
+      <div className="mt-4 flex justify-end">
+        <button
+          onClick={save}
+          disabled={saving}
+          className="flex items-center gap-2 bg-amber-500/10 text-amber-400 border border-amber-500/30 px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-amber-500/20 transition-all disabled:opacity-50"
+        >
+          <Save className="w-4 h-4" /> {saving ? 'Saving…' : 'Save Authority Profile'}
         </button>
       </div>
     </Section>

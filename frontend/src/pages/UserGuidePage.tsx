@@ -634,6 +634,52 @@ const sections: GuideSection[] = [
     ),
   },
   {
+    id: 'permits',
+    title: 'Permits & Code Enforcement',
+    icon: <ShieldCheck className="w-5 h-5 text-amber-400" />,
+    easyContent: (
+      <div className="space-y-3">
+        <p>The <strong>Permits page</strong> is where projects move from "designed" to "approved." Two sides:</p>
+        <div className="space-y-3">
+          <div>
+            <p className="font-semibold text-white mb-1">If you're submitting a project:</p>
+            <StepList steps={[
+              'On your Dashboard, hover the project card and click the shield icon',
+              'Search for an authority — by ZIP, state, county, or type (Building Dept, Fire Marshal, etc.)',
+              'Pick the authority. The card shows their additional intake process — site visit requirements, hard-copy needs, scheduling phone numbers, response timelines',
+              'Pick a submission type (mechanical permit, plan review, inspection request, etc.) and write a cover letter',
+              'Submit. Track status under Permits in the sidebar — submitted → under review → approved/denied/changes requested',
+              'Withdraw any time before a decision lands',
+            ]} />
+          </div>
+          <div>
+            <p className="font-semibold text-white mb-1">If you're a permit authority (inspector, plan reviewer, code enforcement officer, etc.):</p>
+            <StepList steps={[
+              'Permits link in the sidebar takes you to your incoming queue',
+              'Status counts up top: Submitted (in queue), Under Review (you started), Changes Requested, Approved, Denied, Withdrawn',
+              'Click a submission to see the FULL project — calculations, drawings, address, cover letter (this is the deliberate cross-tenant exception)',
+              'Claim it (marks as under review), then approve / deny / request changes',
+              'Decision notes are required for deny + request changes (prevents silent denials)',
+              'Optional: assign a permit number on approval',
+              'Internal comments visible only to your authority side — separate from the public discussion thread the submitter sees',
+            ]} />
+          </div>
+        </div>
+        <Tip>The submitter sees your decision the moment you make it. They get the full discussion thread (minus internal comments) and any decision notes you write.</Tip>
+        <Tip>Different jurisdictions use different terminology — Building Inspector, Code Enforcement Officer, Plan Reviewer, Permit Specialist. Configure your tenant's display title under Settings → Authority Profile.</Tip>
+      </div>
+    ),
+    advancedContent: (
+      <div className="space-y-3">
+        <p>Tenancy: authority status is the orthogonal flag <code className="text-emerald-400/70">users.is_permit_authority</code>, mirroring <code>is_platform_admin</code>. Authority profile fields live on <code>organisations</code>: <code>authority_type</code>, <code>authority_title</code>, <code>jurisdiction_states/counties/zips</code> (JSON arrays), <code>authority_intake_notes</code>, <code>authority_intake_email</code>. Migration <code>0005_permit_authority.sql</code>.</p>
+        <p>Tables: <code className="text-emerald-400/70">permit_submissions</code> with state machine (submitted → under_review → approved | denied | changes_requested | withdrawn), and <code>permit_submission_comments</code> with an <code>is_internal</code> flag for authority-side notes.</p>
+        <p>Cross-tenant exception: this is the SECOND deliberate exception to per-tenant <code>org_id</code> isolation (Community is the first). When a submission is created, both submitter org and authority org get scoped read access to the underlying project, drawings, and calculations. The Worker handler's <code>isParty()</code> check gates every read.</p>
+        <p>Worker endpoints: <code>POST /api/permits/submit</code>, <code>GET /api/permits/submissions</code> (auto-scoped), <code>GET /api/permits/submissions/:id</code>, <code>PATCH /api/permits/submissions/:id</code> (decision actions), <code>POST /api/permits/submissions/:id/comments</code>, <code>GET /api/permits/authorities</code> (geographic search).</p>
+        <p>Phase 2 backlog: customizable dashboard layouts for authority side, GIS polygon jurisdictions (today: ZIP arrays), email notifications, permit-certificate PDF generation, multi-authority routing (e.g., a project that needs both Mechanical + Fire approvals), inspection scheduling.</p>
+      </div>
+    ),
+  },
+  {
     id: 'platform-admin',
     title: 'Platform Admin Panel (L0)',
     icon: <ShieldCheck className="w-5 h-5 text-amber-400" />,

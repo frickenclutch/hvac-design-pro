@@ -12,10 +12,11 @@
 import { useEffect, useState } from 'react';
 import {
   Users, UserPlus, Globe, Mail, Trash2, Shield, RefreshCw,
-  AlertTriangle, CheckCircle2, Copy, Crown,
+  AlertTriangle, CheckCircle2, Copy, Crown, ShieldCheck,
 } from 'lucide-react';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { api } from '../lib/api';
+import AuthorityBadge from '../components/AuthorityBadge';
 
 type Role = 'admin' | 'engineer' | 'tech' | 'viewer';
 
@@ -26,6 +27,7 @@ interface Member {
   last_name: string | null;
   role: Role;
   is_verified: number;
+  is_permit_authority?: number;
   last_seen_at: string | null;
   created_at: string;
 }
@@ -166,6 +168,15 @@ export default function TeamPage() {
               try {
                 await api.teamSetRole(userId, role);
                 setInfo('Role updated.');
+                refresh();
+              } catch (e) {
+                setErr(e instanceof Error ? e.message : String(e));
+              }
+            }}
+            onSetAuthority={async (userId, isAuth) => {
+              try {
+                await api.teamSetAuthorityFlag(userId, isAuth);
+                setInfo(isAuth ? 'Authority flag enabled.' : 'Authority flag removed.');
                 refresh();
               } catch (e) {
                 setErr(e instanceof Error ? e.message : String(e));
@@ -343,10 +354,11 @@ function PendingInvitesCard({ invites, isAdmin, onRevoke, onCopy }: { invites: I
   );
 }
 
-function MembersCard({ members, sessionUserId, isAdmin, loading, onRefresh, onSetRole, onRemove }: {
+function MembersCard({ members, sessionUserId, isAdmin, loading, onRefresh, onSetRole, onSetAuthority, onRemove }: {
   members: Member[]; sessionUserId: string | null; isAdmin: boolean; loading: boolean;
   onRefresh: () => void;
   onSetRole: (userId: string, role: Role) => void;
+  onSetAuthority: (userId: string, isAuthority: boolean) => void;
   onRemove: (userId: string) => void;
 }) {
   return (
@@ -373,6 +385,7 @@ function MembersCard({ members, sessionUserId, isAdmin, loading, onRefresh, onSe
                 <th className="px-3 py-2 font-bold">Name</th>
                 <th className="px-3 py-2 font-bold">Email</th>
                 <th className="px-3 py-2 font-bold">Role</th>
+                <th className="px-3 py-2 font-bold">Authority</th>
                 <th className="px-3 py-2 font-bold">Last seen</th>
                 {isAdmin && <th className="px-3 py-2"></th>}
               </tr>
@@ -402,6 +415,26 @@ function MembersCard({ members, sessionUserId, isAdmin, loading, onRefresh, onSe
                           {m.role === 'admin' && <Crown className="w-3 h-3 text-amber-400" />}
                           {m.role}
                         </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      {isAdmin ? (
+                        <button
+                          onClick={() => onSetAuthority(m.id, !m.is_permit_authority)}
+                          title={m.is_permit_authority
+                            ? 'Click to revoke permit authority status'
+                            : 'Click to grant permit authority status'}
+                          className={`flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border transition-colors ${m.is_permit_authority
+                            ? 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25'
+                            : 'bg-slate-800/60 text-slate-500 border-slate-700/40 hover:text-slate-300 hover:border-slate-600/60'}`}
+                        >
+                          <ShieldCheck className="w-3 h-3" />
+                          {m.is_permit_authority ? 'Authority' : 'Off'}
+                        </button>
+                      ) : (
+                        m.is_permit_authority
+                          ? <AuthorityBadge variant="compact" />
+                          : <span className="text-[10px] text-slate-600">—</span>
                       )}
                     </td>
                     <td className="px-3 py-2 text-slate-500 text-xs">

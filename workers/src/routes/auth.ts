@@ -105,7 +105,7 @@ authRoutes.post('/login', async (c) => {
   }
 
   const user = await db.prepare(
-    `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.is_platform_admin, u.org_id,
+    `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.is_platform_admin, u.is_permit_authority, u.org_id,
             u.password_hash,
             o.name as org_name, o.org_type, o.slug, o.region_code
      FROM users u JOIN organisations o ON o.id = u.org_id
@@ -160,6 +160,7 @@ authRoutes.post('/login', async (c) => {
       id: user.id, email: user.email, firstName: user.first_name,
       lastName: user.last_name, role: user.role, isVerified: true,
       isPlatformAdmin: Number(user.is_platform_admin ?? 0) === 1,
+      isPermitAuthority: Number(user.is_permit_authority ?? 0) === 1,
     },
     organisation: {
       id: user.org_id, name: user.org_name, type: user.org_type,
@@ -205,7 +206,7 @@ authRoutes.post('/verify-email', async (c) => {
 
   // Fetch full user + org data for the response
   const userData = await db.prepare(
-    `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_platform_admin, u.org_id,
+    `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_platform_admin, u.is_permit_authority, u.org_id,
             o.name as org_name, o.org_type, o.slug, o.region_code
      FROM users u JOIN organisations o ON o.id = u.org_id
      WHERE u.id = ?`
@@ -224,6 +225,7 @@ authRoutes.post('/verify-email', async (c) => {
       id: userData.id, email: userData.email, firstName: userData.first_name,
       lastName: userData.last_name, role: userData.role, isVerified: true,
       isPlatformAdmin: Number(userData.is_platform_admin ?? 0) === 1,
+      isPermitAuthority: Number(userData.is_permit_authority ?? 0) === 1,
     },
     organisation: {
       id: userData.org_id, name: userData.org_name, type: userData.org_type,
@@ -385,7 +387,7 @@ authRoutes.post('/sso/microsoft/callback', async (c) => {
 
   // Check if user already exists
   const existingUser = await db.prepare(
-    `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.is_platform_admin, u.org_id,
+    `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.is_platform_admin, u.is_permit_authority, u.org_id,
             o.name as org_name, o.org_type, o.slug, o.region_code
      FROM users u JOIN organisations o ON o.id = u.org_id
      WHERE u.email = ?`
@@ -401,6 +403,7 @@ authRoutes.post('/sso/microsoft/callback', async (c) => {
   let orgSlug: string;
   let regionCode: string;
   let isPlatformAdmin = false;
+  let isPermitAuthority = false;
 
   if (existingUser) {
     // Existing user — link SSO (mark verified if not already)
@@ -414,6 +417,7 @@ authRoutes.post('/sso/microsoft/callback', async (c) => {
     orgSlug = existingUser.slug as string;
     regionCode = existingUser.region_code as string;
     isPlatformAdmin = Number(existingUser.is_platform_admin ?? 0) === 1;
+    isPermitAuthority = Number(existingUser.is_permit_authority ?? 0) === 1;
 
     if (!existingUser.is_verified) {
       await db.prepare('UPDATE users SET is_verified = 1 WHERE id = ?').bind(userId).run();
@@ -464,7 +468,7 @@ authRoutes.post('/sso/microsoft/callback', async (c) => {
     user: {
       id: userId, email, firstName: userFirstName,
       lastName: userLastName, role: userRole, isVerified: true,
-      isPlatformAdmin,
+      isPlatformAdmin, isPermitAuthority,
     },
     organisation: {
       id: orgId, name: orgName, type: orgType,
@@ -527,7 +531,7 @@ authRoutes.post('/sso/cloudflare/callback', async (c) => {
 
   // Check if user already exists
   const existingUser = await db.prepare(
-    `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.is_platform_admin, u.org_id,
+    `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.is_platform_admin, u.is_permit_authority, u.org_id,
             o.name as org_name, o.org_type, o.slug, o.region_code
      FROM users u JOIN organisations o ON o.id = u.org_id
      WHERE u.email = ?`
@@ -543,6 +547,7 @@ authRoutes.post('/sso/cloudflare/callback', async (c) => {
   let orgSlug: string;
   let regionCode: string;
   let isPlatformAdmin = false;
+  let isPermitAuthority = false;
 
   if (existingUser) {
     userId = existingUser.id as string;
@@ -555,6 +560,7 @@ authRoutes.post('/sso/cloudflare/callback', async (c) => {
     orgSlug = existingUser.slug as string;
     regionCode = existingUser.region_code as string;
     isPlatformAdmin = Number(existingUser.is_platform_admin ?? 0) === 1;
+    isPermitAuthority = Number(existingUser.is_permit_authority ?? 0) === 1;
 
     if (!existingUser.is_verified) {
       await db.prepare('UPDATE users SET is_verified = 1 WHERE id = ?').bind(userId).run();
@@ -603,7 +609,7 @@ authRoutes.post('/sso/cloudflare/callback', async (c) => {
     user: {
       id: userId, email, firstName: userFirstName,
       lastName: userLastName, role: userRole, isVerified: true,
-      isPlatformAdmin,
+      isPlatformAdmin, isPermitAuthority,
     },
     organisation: {
       id: orgId, name: orgName, type: orgType,
@@ -631,7 +637,7 @@ authRoutes.get('/me', async (c) => {
   const db = c.env.DB;
 
   const result = await db.prepare(
-    `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.is_platform_admin, u.org_id,
+    `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.is_platform_admin, u.is_permit_authority, u.org_id,
             o.name as org_name, o.org_type, o.slug, o.region_code
      FROM sessions s
      JOIN users u ON u.id = s.user_id
@@ -646,6 +652,7 @@ authRoutes.get('/me', async (c) => {
       id: result.id, email: result.email, firstName: result.first_name,
       lastName: result.last_name, role: result.role, isVerified: !!result.is_verified,
       isPlatformAdmin: Number(result.is_platform_admin ?? 0) === 1,
+      isPermitAuthority: Number(result.is_permit_authority ?? 0) === 1,
     },
     organisation: {
       id: result.org_id, name: result.org_name, type: result.org_type,

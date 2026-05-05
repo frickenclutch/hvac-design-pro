@@ -1,6 +1,6 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
-import { Home, Compass, Settings, Users, LogOut, Thermometer, PenTool, Menu, X, Search, BookOpen, GitBranch, Sun, Globe } from 'lucide-react';
+import { Home, Compass, Settings, Users, LogOut, Thermometer, PenTool, Menu, X, Search, BookOpen, GitBranch, Sun, Globe, ShieldCheck } from 'lucide-react';
 import LandingPage from './pages/LandingPage';
 import OnboardingPage from './pages/OnboardingPage';
 import AuthPage from './pages/AuthPage';
@@ -24,6 +24,7 @@ const UserGuidePage = lazy(() => import('./pages/UserGuidePage'));
 const AdminPage = lazy(() => import('./pages/AdminPage'));
 const TeamPage = lazy(() => import('./pages/TeamPage'));
 const CommunityPage = lazy(() => import('./pages/CommunityPage'));
+const PermitsPage = lazy(() => import('./pages/PermitsPage'));
 import { useAuthStore } from './features/auth/store/useAuthStore';
 import { usePreferencesStore } from './stores/usePreferencesStore';
 import SpotlightSearch, { SpotlightTrigger } from './features/spotlight/SpotlightSearch';
@@ -95,6 +96,7 @@ function AppLayout() {
             <div className="h-px bg-slate-800/60 my-2" />
             <MobileNavLink to="/team" icon={<Users className="w-5 h-5" />} label="Team" onClick={() => setMobileNavOpen(false)} />
             <MobileNavLink to="/community" icon={<Globe className="w-5 h-5" />} label="Community" onClick={() => setMobileNavOpen(false)} />
+            <MobileNavLink to="/permits" icon={<ShieldCheck className="w-5 h-5" />} label="Permits" onClick={() => setMobileNavOpen(false)} />
             <MobileNavLink to="/settings" icon={<Settings className="w-5 h-5" />} label="Settings" onClick={() => setMobileNavOpen(false)} />
             <MobileNavLink to="/guide" icon={<BookOpen className="w-5 h-5" />} label="Guide" onClick={() => setMobileNavOpen(false)} />
             <div className="h-px bg-slate-800/60 my-2" />
@@ -134,6 +136,7 @@ function AppLayout() {
 
               <NavigationLink to="/team" icon={<Users className="w-5 h-5" />} label="Team" collapsed={sidebarCollapsed} />
               <NavigationLink to="/community" icon={<Globe className="w-5 h-5" />} label="Community" collapsed={sidebarCollapsed} />
+              <NavigationLink to="/permits" icon={<ShieldCheck className="w-5 h-5" />} label="Permits" collapsed={sidebarCollapsed} />
               <NavigationLink to="/settings" icon={<Settings className="w-5 h-5" />} label="Settings" collapsed={sidebarCollapsed} />
               <NavigationLink to="/guide" icon={<BookOpen className="w-5 h-5" />} label="Guide" collapsed={sidebarCollapsed} />
             </div>
@@ -198,6 +201,8 @@ function AppLayout() {
           <Route path="/team" element={isAuthenticated ? <TeamPage /> : <Navigate to="/" />} />
           <Route path="/community" element={isAuthenticated ? <CommunityPage /> : <Navigate to="/" />} />
           <Route path="/community/:id" element={isAuthenticated ? <CommunityPage /> : <Navigate to="/" />} />
+          <Route path="/permits" element={isAuthenticated ? <PermitsPage /> : <Navigate to="/" />} />
+          <Route path="/permits/:id" element={isAuthenticated ? <PermitsPage /> : <Navigate to="/" />} />
           <Route path="/cad" element={isAuthenticated ? <CadWorkspace /> : <Navigate to="/" />} />
           <Route path="/project/:id/cad" element={isAuthenticated ? <CadWorkspace /> : <Navigate to="/" />} />
 

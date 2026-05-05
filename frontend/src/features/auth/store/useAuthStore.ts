@@ -29,6 +29,13 @@ export interface User {
    * menu surfaces the /admin link and platform.* API calls are unlocked.
    */
   isPlatformAdmin?: boolean;
+  /**
+   * Permit-authority flag. Orthogonal to `role`, mirrors `isPlatformAdmin`.
+   * Set on inspectors / plan reviewers / code enforcement officers within
+   * a tenant configured with an `authority_type`. Surfaces the /permits
+   * sidebar link and unlocks decision actions on incoming submissions.
+   */
+  isPermitAuthority?: boolean;
 }
 
 export interface Organisation {

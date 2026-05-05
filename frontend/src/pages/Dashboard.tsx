@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, MapPin, Calendar, ArrowRight, Pencil, Check, X, Trash2, Building2, Home, GripVertical, ChevronDown, ChevronRight, RotateCcw, Minus, Cloud, CloudOff, UploadCloud, AlertTriangle, Globe, Lock, Send } from 'lucide-react';
+import { Plus, Search, MapPin, Calendar, ArrowRight, Pencil, Check, X, Trash2, Building2, Home, GripVertical, ChevronDown, ChevronRight, RotateCcw, Minus, Cloud, CloudOff, UploadCloud, AlertTriangle, Globe, Lock, Send, ShieldCheck } from 'lucide-react';
 import { api } from '../lib/api';
 import { toast } from '../stores/useToastStore';
+import SubmitForReviewModal from '../features/permits/SubmitForReviewModal';
 import NewProjectModal from '../features/projects/components/NewProjectModal';
 import {
   loadProjects as loadProjectsSynced,
@@ -71,9 +72,19 @@ export default function Dashboard() {
   const [shareSummary, setShareSummary] = useState('');
   const [shareSubmitting, setShareSubmitting] = useState(false);
 
+  // ── Submit-for-permit-review modal state ───────────────────────────────
+  const [reviewTarget, setReviewTarget] = useState<Project | null>(null);
+
   const openShare = (proj: Project) => {
     setShareTarget(proj);
     setShareSummary('');
+  };
+  const openReview = (proj: Project) => {
+    if (proj.id.startsWith('proj-')) {
+      toast.warning('This project is local-only. Click the cloud icon to sync it to D1 first, then submit for review.');
+      return;
+    }
+    setReviewTarget(proj);
   };
   const submitShare = async (makePublic: boolean) => {
     if (!shareTarget) return;
@@ -511,8 +522,15 @@ export default function Dashboard() {
                       </>
                     ) : (
                       <>
-                        {/* Edit + share buttons (hover-visible) */}
+                        {/* Hover-visible action row: submit for review, share, edit */}
                         <div className="flex justify-end -mt-1 mb-2 gap-1">
+                          <button
+                            onClick={() => openReview(proj)}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-amber-400 hover:bg-amber-500/10 transition-colors opacity-0 group-hover:opacity-100"
+                            title="Submit for permit review"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                          </button>
                           <button
                             onClick={() => openShare(proj)}
                             className="p-1.5 rounded-lg text-slate-500 hover:text-violet-400 hover:bg-violet-500/10 transition-colors opacity-0 group-hover:opacity-100"
@@ -555,6 +573,18 @@ export default function Dashboard() {
             );
           })}
         </div>
+      )}
+
+      {/* ── Submit-for-permit-review modal ───────────────────────────────── */}
+      {reviewTarget && (
+        <SubmitForReviewModal
+          project={reviewTarget}
+          onClose={() => setReviewTarget(null)}
+          onSubmitted={(submissionId) => {
+            setReviewTarget(null);
+            toast.success(`Submission #${submissionId.slice(0, 8)} created. Track status under /permits.`);
+          }}
+        />
       )}
 
       {/* ── Share-to-Community modal ─────────────────────────────────────── */}

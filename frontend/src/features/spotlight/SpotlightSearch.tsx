@@ -54,6 +54,7 @@ function getPageResults(navigate: (path: string) => void, isPlatformAdmin: boole
     { id: 'page-settings', category: 'page', title: 'Settings', subtitle: 'Theme, units, preferences', icon: <Settings className="w-4 h-4" />, action: () => navigate('/settings') },
     { id: 'page-team', category: 'page', title: 'Team Management', subtitle: 'Members, invites, claimed domain', icon: <Users className="w-4 h-4" />, action: () => navigate('/team') },
     { id: 'page-community', category: 'page', title: 'Community', subtitle: 'Cross-tenant project board + comments', icon: <Globe className="w-4 h-4" />, action: () => navigate('/community') },
+    { id: 'page-permits', category: 'page', title: 'Permits', subtitle: 'Submission queue + decisions (authority + submitter views)', icon: <ShieldCheck className="w-4 h-4" />, action: () => navigate('/permits') },
     { id: 'page-guide', category: 'page', title: 'User Guide', subtitle: 'Easy-mode + advanced docs for every feature', icon: <BookOpen className="w-4 h-4" />, action: () => navigate('/guide') },
     { id: 'page-terms', category: 'page', title: 'Terms of Service', subtitle: 'C4 Technologies legal terms', icon: <Shield className="w-4 h-4" />, action: () => navigate('/terms') },
   ];

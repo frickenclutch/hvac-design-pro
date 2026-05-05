@@ -23,6 +23,107 @@ function inviteToken(): string {
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+// ── GET /api/org/authority — return the org's authority profile ───────────
+// Returns null fields when not configured. Visible to any member of the
+// org so the Settings page can decide whether to show the "Authority
+// Profile" section. Mutating writes are admin-gated below.
+orgRoutes.get('/authority', async (c) => {
+  const user = c.get('user');
+  const db = c.env.DB;
+  const org = await db.prepare(
+    `SELECT id, authority_type, authority_title,
+            jurisdiction_states, jurisdiction_counties, jurisdiction_zips,
+            authority_intake_notes, authority_intake_email
+     FROM organisations WHERE id = ?`
+  ).bind(user.orgId).first();
+  if (!org) return c.json({ error: 'Organisation not found' }, 404);
+  // Parse JSON arrays for the client.
+  const parse = (v: unknown): string[] => {
+    if (typeof v !== 'string' || !v) return [];
+    try { const a = JSON.parse(v); return Array.isArray(a) ? a.map(String) : []; }
+    catch { return []; }
+  };
+  return c.json({
+    authority: {
+      authorityType: org.authority_type ?? null,
+      authorityTitle: org.authority_title ?? null,
+      jurisdictionStates: parse(org.jurisdiction_states),
+      jurisdictionCounties: parse(org.jurisdiction_counties),
+      jurisdictionZips: parse(org.jurisdiction_zips),
+      intakeNotes: org.authority_intake_notes ?? null,
+      intakeEmail: org.authority_intake_email ?? null,
+    },
+  });
+});
+
+// ── PUT /api/org/authority — configure authority profile (admin-only) ─────
+// Sets the org's authority_type + jurisdiction + intake metadata. Setting
+// authority_type=null clears the profile. After this lands an admin still
+// has to flip `is_permit_authority=1` on the relevant users (via /team
+// or platform admin) before they can act on submissions.
+orgRoutes.put('/authority', async (c) => {
+  const user = c.get('user');
+  if (user.role !== 'admin') {
+    return c.json({ error: 'Only admins can configure the authority profile' }, 403);
+  }
+  const body = await c.req.json();
+  const validTypes = [
+    'building_dept', 'fire_marshal', 'zoning', 'mechanical',
+    'plumbing', 'electrical', 'environmental', 'general',
+  ];
+  const authorityType = body.authorityType ? String(body.authorityType) : null;
+  if (authorityType && !validTypes.includes(authorityType)) {
+    return c.json({ error: `authorityType must be one of: ${validTypes.join(', ')}` }, 400);
+  }
+  const stringifyList = (v: unknown): string | null => {
+    if (!Array.isArray(v)) return null;
+    const cleaned = v.map(String).map(s => s.trim()).filter(Boolean);
+    return cleaned.length === 0 ? null : JSON.stringify(cleaned);
+  };
+
+  await c.env.DB.prepare(
+    `UPDATE organisations
+       SET authority_type = ?,
+           authority_title = ?,
+           jurisdiction_states = ?,
+           jurisdiction_counties = ?,
+           jurisdiction_zips = ?,
+           authority_intake_notes = ?,
+           authority_intake_email = ?
+     WHERE id = ?`
+  ).bind(
+    authorityType,
+    body.authorityTitle ? String(body.authorityTitle).slice(0, 120) : null,
+    stringifyList(body.jurisdictionStates),
+    stringifyList(body.jurisdictionCounties),
+    stringifyList(body.jurisdictionZips),
+    body.intakeNotes ? String(body.intakeNotes).slice(0, 5000) : null,
+    body.intakeEmail ? String(body.intakeEmail).toLowerCase().trim().slice(0, 200) : null,
+    user.orgId,
+  ).run();
+
+  return c.json({ ok: true });
+});
+
+// ── PATCH /api/org/users/:id/authority — toggle is_permit_authority flag ──
+// Admin-only. Mirrors the role-change endpoint pattern.
+orgRoutes.patch('/users/:id/authority', async (c) => {
+  const user = c.get('user');
+  if (user.role !== 'admin') {
+    return c.json({ error: 'Only admins can toggle authority status' }, 403);
+  }
+  const targetId = c.req.param('id');
+  const body = await c.req.json();
+  const flag = !!body.isPermitAuthority;
+
+  const r = await c.env.DB.prepare(
+    `UPDATE users SET is_permit_authority = ? WHERE id = ? AND org_id = ?`
+  ).bind(flag ? 1 : 0, targetId, user.orgId).run();
+
+  if (!r.meta.changes) return c.json({ error: 'Member not found' }, 404);
+  return c.json({ ok: true, isPermitAuthority: flag });
+});
+
 // ── GET /api/org — get current user's org profile ───────────────────────────
 orgRoutes.get('/', async (c) => {
   const user = c.get('user');
@@ -124,7 +225,7 @@ orgRoutes.get('/team', async (c) => {
 
   const { results: members } = await db.prepare(
     `SELECT id, email, first_name, last_name, role,
-            is_verified, last_seen_at, created_at
+            is_verified, is_permit_authority, last_seen_at, created_at
      FROM users
      WHERE org_id = ?
      ORDER BY created_at ASC`

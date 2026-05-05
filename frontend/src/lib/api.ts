@@ -444,6 +444,135 @@ class ApiClient {
     return this.request<{ ok: boolean }>(`/api/forum/comments/${id}`, { method: 'DELETE' });
   }
 
+  // ── Permit Authority rail ──────────────────────────────────────────────
+
+  async authorityGetProfile() {
+    return this.request<{
+      authority: {
+        authorityType: string | null;
+        authorityTitle: string | null;
+        jurisdictionStates: string[];
+        jurisdictionCounties: string[];
+        jurisdictionZips: string[];
+        intakeNotes: string | null;
+        intakeEmail: string | null;
+      };
+    }>('/api/org/authority');
+  }
+
+  async authorityPutProfile(input: {
+    authorityType: string | null;
+    authorityTitle?: string | null;
+    jurisdictionStates?: string[];
+    jurisdictionCounties?: string[];
+    jurisdictionZips?: string[];
+    intakeNotes?: string | null;
+    intakeEmail?: string | null;
+  }) {
+    return this.request<{ ok: boolean }>('/api/org/authority', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+  }
+
+  async teamSetAuthorityFlag(userId: string, isPermitAuthority: boolean) {
+    return this.request<{ ok: boolean; isPermitAuthority: boolean }>(
+      `/api/org/users/${userId}/authority`,
+      { method: 'PATCH', body: JSON.stringify({ isPermitAuthority }) },
+    );
+  }
+
+  async permitsSearchAuthorities(params: {
+    zip?: string; state?: string; county?: string; type?: string;
+  } = {}) {
+    const qs = new URLSearchParams();
+    if (params.zip) qs.set('zip', params.zip);
+    if (params.state) qs.set('state', params.state);
+    if (params.county) qs.set('county', params.county);
+    if (params.type) qs.set('type', params.type);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return this.request<{
+      authorities: Array<{
+        id: string; name: string; slug: string;
+        authority_type: string; authority_title: string | null;
+        jurisdiction_states: string | null;
+        jurisdiction_counties: string | null;
+        jurisdiction_zips: string | null;
+        authority_intake_notes: string | null;
+        city: string | null; state: string | null; zip: string | null;
+        phone: string | null;
+        _score: number; _matched: string[];
+      }>;
+      criteria: { zip?: string; state?: string; county?: string; type?: string };
+    }>(`/api/permits/authorities${suffix}`);
+  }
+
+  async permitSubmit(input: {
+    projectId: string;
+    authorityOrgId: string;
+    submissionType?: string;
+    coverLetter?: string;
+  }) {
+    return this.request<{ id: string; status: string }>('/api/permits/submit', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  }
+
+  async permitListSubmissions(status?: string) {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+    return this.request<{
+      submissions: Array<{
+        id: string; project_id: string; status: string;
+        submission_type: string | null; submitted_at: string;
+        reviewed_at: string | null; permit_number: string | null;
+        decision_notes: string | null;
+        submitter_org_id: string; authority_org_id: string;
+        project_name: string | null;
+        project_address: string | null; project_city: string | null;
+        project_state: string | null; project_zip: string | null;
+        submitter_org_name: string | null;
+        authority_org_name: string | null;
+        authority_title: string | null;
+      }>;
+    }>(`/api/permits/submissions${qs}`);
+  }
+
+  async permitGetSubmission(id: string) {
+    return this.request<{
+      submission: Record<string, unknown>;
+      project: Record<string, unknown> | null;
+      calculations: Array<Record<string, unknown>>;
+      comments: Array<{
+        id: string; body: string; is_internal: number;
+        deleted_at: string | null; created_at: string;
+        author_user_id: string; author_org_id: string;
+        author_first_name: string | null; author_last_name: string | null;
+        author_org_name: string | null;
+        author_is_authority: number;
+      }>;
+      party: 'submitter' | 'authority' | null;
+    }>(`/api/permits/submissions/${id}`);
+  }
+
+  async permitAct(id: string, input: {
+    action: 'claim' | 'approve' | 'deny' | 'request_changes' | 'withdraw';
+    decisionNotes?: string;
+    permitNumber?: string;
+  }) {
+    return this.request<{ ok: boolean; status: string }>(
+      `/api/permits/submissions/${id}`,
+      { method: 'PATCH', body: JSON.stringify(input) },
+    );
+  }
+
+  async permitAddComment(id: string, body: string, isInternal = false) {
+    return this.request<{ id: string; isInternal: boolean; created_at: string }>(
+      `/api/permits/submissions/${id}/comments`,
+      { method: 'POST', body: JSON.stringify({ body, isInternal }) },
+    );
+  }
+
   // Feedback
   async submitFeedback(data: {
     type: string;
