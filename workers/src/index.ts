@@ -26,10 +26,13 @@ export interface Env {
 
 const app = new Hono<{ Bindings: Env }>();
 
-// CORS for frontend
+// CORS for frontend. PATCH must be in allowMethods for the preflight on
+// every partial-update endpoint we ship — role change, authority toggle,
+// permit decisions, etc. Without it, browsers block the request before
+// it reaches the worker and the user sees "Unable to reach the server."
 app.use('*', cors({
   origin: ['https://hvac-design-pro.pages.dev', 'http://localhost:5173'],
-  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 }));
