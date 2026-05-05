@@ -14,6 +14,7 @@ import Mason from '../components/Mason';
 import ProjectContextBar from '../components/ProjectContextBar';
 import ProjectGateDialog from '../components/ProjectGateDialog';
 import { scopedKey } from '../utils/storage';
+import { syncCalcToD1 } from '../features/calculations/calcStorage';
 
 // ── User + project scoped persistence ────────────────────────────────────────
 function getStorageKey(projectId: string | null): string {
@@ -240,6 +241,7 @@ export default function ManualDCalculator() {
   }, []);
 
   const runCalculation = useCallback(() => {
+    const t0 = performance.now();
     const input: ManualDSystemInput = {
       systemName: activeProjectName || 'Manual D Design',
       equipmentCfm,
@@ -253,9 +255,20 @@ export default function ManualDCalculator() {
       rooms,
     };
     const res = calculateManualD(input);
+    const durationMs = Math.round(performance.now() - t0);
     setResult(res);
     setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
-  }, [activeProjectName, equipmentCfm, blowerEsp, filterDrop, coilDrop, ductMaterial, preferredShape, maxAspectRatio, application, rooms]);
+
+    // Persist to D1 (Priority 1) — fire-and-forget; skipped for draft + local-only projects.
+    void syncCalcToD1({
+      projectId: activeProjectId,
+      calcType: 'MANUAL_D',
+      inputs: input,
+      outputs: res,
+      engineVersion: 'manualD-1.0',
+      durationMs,
+    });
+  }, [activeProjectId, activeProjectName, equipmentCfm, blowerEsp, filterDrop, coilDrop, ductMaterial, preferredShape, maxAspectRatio, application, rooms]);
 
   const resetAll = useCallback(() => {
     setApplication('residential');

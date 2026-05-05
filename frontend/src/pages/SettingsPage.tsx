@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react';
-import { usePreferencesStore, type ThemeMode, type UIDensity, type UnitSystem } from '../stores/usePreferencesStore';
-import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save } from 'lucide-react';
+import { usePreferencesStore, type ThemeMode, type UIDensity, type UnitSystem, type EngineVersion } from '../stores/usePreferencesStore';
+import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck } from 'lucide-react';
 import A11yPanel from '../components/accessibility/A11yPanel';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { toast } from '../stores/useToastStore';
@@ -214,6 +214,40 @@ export default function SettingsPage() {
               onClear={() => prefs.update({ notaryStampDataUrl: '' })}
             />
           </Section>
+
+          {/* Calculation Engine — gated to platform admins until ACCA cert review approves and Phase 2 cutover ships */}
+          {user?.isPlatformAdmin && (
+            <Section icon={<BadgeCheck className="w-5 h-5 text-amber-400" />} title="Calculation Engine (Beta)">
+              <p className="text-xs text-slate-500 mb-4">
+                Cert-grade Manual J 8th Ed v2.50 engine — currently shadow-running alongside the legacy engine in production. Gated to platform admins until ACCA cert review approves. See <a href="/guide" className="text-amber-400 hover:underline">User Guide → Cert-Grade Manual J Engine</a> for the full rollout plan.
+              </p>
+
+              <OptionGroup label="Active Engine">
+                <ToggleRow
+                  options={[
+                    { value: 'legacy', label: 'Legacy (per-room)' },
+                    { value: 'manualJ8', label: 'Cert-grade (whole-house)' },
+                  ]}
+                  value={prefs.engineVersion}
+                  onChange={(v) => prefs.update({ engineVersion: v as EngineVersion })}
+                />
+              </OptionGroup>
+
+              <SwitchOption
+                label="Shadow-run cert engine on every calc"
+                description="Runs the cert-grade engine alongside legacy and logs [engine drift] to console. Off by default for non-admins; on for telemetry collection."
+                checked={prefs.shadowRunManualJ8}
+                onChange={(v) => prefs.update({ shadowRunManualJ8: v })}
+              />
+
+              {prefs.engineVersion === 'manualJ8' && (
+                <div className="flex items-start gap-2 px-3 py-2 mt-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300">
+                  <span className="font-bold uppercase tracking-wider text-[10px] flex-shrink-0">Heads up</span>
+                  <span>Cert-grade engine selected. Display flips to cert-grade results on the next calc. Phase 2 inverse-adapter for per-room display is not yet shipped — room cards may show approximated loads. Switch back to legacy if results look off.</span>
+                </div>
+              )}
+            </Section>
+          )}
 
           {/* System */}
           <Section icon={<Monitor className="w-5 h-5 text-amber-400" />} title="System">

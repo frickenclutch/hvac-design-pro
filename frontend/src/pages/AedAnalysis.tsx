@@ -9,6 +9,7 @@ import { useProjectStore } from '../stores/useProjectStore';
 import { useCadStore } from '../features/cad/store/useCadStore';
 import { toast } from '../stores/useToastStore';
 import { scopedKey } from '../utils/storage';
+import { syncCalcToD1 } from '../features/calculations/calcStorage';
 
 // ── Display formatting ──────────────────────────────────────────────────────
 function fmt(value: number): string {
@@ -190,7 +191,9 @@ export default function AedAnalysis() {
 
   // ── Handlers ────────────────────────────────────────────────────────────
   const handleCalculate = () => {
+    const t0 = performance.now();
     const res = calculateAed(groups);
+    const durationMs = Math.round(performance.now() - t0);
     setResult(res);
     // Persist results + back-patch into Manual J results for cross-tool coherence
     saveResults(activeProjectId, res);
@@ -199,6 +202,15 @@ export default function AedAnalysis() {
     } else {
       toast.success(`AED PASS — ratio ${Math.round(res.ratio * 100 * 10) / 10}% (under 130% threshold)`);
     }
+    // Persist to D1 (Priority 1) — fire-and-forget; skipped for draft + local-only.
+    void syncCalcToD1({
+      projectId: activeProjectId,
+      calcType: 'AED',
+      inputs: { groups },
+      outputs: res,
+      engineVersion: 'aed-1.0',
+      durationMs,
+    });
   };
 
   const handleReset = () => {

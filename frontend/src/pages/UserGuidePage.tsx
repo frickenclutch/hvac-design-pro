@@ -6,6 +6,7 @@ import {
   Eye, Lock,
   Printer, MessageSquarePlus,
   Wind, SquarePen, GitBranch, FolderOpen, Flame,
+  Users, Globe, ShieldCheck, BadgeCheck, Share2, Mail,
 } from 'lucide-react';
 
 type GuideMode = 'easy' | 'advanced';
@@ -495,6 +496,169 @@ const sections: GuideSection[] = [
         <p>Data is scoped to project IDs in localStorage: <code>hvac_manualj_inputs_&#123;projectId&#125;</code>, <code>hvac_manuald_inputs_&#123;projectId&#125;</code>, <code>hvac_cad_&#123;projectId&#125;</code>.</p>
         <p>Draft mode uses the key suffix <code>_draft</code>. One-time migration copies old global keys to draft scope on first load.</p>
         <p>CAD workspace state (panel visibility, zoom, ghosting) persists via the drawing serialization. The subscribe handler auto-saves on state changes with 500ms debounce.</p>
+      </div>
+    ),
+  },
+  {
+    id: 'team',
+    title: 'Team & Members',
+    icon: <Users className="w-5 h-5 text-emerald-400" />,
+    easyContent: (
+      <div className="space-y-3">
+        <p>The <strong>Team page</strong> is where you manage who's in your organization. Open it from the sidebar — click <strong>Team</strong>.</p>
+        <StepList steps={[
+          'Members list shows everyone in your tenant — name, email, role, last seen',
+          'Admins can change anyone\'s role using the dropdown next to their name',
+          'Admins can remove a member with the red trash icon (you can\'t remove yourself)',
+          'Use "Invite a member" to bring someone new in by email',
+          'Pending invites appear below the form — copy the redemption link to send via your own email/chat',
+        ]} />
+        <div className="space-y-2">
+          <p className="font-semibold text-white">Roles</p>
+          <ul className="text-sm text-slate-300 space-y-1 ml-4 list-disc">
+            <li><strong className="text-emerald-400">admin</strong> — full org control, can manage members + claim domain</li>
+            <li><strong className="text-sky-400">engineer</strong> — create/edit projects, run calculations, share to community</li>
+            <li><strong className="text-amber-400">tech</strong> — view projects, run calcs, download reports (no project creation)</li>
+            <li><strong className="text-slate-400">viewer</strong> — read-only access</li>
+          </ul>
+        </div>
+        <Tip>The platform won't let the last admin demote themselves. Promote someone else first if you want to change your own role.</Tip>
+      </div>
+    ),
+    advancedContent: (
+      <div className="space-y-3">
+        <p>Worker endpoints under <code className="text-emerald-400/70">/api/org/*</code>: <code>GET /team</code> (list members + invites + claimed domain), <code>POST /invite</code>, <code>DELETE /invites/:id</code>, <code>PATCH /users/:id</code> (role change), <code>DELETE /users/:id</code> (remove). All mutations require <code>role === 'admin'</code>.</p>
+        <p>Email delivery is deferred to Phase 2 — invites are stored as token records with a 14-day expiration in the <code className="text-emerald-400/70">org_invites</code> table. The redemption link the admin copies points to <code>/onboarding?invite=&#123;token&#125;</code>.</p>
+        <p>Last-admin demotion is enforced server-side — every tenant must always retain at least one user with <code>role='admin'</code> so the manage-team door stays open.</p>
+      </div>
+    ),
+  },
+  {
+    id: 'domain-claim',
+    title: 'Email Domain Claim',
+    icon: <Mail className="w-5 h-5 text-violet-400" />,
+    easyContent: (
+      <div className="space-y-3">
+        <p>If your team all uses the same email domain (e.g. <code className="text-violet-400/70">@yourcompany.com</code>), you can <strong>claim it</strong> on the Team page. Once claimed, future signups at that domain auto-route to your tenant — you don't have to invite each person individually.</p>
+        <StepList steps={[
+          'Open Team in the sidebar',
+          'Find the "Claimed email domain" card at the top',
+          'Type your domain (without the @) and click Save',
+          'Future @yourcompany.com signups land in your tenant automatically',
+        ]} />
+        <Tip>One domain per tenant. If someone else has already claimed it, you'll see a 409 error — contact your platform admin to resolve.</Tip>
+      </div>
+    ),
+    advancedContent: (
+      <div className="space-y-3">
+        <p>Stored in <code className="text-emerald-400/70">organisations.claimed_domain</code> (TEXT) and <code className="text-emerald-400/70">organisations.domain_verified_at</code> (TIMESTAMP). The verified-at field stays NULL until the Phase 2 DNS TXT verification flow lands — claiming today is on the honor system, but the column is in place so the verification flow doesn't require a schema migration.</p>
+        <p>Conflict resolution is server-side — <code>PUT /api/org/domain</code> returns 409 if another tenant already owns the domain. Disputes resolved out-of-band by the L0 platform admin (Nathan @ c4tech.dev).</p>
+      </div>
+    ),
+  },
+  {
+    id: 'community',
+    title: 'Community Forum',
+    icon: <Globe className="w-5 h-5 text-violet-400" />,
+    easyContent: (
+      <div className="space-y-3">
+        <p>The <strong>Community page</strong> is a cross-tenant project board. Anyone with an account can browse projects others have shared, comment, and offer help. Most users will never need to share — but if you're stuck on a tricky job and want a second pair of eyes, the option is there.</p>
+        <StepList steps={[
+          'Click Community in the sidebar to see projects shared by other users',
+          'Sort by Most recent, Oldest first, or Most commented',
+          'Search by name, summary, climate zone, or standard',
+          'Click a project card to read its summary and the comment thread',
+          'Add a comment from the bottom of the detail page (max 5000 chars)',
+          'Delete your own comments with the trash icon — soft-delete keeps the timeline intact',
+        ]} />
+        <Tip>You can comment on any public project, but you can't edit the project itself. Only the owner can update the calculations or share-summary.</Tip>
+      </div>
+    ),
+    advancedContent: (
+      <div className="space-y-3">
+        <p>This is the one surface where strict per-tenant <code className="text-emerald-400/70">org_id</code> isolation is intentionally relaxed. Projects with <code>is_public = 1</code> are visible to any authenticated user via <code>/api/forum/projects</code>; the listing only exposes owner-curated fields (<code>name</code>, <code>share_summary</code>, <code>climate_zone</code>, <code>standard</code>) — never the raw address or client name.</p>
+        <p>Comments live in the flat <code className="text-emerald-400/70">project_comments</code> table — no threading in v1. The author org_id is captured for L0 audit visibility, even though comments aren't org-scoped for read.</p>
+        <p>Phase 2 backlog: comment threading (<code>parent_comment_id</code>), moderation tools (flag/report, platform-admin hide), email notifications to the project owner on new comments.</p>
+      </div>
+    ),
+  },
+  {
+    id: 'share-project',
+    title: 'Sharing a Project to Community',
+    icon: <Share2 className="w-5 h-5 text-violet-400" />,
+    easyContent: (
+      <div className="space-y-3">
+        <p>Sharing a project posts it to the public Community board. You stay in control: only the summary you write is visible — your client name, exact address, and project notes never leave your tenant.</p>
+        <StepList steps={[
+          'On the Dashboard, hover the project card you want to share',
+          'Click the small globe (🌐) icon next to the edit pencil',
+          'Write a summary (≥ 20 chars) describing what you need help with',
+          'Click "Share publicly" — your project is now visible on the Community page',
+          'To withdraw sharing later, click the same icon and choose "Make private"',
+        ]} />
+        <Tip>You're the only one who can edit a shared project. Other users can only view + comment.</Tip>
+        <Tip>Sharing currently requires the project to be saved to the cloud. If the project is local-only (no cloud icon), save it first.</Tip>
+      </div>
+    ),
+    advancedContent: (
+      <div className="space-y-3">
+        <p>Toggle endpoint: <code className="text-emerald-400/70">POST /api/forum/projects/:id/share</code> — body <code>&#123;isPublic, summary&#125;</code>. Only callable by the owning tenant's <code>admin</code> or <code>engineer</code>. Setting <code>isPublic=true</code> requires a non-empty summary (20-2000 chars).</p>
+        <p>Stored fields: <code className="text-emerald-400/70">projects.is_public</code> (INTEGER), <code>projects.shared_at</code> (TIMESTAMP), <code>projects.share_summary</code> (TEXT). The summary is what the public listing shows; raw <code>address</code>, <code>client_name</code>, etc. are NEVER exposed via <code>/api/forum/*</code>.</p>
+        <p>Withdrawing share sets <code>is_public = 0</code> but preserves <code>shared_at</code> and existing comments — re-sharing later picks up where it left off.</p>
+      </div>
+    ),
+  },
+  {
+    id: 'manual-j-shadow',
+    title: 'Cert-Grade Manual J Engine (Beta)',
+    icon: <BadgeCheck className="w-5 h-5 text-amber-400" />,
+    easyContent: (
+      <div className="space-y-3">
+        <p>HVAC DesignPro is in the middle of upgrading its Manual J calculation engine to a <strong>cert-grade ACCA Manual J 8th Edition v2.50</strong> implementation. Submitted to ACCA on May 1, 2026 — currently awaiting review (~3-4 month SLA).</p>
+        <p>Today, every Manual J calculation runs <strong>both engines</strong> in parallel:</p>
+        <ul className="text-sm text-slate-300 space-y-1 ml-4 list-disc">
+          <li><strong className="text-emerald-400">Legacy engine</strong> — the per-room aggregator that's been in production. Its results are what you see displayed.</li>
+          <li><strong className="text-amber-400">Cert-grade engine v1.1.0</strong> — the new whole-house Form J1 implementation. Runs silently alongside legacy and logs drift to the browser console.</li>
+        </ul>
+        <p>Once we collect a few weeks of real-user drift telemetry from production projects, we flip the display to the cert-grade results. ACCA approval makes those outputs <strong>legally valid for permit applications</strong>.</p>
+        <Tip>Nothing changes for you today. Same calculator, same display. Drift telemetry happens in the background.</Tip>
+      </div>
+    ),
+    advancedContent: (
+      <div className="space-y-3">
+        <p>Engine: <code className="text-emerald-400/70">frontend/src/engines/manualJ8/</code>, version stamp <code>manualJ8-ts-1.1.0</code>. Validated against ACCA reference test cases (Smith / Walker / Cobb) at 184/184 line items within 0.5% tolerance — 30/30 vitest pass.</p>
+        <p>Adapter shim: <code className="text-emerald-400/70">manualJ8/adapters/legacy.ts → roomInputsToFormJ1Input()</code> aggregates per-room legacy <code>RoomInput[]</code> data into the whole-house <code>FormJ1Input</code>.</p>
+        <p>Pipeline: <code className="text-emerald-400/70">runCalculation()</code> in <code>pages/ManualJCalculator.tsx</code> calls legacy first (display), then if <code>shadowRunManualJ8 === true</code> also calls the cert engine and console-logs <code>[engine drift]</code> with heat / sens / latent percentages.</p>
+        <p>Phase 2 trigger criteria documented in <code>docs/option-e-ui-migration-plan.md</code>: ≥10 production projects driven through the calculator + drift on those projects ≤ 5% on every total + ACCA cert review approved.</p>
+      </div>
+    ),
+  },
+  {
+    id: 'platform-admin',
+    title: 'Platform Admin Panel (L0)',
+    icon: <ShieldCheck className="w-5 h-5 text-amber-400" />,
+    easyContent: (
+      <div className="space-y-3">
+        <p className="text-sm text-slate-400 italic">Visible only to platform-level administrators (currently a single account at C4 Technologies).</p>
+        <p>The <code>/admin</code> page is the cross-tenant control panel. It shows what's happening across <strong>every</strong> organization on the platform — orgs, users, projects, calculations, audit events.</p>
+        <div className="space-y-2">
+          <p className="font-semibold text-white">Sections:</p>
+          <ul className="text-sm text-slate-300 space-y-1 ml-4 list-disc">
+            <li><strong>Platform metrics</strong> — totals + last-30-day activity (orgs, users, projects, calcs, signups)</li>
+            <li><strong>Q/A benchmarks</strong> — engine version distribution, calc volume + status mix, p50/p95/p99 duration vs SLO, audit activity, ACCA cert tile (184/184)</li>
+            <li><strong>Organisations</strong> — full table; click a row for member roster + project counts</li>
+            <li><strong>Audit feed</strong> — last 50 cross-org events</li>
+            <li><strong>Action lab</strong> — placeholders for future destructive actions (impersonate, plan override, billing flips) — Phase 2+ work</li>
+          </ul>
+        </div>
+        <Tip>Every section has a "Show raw JSON" drawer for ad-hoc inspection.</Tip>
+      </div>
+    ),
+    advancedContent: (
+      <div className="space-y-3">
+        <p>Hard-gated route — <code className="text-emerald-400/70">isPlatformAdmin</code> flag on the user record (separate from <code>role</code>) controls visibility. Server enforces 403 on every <code>/api/platform/*</code> call via <code>requirePlatformAdmin</code> middleware in <code>workers/src/middleware/auth.ts</code>.</p>
+        <p>Q/A benchmarks endpoint at <code>/api/platform/qa-benchmarks</code> joins live D1 telemetry (engine version distribution, calc volume + status mix, p50/p95/p99 via window-function CTE, audit activity) with static cert facts about the active engine version.</p>
+        <p>Future: impersonation tokens, plan/seat overrides, <code>billing_status</code> flips — all queued behind ACCA cert completion. Audit log writes (SOC 2 CC7.2) still TODO.</p>
       </div>
     ),
   },

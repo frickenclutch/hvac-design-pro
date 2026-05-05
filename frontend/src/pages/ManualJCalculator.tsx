@@ -26,6 +26,7 @@ import { usePreferencesStore } from '../stores/usePreferencesStore';
 import { scopedKey } from '../utils/storage';
 import { buildFormJ1, MANUAL_J8_ENGINE_VERSION } from '../engines/manualJ8';
 import { roomInputsToFormJ1Input } from '../engines/manualJ8/adapters/legacy';
+import { syncCalcToD1 } from '../features/calculations/calcStorage';
 
 // ── Display formatting (engine values are full-precision floats) ─────────────
 /** Round to integer and format with locale separators for display */
@@ -248,7 +249,9 @@ export default function ManualJCalculator() {
   };
 
   const runCalculation = () => {
+    const t0 = performance.now();
     const res = calculateWholeHouse(rooms, conditions);
+    const durationMs = Math.round(performance.now() - t0);
     setWholeHouse(res);
     // Persist results so Manual D can import them (project-scoped)
     try {
@@ -280,6 +283,21 @@ export default function ManualJCalculator() {
         console.warn('[engine drift] manualJ8 shadow-run failed:', err);
       }
     }
+
+    // ── Persist to D1 (Priority 1) ─────────────────────────────────────
+    // Fire-and-forget. Skipped automatically for draft mode and local-only
+    // projects. Engine version stamped is `manualJ-legacy-1.0` for the
+    // displayed result; the cert-grade shadow-run engine version is
+    // tracked separately via the [engine drift] console log until
+    // Phase 2 flips the display.
+    void syncCalcToD1({
+      projectId: activeProjectId,
+      calcType: 'MANUAL_J',
+      inputs: { buildingType, rooms, conditions },
+      outputs: res,
+      engineVersion: 'manualJ-legacy-1.0',
+      durationMs,
+    });
   };
 
   const resetAll = () => {
