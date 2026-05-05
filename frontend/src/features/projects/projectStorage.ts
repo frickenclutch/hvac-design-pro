@@ -40,6 +40,12 @@ export interface Project {
   date: string;              // ISO created_at
   updatedAt?: string;        // ISO updated_at (D1 only)
   syncStatus: SyncStatus;
+  // Community sharing — set when the owner posts the project to /community.
+  // Optimistically updated by the Dashboard share modal; authoritative
+  // copy lives in D1 (`projects.is_public`). The summary is owner-curated
+  // text shown on the public listing instead of raw address/client name.
+  isPublic?: boolean;
+  shareSummary?: string;
 }
 
 export interface ProjectCreateInput {
@@ -98,6 +104,10 @@ interface BackendProject {
   status?: string;
   created_at?: string;
   updated_at?: string;
+  // Migration 0004 (team_and_forum) — community-sharing fields. Older
+  // backend builds may not return these; treat as falsy when absent.
+  is_public?: number | boolean;
+  share_summary?: string | null;
 }
 
 function fromBackend(p: BackendProject): Project {
@@ -115,6 +125,8 @@ function fromBackend(p: BackendProject): Project {
     date: p.created_at || new Date().toISOString(),
     updatedAt: p.updated_at,
     syncStatus: 'synced',
+    isPublic: p.is_public === 1 || p.is_public === true,
+    shareSummary: p.share_summary || undefined,
   };
 }
 

@@ -343,6 +343,14 @@ export default function AedAnalysis() {
       y += 14;
     }
 
+    // Engine + standard stamp at the bottom — same audit-trail purpose as
+    // the Manual J PDF footer. AED uses its own engine so we stamp that
+    // version explicitly.
+    const ph = doc.internal.pageSize.getHeight();
+    doc.setFontSize(6); doc.setTextColor(150);
+    doc.text('Engine aed-1.0  —  ACCA Manual J 8th Edition Section N (AED)', margin, ph - 20);
+    doc.text(new Date().toISOString().slice(0, 10), pw - margin, ph - 20, { align: 'right' });
+
     doc.save(`AED_Analysis_${new Date().toISOString().slice(0, 10)}.pdf`);
   };
 

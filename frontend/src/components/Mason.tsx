@@ -1152,32 +1152,43 @@ function processCommands(query: string, context: MasonContext): string | null {
   if (q.startsWith('/navigate ') || q.startsWith('/go ') || q.startsWith('/open ')) {
     const target = q.replace(/^\/(navigate|go|open)\s+/, '').trim();
     const routes: Record<string, [string, string]> = {
-      'manual-j':   ['/calculator', 'Manual J Calculator'],
-      'manualj':    ['/calculator', 'Manual J Calculator'],
-      'calculator': ['/calculator', 'Manual J Calculator'],
-      'manual-d':   ['/manual-d', 'Manual D Calculator'],
-      'manuald':    ['/manual-d', 'Manual D Calculator'],
-      'duct':       ['/manual-d', 'Manual D Calculator'],
-      'aed':        ['/aed', 'AED Analysis'],
-      'exposure':   ['/aed', 'AED Analysis'],
-      'diversity':  ['/aed', 'AED Analysis'],
-      'cad':        ['/cad', 'CAD Workspace'],
-      'workspace':  ['/cad', 'CAD Workspace'],
-      'drawing':    ['/cad', 'CAD Workspace'],
-      'settings':   ['/settings', 'Settings'],
-      'preferences':['/settings', 'Settings'],
-      'dashboard':  ['/dashboard', 'Dashboard'],
-      'projects':   ['/dashboard', 'Dashboard'],
-      'guide':      ['/guide', 'User Guide'],
-      'help':       ['/guide', 'User Guide'],
-      'team':       ['/team', 'Team Management'],
+      'manual-j':    ['/calculator', 'Manual J Calculator'],
+      'manualj':     ['/calculator', 'Manual J Calculator'],
+      'calculator':  ['/calculator', 'Manual J Calculator'],
+      'manual-d':    ['/manual-d', 'Manual D Calculator'],
+      'manuald':     ['/manual-d', 'Manual D Calculator'],
+      'duct':        ['/manual-d', 'Manual D Calculator'],
+      'aed':         ['/aed', 'AED Analysis'],
+      'exposure':    ['/aed', 'AED Analysis'],
+      'diversity':   ['/aed', 'AED Analysis'],
+      'cad':         ['/cad', 'CAD Workspace'],
+      'workspace':   ['/cad', 'CAD Workspace'],
+      'drawing':     ['/cad', 'CAD Workspace'],
+      'settings':    ['/settings', 'Settings'],
+      'preferences': ['/settings', 'Settings'],
+      'dashboard':   ['/dashboard', 'Dashboard'],
+      'projects':    ['/dashboard', 'Dashboard'],
+      'guide':       ['/guide', 'User Guide'],
+      'help':        ['/guide', 'User Guide'],
+      'team':        ['/team', 'Team Management'],
+      'members':     ['/team', 'Team Management'],
+      'invite':      ['/team', 'Team Management'],
+      'domain':      ['/team', 'Team Management'],
+      'community':   ['/community', 'Community Forum'],
+      'forum':       ['/community', 'Community Forum'],
+      'share':       ['/community', 'Community Forum'],
+      'public':      ['/community', 'Community Forum'],
+      'admin':       ['/admin', 'Platform Admin (L0)'],
+      'platform':    ['/admin', 'Platform Admin (L0)'],
+      'qa':          ['/admin', 'Platform Admin (L0)'],
+      'benchmarks':  ['/admin', 'Platform Admin (L0)'],
     };
     const match = routes[target];
     if (match) {
       setTimeout(() => { window.location.href = match[0]; }, 500);
       return `Navigating to **${match[1]}**...`;
     }
-    return `I don't recognize "${target}". Try: manual-j, manual-d, aed, cad, settings, dashboard, guide, or team.`;
+    return `I don't recognize "${target}". Try: manual-j, manual-d, aed, cad, settings, dashboard, guide, team, community, or admin.`;
   }
 
   // ── /calculate — trigger Manual J calculation ──────────────────────

@@ -318,6 +318,19 @@ class ApiClient {
       };
       calcMix: Array<{ calc_type: string; count: number }>;
       auditVolume: { total: number; d24h: number; d7: number; d30: number };
+      shadowRunDrift: {
+        sample_size: number | null;
+        avg_abs_heat_pct: number | null;
+        avg_abs_sens_pct: number | null;
+        avg_abs_latent_pct: number | null;
+        max_abs_heat_pct: number | null;
+        max_abs_sens_pct: number | null;
+        max_abs_latent_pct: number | null;
+      } | null;
+      shadowRunReliability: {
+        shadow_success: number | null;
+        shadow_failure: number | null;
+      } | null;
       generatedAt: string;
     }>('/api/platform/qa-benchmarks');
   }

@@ -14,8 +14,10 @@ import { useNavigate } from 'react-router-dom';
 import {
   Search, X, FileText, Home, Thermometer, PenTool, Settings, Users, Sun, GitBranch,
   MapPin, Star, Wrench, Package, Navigation,
-  ArrowRight, FolderOpen, Zap, Gauge, FileDown, Shield
+  ArrowRight, FolderOpen, Zap, Gauge, FileDown, Shield,
+  Globe, ShieldCheck, BookOpen,
 } from 'lucide-react';
+import { useAuthStore } from '../auth/store/useAuthStore';
 import { ALL_RETAILERS } from '../retailer/data/retailers';
 import { getDirectionsUrl } from '../retailer/utils/geolocation';
 import { scopedKey } from '../../utils/storage';
@@ -42,17 +44,29 @@ interface SearchResult {
 // APP PAGES INDEX
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function getPageResults(navigate: (path: string) => void): SearchResult[] {
-  return [
+function getPageResults(navigate: (path: string) => void, isPlatformAdmin: boolean): SearchResult[] {
+  const base: SearchResult[] = [
     { id: 'page-dashboard', category: 'page', title: 'Project Workspace', subtitle: 'Dashboard — manage projects', icon: <Home className="w-4 h-4" />, action: () => navigate('/dashboard') },
     { id: 'page-calculator', category: 'page', title: 'Manual J Calculator', subtitle: 'Heating & cooling load calculations', icon: <Thermometer className="w-4 h-4" />, action: () => navigate('/calculator') },
     { id: 'page-manuald', category: 'page', title: 'Manual D Calculator', subtitle: 'Duct sizing & friction rate design', icon: <GitBranch className="w-4 h-4" />, action: () => navigate('/manual-d') },
     { id: 'page-aed', category: 'page', title: 'AED Analysis', subtitle: 'Adequate Exposure Diversity — Section N', icon: <Sun className="w-4 h-4" />, action: () => navigate('/aed') },
     { id: 'page-cad', category: 'page', title: 'CAD Workspace', subtitle: 'Floor plan design & duct layout', icon: <PenTool className="w-4 h-4" />, action: () => navigate('/cad') },
     { id: 'page-settings', category: 'page', title: 'Settings', subtitle: 'Theme, units, preferences', icon: <Settings className="w-4 h-4" />, action: () => navigate('/settings') },
-    { id: 'page-team', category: 'page', title: 'Team Management', subtitle: 'Manage team members', icon: <Users className="w-4 h-4" />, action: () => navigate('/team') },
+    { id: 'page-team', category: 'page', title: 'Team Management', subtitle: 'Members, invites, claimed domain', icon: <Users className="w-4 h-4" />, action: () => navigate('/team') },
+    { id: 'page-community', category: 'page', title: 'Community', subtitle: 'Cross-tenant project board + comments', icon: <Globe className="w-4 h-4" />, action: () => navigate('/community') },
+    { id: 'page-guide', category: 'page', title: 'User Guide', subtitle: 'Easy-mode + advanced docs for every feature', icon: <BookOpen className="w-4 h-4" />, action: () => navigate('/guide') },
     { id: 'page-terms', category: 'page', title: 'Terms of Service', subtitle: 'C4 Technologies legal terms', icon: <Shield className="w-4 h-4" />, action: () => navigate('/terms') },
   ];
+  // Platform-admin-only: surface /admin in spotlight only when the
+  // session has the flag, mirroring the L0 hard-gate in App.tsx.
+  if (isPlatformAdmin) {
+    base.push({
+      id: 'page-admin', category: 'page', title: 'Platform Admin (L0)',
+      subtitle: 'Cross-tenant control — orgs, metrics, Q/A benchmarks, audit',
+      icon: <ShieldCheck className="w-4 h-4" />, action: () => navigate('/admin'),
+    });
+  }
+  return base;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -131,6 +145,7 @@ function scoreMatch(query: string, text: string): number {
 function searchAll(
   query: string,
   navigate: (path: string) => void,
+  isPlatformAdmin: boolean,
 ): SearchResult[] {
   if (!query.trim()) return [];
 
@@ -159,7 +174,7 @@ function searchAll(
   } catch { /* ignore localStorage errors */ }
 
   // 2. Search app pages
-  getPageResults(navigate).forEach(page => {
+  getPageResults(navigate, isPlatformAdmin).forEach(page => {
     if (fuzzyMatch(q, `${page.title} ${page.subtitle ?? ''}`)) {
       results.push(page);
     }
@@ -365,8 +380,12 @@ export default function SpotlightSearch() {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  const isPlatformAdmin = useAuthStore((s) => !!s.user?.isPlatformAdmin);
 
-  const results = useMemo(() => searchAll(query, navigate), [query, navigate]);
+  const results = useMemo(
+    () => searchAll(query, navigate, isPlatformAdmin),
+    [query, navigate, isPlatformAdmin],
+  );
 
   // Keyboard shortcut: Cmd+K / Ctrl+K
   useEffect(() => {

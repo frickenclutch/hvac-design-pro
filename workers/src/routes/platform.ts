@@ -233,6 +233,46 @@ platformRoutes.get('/qa-benchmarks', async (c) => {
        (SELECT COUNT(*) FROM audit_log WHERE created_at > datetime('now', '-30 days')) AS d30`
   ).first();
 
+  // ── Phase 1 shadow-run drift aggregate ────────────────────────────────
+  // The Manual J calculator persists two records per user click — one for
+  // the legacy engine (displayed) and one for the cert-grade shadow-run.
+  // Shadow-run records carry their drift-vs-legacy in the outputs JSON
+  // under `__driftVsLegacy.{heat,sens,latent}`. We aggregate over the
+  // last 30d of cert-grade records that include the marker. Failure
+  // marker records have engine_version ending in `-fail` and are
+  // counted separately so we can report shadow-run reliability.
+  //
+  // SQLite's json_extract works on TEXT columns; outputs is TEXT JSON.
+  const driftAgg = await db.prepare(
+    `SELECT
+       COUNT(*) AS sample_size,
+       AVG(ABS(CAST(json_extract(outputs, '$.__driftVsLegacy.heat')   AS REAL))) AS avg_abs_heat_pct,
+       AVG(ABS(CAST(json_extract(outputs, '$.__driftVsLegacy.sens')   AS REAL))) AS avg_abs_sens_pct,
+       AVG(ABS(CAST(json_extract(outputs, '$.__driftVsLegacy.latent') AS REAL))) AS avg_abs_latent_pct,
+       MAX(ABS(CAST(json_extract(outputs, '$.__driftVsLegacy.heat')   AS REAL))) AS max_abs_heat_pct,
+       MAX(ABS(CAST(json_extract(outputs, '$.__driftVsLegacy.sens')   AS REAL))) AS max_abs_sens_pct,
+       MAX(ABS(CAST(json_extract(outputs, '$.__driftVsLegacy.latent') AS REAL))) AS max_abs_latent_pct
+     FROM calculations
+     WHERE calc_type = 'MANUAL_J'
+       AND engine_version LIKE 'manualJ8-ts-%'
+       AND engine_version NOT LIKE '%-fail'
+       AND json_extract(outputs, '$.__driftVsLegacy.heat') IS NOT NULL
+       AND created_at > datetime('now', '-30 days')`
+  ).first();
+
+  // Shadow-run reliability — successes vs failures over 30d. High
+  // failure rate signals the cert-grade engine's construction registry
+  // doesn't yet cover whatever climate / wall combos production users
+  // are running.
+  const shadowReliability = await db.prepare(
+    `SELECT
+       SUM(CASE WHEN engine_version LIKE 'manualJ8-ts-%' AND engine_version NOT LIKE '%-fail' THEN 1 ELSE 0 END) AS shadow_success,
+       SUM(CASE WHEN engine_version LIKE '%-fail' THEN 1 ELSE 0 END) AS shadow_failure
+     FROM calculations
+     WHERE calc_type = 'MANUAL_J'
+       AND created_at > datetime('now', '-30 days')`
+  ).first();
+
   // ── Static cert facts (travel with the build) ──────────────────────────
   // These are the published ACCA reference test results for the engine
   // version currently shipped. See docs/acca-validation-report.md for the
@@ -264,6 +304,8 @@ platformRoutes.get('/qa-benchmarks', async (c) => {
     calcDuration,
     calcMix,
     auditVolume,
+    shadowRunDrift: driftAgg,
+    shadowRunReliability: shadowReliability,
     generatedAt: new Date().toISOString(),
   });
 });

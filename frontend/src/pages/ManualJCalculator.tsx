@@ -258,38 +258,10 @@ export default function ManualJCalculator() {
       localStorage.setItem(getResultsKey(activeProjectId), JSON.stringify(res));
     } catch { /* storage full */ }
 
-    // ── Phase 1: shadow-run cert-grade engine for drift telemetry ───────
-    // Display values above are unchanged. We run the new engine in parallel
-    // and log drift to console only — real users see legacy results until
-    // we flip `engineVersion` in Phase 2.
-    const prefs = usePreferencesStore.getState();
-    if (prefs.shadowRunManualJ8) {
-      try {
-        const j8Input = roomInputsToFormJ1Input(rooms, conditions, res.aed.excursion);
-        const j8Result = buildFormJ1(j8Input);
-        const drift = (legacyVal: number, j8Val: number) =>
-          legacyVal === 0 ? 0 : ((j8Val - legacyVal) / legacyVal) * 100;
-        // eslint-disable-next-line no-console
-        console.log(
-          `[engine drift] ${MANUAL_J8_ENGINE_VERSION} vs legacy — ` +
-          `heat: ${drift(res.totalHeatingBtu, j8Result.total.heat).toFixed(1)}%, ` +
-          `sens: ${drift(res.totalCoolingSensible, j8Result.total.sens).toFixed(1)}%, ` +
-          `latent: ${drift(res.totalCoolingLatent, j8Result.total.latent).toFixed(1)}%`,
-          { legacy: { heat: res.totalHeatingBtu, sens: res.totalCoolingSensible, latent: res.totalCoolingLatent }, manualJ8: j8Result.total }
-        );
-      } catch (err) {
-        // Adapter or engine threw — log a finding but don't disrupt the user
-        // eslint-disable-next-line no-console
-        console.warn('[engine drift] manualJ8 shadow-run failed:', err);
-      }
-    }
-
-    // ── Persist to D1 (Priority 1) ─────────────────────────────────────
+    // ── Persist legacy result to D1 (Priority 1) ──────────────────────
     // Fire-and-forget. Skipped automatically for draft mode and local-only
-    // projects. Engine version stamped is `manualJ-legacy-1.0` for the
-    // displayed result; the cert-grade shadow-run engine version is
-    // tracked separately via the [engine drift] console log until
-    // Phase 2 flips the display.
+    // projects. The cert-grade shadow-run record (if produced below) gets
+    // its own POST so the Q/A panel can compare engine versions.
     void syncCalcToD1({
       projectId: activeProjectId,
       calcType: 'MANUAL_J',
@@ -298,6 +270,75 @@ export default function ManualJCalculator() {
       engineVersion: 'manualJ-legacy-1.0',
       durationMs,
     });
+
+    // ── Phase 1: shadow-run cert-grade engine for drift telemetry ───────
+    // Runs alongside legacy and (a) logs to console for in-session debug,
+    // (b) persists a parallel calc record stamped with the cert-grade
+    // version so the L0 Q/A panel can aggregate drift across users.
+    // Display values above are unchanged.
+    const prefs = usePreferencesStore.getState();
+    if (prefs.shadowRunManualJ8) {
+      try {
+        const t1 = performance.now();
+        const j8Input = roomInputsToFormJ1Input(rooms, conditions, res.aed.excursion);
+        const j8Result = buildFormJ1(j8Input);
+        const j8DurationMs = Math.round(performance.now() - t1);
+        const drift = (legacyVal: number, j8Val: number) =>
+          legacyVal === 0 ? 0 : ((j8Val - legacyVal) / legacyVal) * 100;
+        const driftPct = {
+          heat: drift(res.totalHeatingBtu, j8Result.total.heat),
+          sens: drift(res.totalCoolingSensible, j8Result.total.sens),
+          latent: drift(res.totalCoolingLatent, j8Result.total.latent),
+        };
+        // eslint-disable-next-line no-console
+        console.log(
+          `[engine drift] ${MANUAL_J8_ENGINE_VERSION} vs legacy — ` +
+          `heat: ${driftPct.heat.toFixed(1)}%, sens: ${driftPct.sens.toFixed(1)}%, latent: ${driftPct.latent.toFixed(1)}%`,
+          { legacy: { heat: res.totalHeatingBtu, sens: res.totalCoolingSensible, latent: res.totalCoolingLatent }, manualJ8: j8Result.total }
+        );
+
+        // Persist the shadow-run as a separate calc record. The Q/A panel
+        // groups by engine_version so legacy and cert-grade live in
+        // distinct rows. `__shadowRun: true` lets future panel queries
+        // exclude legacy display records when measuring cert-grade drift.
+        void syncCalcToD1({
+          projectId: activeProjectId,
+          calcType: 'MANUAL_J',
+          inputs: { buildingType, rooms, conditions, __shadowRun: true },
+          outputs: {
+            ...j8Result,
+            __shadowRun: true,
+            __driftVsLegacy: driftPct,
+            __legacyTotals: {
+              heat: res.totalHeatingBtu,
+              sens: res.totalCoolingSensible,
+              latent: res.totalCoolingLatent,
+            },
+          },
+          engineVersion: MANUAL_J8_ENGINE_VERSION,
+          durationMs: j8DurationMs,
+        });
+      } catch (err) {
+        // Adapter or engine threw — log a finding but don't disrupt the user
+        // eslint-disable-next-line no-console
+        console.warn('[engine drift] manualJ8 shadow-run failed:', err);
+        // Persist the failure as a marker record so the Q/A panel can
+        // surface "shadow-run failure rate" — high failure indicates the
+        // construction registry needs more variants for production climates.
+        void syncCalcToD1({
+          projectId: activeProjectId,
+          calcType: 'MANUAL_J',
+          inputs: { buildingType, rooms, conditions, __shadowRun: true },
+          outputs: {
+            __shadowRun: true,
+            __shadowRunFailure: true,
+            __error: err instanceof Error ? err.message : String(err),
+          },
+          engineVersion: `${MANUAL_J8_ENGINE_VERSION}-fail`,
+          durationMs: 0,
+        });
+      }
+    }
   };
 
   const resetAll = () => {
@@ -436,9 +477,18 @@ export default function ManualJCalculator() {
     const safeProjectName = projectName.replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '_').slice(0, 40);
 
     // ── Helper: page footer with watermark, standard, page number ───
+    // Engine stamp lets a reviewer trace this PDF's numbers back to a
+    // specific engine release. Today the displayed values come from the
+    // legacy engine; once Phase 2 flips, the stamp switches to the
+    // cert-grade version. Reviewer can match this against the
+    // `engine_version` column on the calc record in D1.
+    const engineStamp = usePreferencesStore.getState().engineVersion === 'manualJ8'
+      ? `Engine ${MANUAL_J8_ENGINE_VERSION} (cert-grade)`
+      : 'Engine manualJ-legacy-1.0 (production display)';
     const drawFooter = () => {
       doc.setFont('helvetica', 'normal'); doc.setFontSize(6); doc.setTextColor(150);
       doc.text(`${watermark}  \u2014  ACCA Manual J 8th Edition (ANSI/ACCA 2-2016)  \u2014  ASHRAE 62.2-2022`, margin, ph - 20);
+      doc.text(engineStamp, margin, ph - 12);
       doc.text(`Page ${pageNum}`, pw - margin, ph - 20, { align: 'right' });
       doc.text(dateStr, pw / 2, ph - 20, { align: 'center' });
     };

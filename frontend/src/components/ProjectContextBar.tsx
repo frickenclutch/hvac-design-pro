@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, FolderOpen, Home, Building2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ChevronDown, FolderOpen, Home, Building2, Globe } from 'lucide-react';
 import { useProjectStore } from '../stores/useProjectStore';
 import { getCachedProjects, type Project } from '../features/projects/projectStorage';
 
@@ -21,6 +22,7 @@ export default function ProjectContextBar() {
   }, [dropdownOpen]);
 
   const projects: Project[] = getCachedProjects();
+  const activeProject = projects.find(p => p.id === activeProjectId);
 
   if (!activeProjectId) {
     return (
@@ -52,6 +54,19 @@ export default function ProjectContextBar() {
           <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500 bg-slate-800/80 px-2 py-0.5 rounded-md flex-shrink-0">
             {activeProjectType}
           </span>
+        )}
+
+        {/* Shared-to-Community chip — appears when the owner has posted
+            this project to /community. Click to jump to the public view. */}
+        {activeProject?.isPublic && (
+          <Link
+            to={`/community/${activeProject.id}`}
+            title="Shared to Community — open public view + comments"
+            className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-violet-400 bg-violet-500/10 border border-violet-500/30 hover:bg-violet-500/20 px-2 py-0.5 rounded-md flex-shrink-0 transition-colors"
+          >
+            <Globe className="w-3 h-3" />
+            <span className="hidden md:inline">Shared</span>
+          </Link>
         )}
 
         {/* Switch dropdown */}

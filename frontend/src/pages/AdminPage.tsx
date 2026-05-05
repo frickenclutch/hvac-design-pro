@@ -140,6 +140,10 @@ function QaBenchmarksSection() {
             duration={state.data.calcDuration}
             audit={state.data.auditVolume}
           />
+          <ShadowRunDriftCard
+            drift={state.data.shadowRunDrift}
+            reliability={state.data.shadowRunReliability}
+          />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
             <BreakdownTable
               title="Calc-type mix (all-time)"
@@ -151,6 +155,96 @@ function QaBenchmarksSection() {
         </>
       )}
     </SectionShell>
+  );
+}
+
+// Phase 1 shadow-run drift aggregate — surfaces the cross-user data
+// that was previously only console-visible. Drives the Phase 2 trigger
+// criteria from docs/option-e-ui-migration-plan.md (≤ 5% drift on real
+// projects). Reliability tile shows shadow-run success vs failure rate
+// — high failure means the construction registry needs more variants.
+function ShadowRunDriftCard({
+  drift, reliability,
+}: {
+  drift: {
+    sample_size: number | null;
+    avg_abs_heat_pct: number | null;
+    avg_abs_sens_pct: number | null;
+    avg_abs_latent_pct: number | null;
+    max_abs_heat_pct: number | null;
+    max_abs_sens_pct: number | null;
+    max_abs_latent_pct: number | null;
+  } | null;
+  reliability: { shadow_success: number | null; shadow_failure: number | null } | null;
+}) {
+  const sample = drift?.sample_size ?? 0;
+  const succ = reliability?.shadow_success ?? 0;
+  const fail = reliability?.shadow_failure ?? 0;
+  const total = succ + fail;
+  const successRate = total > 0 ? (succ / total) * 100 : 0;
+  const fmtPct = (v: number | null | undefined) =>
+    v == null ? '—' : `${v.toFixed(2)}%`;
+
+  // Phase 2 trigger threshold from docs/option-e-ui-migration-plan.md
+  const PHASE_2_DRIFT_TARGET = 5.0;
+  const meets = (v: number | null | undefined) =>
+    v != null && Math.abs(v) <= PHASE_2_DRIFT_TARGET;
+
+  return (
+    <div className="rounded-xl border border-slate-800/40 bg-slate-900/40 p-4 mt-3">
+      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <BadgeCheck className="w-4 h-4 text-amber-400" />
+          <h3 className="font-bold text-white text-sm">Phase 1 shadow-run drift (last 30 d)</h3>
+        </div>
+        <span className="text-[10px] text-slate-500 font-mono">
+          n = {sample}  ·  Phase 2 target: |drift| ≤ {PHASE_2_DRIFT_TARGET}%
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+        <div className="rounded-lg bg-slate-950/50 border border-slate-800/50 p-2.5">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Heat avg drift</div>
+          <div className={`font-bold tabular-nums text-base mt-0.5 ${meets(drift?.avg_abs_heat_pct) ? 'text-emerald-400' : drift?.avg_abs_heat_pct != null ? 'text-amber-400' : 'text-slate-500'}`}>
+            {fmtPct(drift?.avg_abs_heat_pct)}
+          </div>
+          <div className="text-[10px] text-slate-500 mt-0.5 font-mono">
+            max {fmtPct(drift?.max_abs_heat_pct)}
+          </div>
+        </div>
+        <div className="rounded-lg bg-slate-950/50 border border-slate-800/50 p-2.5">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Sens avg drift</div>
+          <div className={`font-bold tabular-nums text-base mt-0.5 ${meets(drift?.avg_abs_sens_pct) ? 'text-emerald-400' : drift?.avg_abs_sens_pct != null ? 'text-amber-400' : 'text-slate-500'}`}>
+            {fmtPct(drift?.avg_abs_sens_pct)}
+          </div>
+          <div className="text-[10px] text-slate-500 mt-0.5 font-mono">
+            max {fmtPct(drift?.max_abs_sens_pct)}
+          </div>
+        </div>
+        <div className="rounded-lg bg-slate-950/50 border border-slate-800/50 p-2.5">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Latent avg drift</div>
+          <div className={`font-bold tabular-nums text-base mt-0.5 ${meets(drift?.avg_abs_latent_pct) ? 'text-emerald-400' : drift?.avg_abs_latent_pct != null ? 'text-amber-400' : 'text-slate-500'}`}>
+            {fmtPct(drift?.avg_abs_latent_pct)}
+          </div>
+          <div className="text-[10px] text-slate-500 mt-0.5 font-mono">
+            max {fmtPct(drift?.max_abs_latent_pct)}
+          </div>
+        </div>
+        <div className="rounded-lg bg-slate-950/50 border border-slate-800/50 p-2.5">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Shadow reliability</div>
+          <div className={`font-bold tabular-nums text-base mt-0.5 ${successRate >= 95 ? 'text-emerald-400' : total > 0 ? 'text-amber-400' : 'text-slate-500'}`}>
+            {total > 0 ? `${successRate.toFixed(1)}%` : '—'}
+          </div>
+          <div className="text-[10px] text-slate-500 mt-0.5 font-mono">
+            {succ} ok · {fail} fail
+          </div>
+        </div>
+      </div>
+
+      <p className="text-[11px] text-slate-500">
+        Drift = (cert-grade − legacy) / legacy, taken on every Manual J calc that ran the shadow engine successfully. Failures (engine throws on unmapped construction) accrue separately under reliability — high failure rate indicates the registry needs more variants.
+      </p>
+    </div>
   );
 }
 

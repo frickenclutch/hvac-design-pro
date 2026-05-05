@@ -80,6 +80,16 @@ export default function Dashboard() {
     setShareSubmitting(true);
     try {
       await api.forumShareProject(shareTarget.id, makePublic, shareSummary.trim() || undefined);
+      // Optimistic local update — patch the project's share state in
+      // both the in-memory list and the localStorage cache so the tile
+      // chip flips immediately without waiting for a re-fetch from D1.
+      const targetId = shareTarget.id;
+      const summary = shareSummary.trim();
+      setProjects(prev => prev.map(p =>
+        p.id === targetId
+          ? { ...p, isPublic: makePublic, shareSummary: makePublic ? summary : undefined }
+          : p
+      ));
       toast.success(makePublic ? 'Shared to Community.' : 'Sharing turned off.');
       setShareTarget(null);
     } catch (err) {
@@ -390,6 +400,17 @@ export default function Dashboard() {
                     {proj.status}
                   </span>
                   <SyncStatusChip project={proj} onMigrate={migrateToCloud} />
+                  {proj.isPublic && (
+                    <Link
+                      to={`/community/${proj.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      title="Shared to Community — click to open public view"
+                      className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full flex-shrink-0 bg-violet-500/10 text-violet-400 border border-violet-500/30 hover:bg-violet-500/20 transition-colors"
+                    >
+                      <Globe className="w-3 h-3" />
+                      <span className="hidden lg:inline">Shared</span>
+                    </Link>
+                  )}
 
                   {/* Collapse/expand toggle */}
                   {!isEditing && (
