@@ -20,6 +20,7 @@ import {
 import { api } from '../../lib/api';
 import { toast } from '../../stores/useToastStore';
 import type { Project } from '../projects/projectStorage';
+import ExternalAuthorityResources from './ExternalAuthorityResources';
 
 interface AuthorityCandidate {
   id: string; name: string; slug: string;
@@ -241,9 +242,31 @@ export default function SubmitForReviewModal({
           )}
 
           {!searching && authorities.length === 0 && (zip || state || county) && (
-            <p className="text-xs text-slate-500 italic">
-              No authorities matched these criteria. Try broadening — search just by state, or browse by type.
-            </p>
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-xs font-bold text-amber-300 mb-1">
+                    No on-platform authorities matched these criteria.
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    The platform's authority directory grows as municipalities sign up. Try broadening (search just by state, or by type), or use the resources below to find your AHJ on the open web. You can also invite them to join the platform — see the bottom of this modal.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* External resources — always available; auto-expanded when no
+              on-platform matches so the empty state isn't a dead end. */}
+          {!searching && (
+            <ExternalAuthorityResources
+              zip={zip || undefined}
+              state={state || undefined}
+              county={county || undefined}
+              defaultOpen={authorities.length === 0 && (!!zip || !!state || !!county)}
+              projectAddress={[project.address, project.city, project.state, project.zip].filter(Boolean).join(', ') || undefined}
+            />
           )}
 
           {/* Step 2/3 — Selected authority + submission form */}
