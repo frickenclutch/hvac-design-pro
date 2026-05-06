@@ -631,7 +631,7 @@ export default function CadCanvas() {
     const floor = state.floors.find(f => f.id === state.activeFloorId);
     if (!floor) return;
 
-    // Remove all existing CAD objects (keep grid/ghost)
+    // Remove all existing CAD objects (keep grid and the active drawing-preview ghost)
     const toRemove = canvas.getObjects().filter(obj => {
       const n = (obj as any).name as string | undefined;
       if (!n) return false;
@@ -639,7 +639,8 @@ export default function CadCanvas() {
              n.startsWith(PREFIX.hvac) || n.startsWith(PREFIX.pipe) ||
              n.startsWith(PREFIX.duct) || n.startsWith(PREFIX.fitting) ||
              n.startsWith(PREFIX.radiant) || n.startsWith(PREFIX.annotation) ||
-             n.startsWith(PREFIX.room) || n.startsWith(PREFIX.underlay);
+             n.startsWith(PREFIX.room) || n.startsWith(PREFIX.underlay) ||
+             n.startsWith(`${PREFIX.ghost}floor_`);
     });
     toRemove.forEach(obj => canvas.remove(obj));
 
