@@ -1190,13 +1190,20 @@ function processCommands(query: string, context: MasonContext): string | null {
       'code':        ['/permits', 'Permits'],
       'enforcement': ['/permits', 'Permits'],
       'approval':    ['/permits', 'Permits'],
+      'audit':       ['/audit-log', 'Audit Log'],
+      'audit-log':   ['/audit-log', 'Audit Log'],
+      'log':         ['/audit-log', 'Audit Log'],
+      'history':     ['/audit-log', 'Audit Log'],
+      'trail':       ['/audit-log', 'Audit Log'],
+      'who':         ['/audit-log', 'Audit Log'],
+      'changes':     ['/audit-log', 'Audit Log'],
     };
     const match = routes[target];
     if (match) {
       setTimeout(() => { window.location.href = match[0]; }, 500);
       return `Navigating to **${match[1]}**...`;
     }
-    return `I don't recognize "${target}". Try: manual-j, manual-d, aed, cad, settings, dashboard, guide, team, community, permits, or admin.`;
+    return `I don't recognize "${target}". Try: manual-j, manual-d, aed, cad, settings, dashboard, guide, team, community, permits, audit-log, or admin.`;
   }
 
   // ── /calculate — trigger Manual J calculation ──────────────────────

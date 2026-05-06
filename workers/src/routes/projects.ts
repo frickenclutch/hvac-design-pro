@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { generateId } from '../utils/id';
+import { setAudit } from '../middleware/audit';
 
 interface Env {
   DB: D1Database;
@@ -55,6 +56,21 @@ projectRoutes.post('/', async (c) => {
          body.standard || 'ACCA', body.projectType || 'Residential',
          body.status || 'active', user.id).run();
 
+  setAudit(c, {
+    action: 'project.create',
+    entityType: 'project',
+    entityId: id,
+    entityLabel: body.name.trim(),
+    projectId: id,
+    detail: {
+      address: body.address || null,
+      city: body.city || null,
+      state: body.state || null,
+      standard: body.standard || 'ACCA',
+      projectType: body.projectType || 'Residential',
+    },
+  });
+
   const project = await c.env.DB.prepare('SELECT * FROM projects WHERE id = ?').bind(id).first();
   return c.json({ project }, 201);
 });
@@ -65,18 +81,25 @@ projectRoutes.put('/:id', async (c) => {
   const id = c.req.param('id');
   const body = await c.req.json();
 
+  // Snapshot pre-edit state for the audit log diff.
+  const before = await c.env.DB.prepare(
+    'SELECT name, address, city, state, zip, climate_zone, standard, project_type, status FROM projects WHERE id = ? AND org_id = ?'
+  ).bind(id, user.orgId).first();
+  if (!before) return c.json({ error: 'Not found' }, 404);
+
   // Build dynamic SET so partial updates don't null out other fields
   const updates: string[] = [];
   const values: unknown[] = [];
-  if (body.name !== undefined) { updates.push('name = ?'); values.push(body.name); }
-  if (body.address !== undefined) { updates.push('address = ?'); values.push(body.address); }
-  if (body.city !== undefined) { updates.push('city = ?'); values.push(body.city); }
-  if (body.state !== undefined) { updates.push('state = ?'); values.push(body.state); }
-  if (body.zip !== undefined) { updates.push('zip = ?'); values.push(body.zip); }
-  if (body.climateZone !== undefined) { updates.push('climate_zone = ?'); values.push(body.climateZone); }
-  if (body.standard !== undefined) { updates.push('standard = ?'); values.push(body.standard); }
-  if (body.projectType !== undefined) { updates.push('project_type = ?'); values.push(body.projectType); }
-  if (body.status !== undefined) { updates.push('status = ?'); values.push(body.status); }
+  const after: Record<string, unknown> = {};
+  if (body.name !== undefined) { updates.push('name = ?'); values.push(body.name); after.name = body.name; }
+  if (body.address !== undefined) { updates.push('address = ?'); values.push(body.address); after.address = body.address; }
+  if (body.city !== undefined) { updates.push('city = ?'); values.push(body.city); after.city = body.city; }
+  if (body.state !== undefined) { updates.push('state = ?'); values.push(body.state); after.state = body.state; }
+  if (body.zip !== undefined) { updates.push('zip = ?'); values.push(body.zip); after.zip = body.zip; }
+  if (body.climateZone !== undefined) { updates.push('climate_zone = ?'); values.push(body.climateZone); after.climate_zone = body.climateZone; }
+  if (body.standard !== undefined) { updates.push('standard = ?'); values.push(body.standard); after.standard = body.standard; }
+  if (body.projectType !== undefined) { updates.push('project_type = ?'); values.push(body.projectType); after.project_type = body.projectType; }
+  if (body.status !== undefined) { updates.push('status = ?'); values.push(body.status); after.status = body.status; }
 
   if (updates.length === 0) {
     return c.json({ error: 'No fields to update' }, 400);
@@ -91,6 +114,18 @@ projectRoutes.put('/:id', async (c) => {
 
   const project = await c.env.DB.prepare('SELECT * FROM projects WHERE id = ? AND org_id = ?').bind(id, user.orgId).first();
   if (!project) return c.json({ error: 'Not found' }, 404);
+
+  setAudit(c, {
+    action: 'project.update',
+    entityType: 'project',
+    entityId: id,
+    entityLabel: (project.name as string) ?? (before.name as string),
+    projectId: id,
+    beforeValue: before as Record<string, unknown>,
+    afterValue: after,
+    detail: { fieldsChanged: Object.keys(after) },
+  });
+
   return c.json({ project });
 });
 
@@ -99,8 +134,26 @@ projectRoutes.delete('/:id', async (c) => {
   const user = c.get('user');
   const id = c.req.param('id');
 
-  await c.env.DB.prepare('DELETE FROM projects WHERE id = ? AND org_id = ?')
+  // Capture entity name before delete so the audit row stays meaningful
+  // when someone reviews "what got deleted last week" months from now.
+  const before = await c.env.DB.prepare(
+    'SELECT name, address, city, state, standard FROM projects WHERE id = ? AND org_id = ?'
+  ).bind(id, user.orgId).first();
+
+  const r = await c.env.DB.prepare('DELETE FROM projects WHERE id = ? AND org_id = ?')
     .bind(id, user.orgId).run();
+
+  if (before) {
+    setAudit(c, {
+      action: 'project.delete',
+      entityType: 'project',
+      entityId: id,
+      entityLabel: before.name as string,
+      projectId: id,
+      beforeValue: before as Record<string, unknown>,
+      detail: { rowsDeleted: r.meta.changes ?? 0 },
+    });
+  }
 
   return c.json({ ok: true });
 });

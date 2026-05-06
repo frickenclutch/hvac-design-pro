@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { api } from '../lib/api';
+import AuditLogView from '../components/AuditLogView';
 
 type LoadState<T> =
   | { status: 'idle' }
@@ -594,39 +595,17 @@ function OrgDetailPanel({ id, onClose }: { id: string; onClose: () => void }) {
 
 // ── Audit ────────────────────────────────────────────────────────────────────
 function AuditSection() {
-  const [state, refresh] = useLoad(() => api.platformAudit(50));
-
+  // Replaces the old "last 50 cross-org events" stub. Now renders the
+  // shared rich audit log view in platform scope, with filters, drill-
+  // through, before/after diffs, and pagination — same component as the
+  // tenant-facing /audit-log page.
   return (
     <SectionShell
       icon={<Activity className="w-4 h-4" />}
-      title="Audit feed"
-      subtitle="Most recent cross-org events (last 50)"
-      onRefresh={refresh}
-      loading={state.status === 'loading'}
+      title="Audit log"
+      subtitle="Every authenticated mutation across every tenant — filter, drill, expand for diffs"
     >
-      {state.status === 'error' && <ErrorBlock message={state.message} />}
-      {state.status === 'ok' && (
-        <>
-          {state.data.events.length === 0 ? (
-            <p className="text-xs text-slate-500 italic">
-              No audit events recorded yet. Audit writes land in a future unit.
-            </p>
-          ) : (
-            <div className="space-y-1">
-              {state.data.events.map((e, i) => (
-                <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-900/40 border border-slate-800/40 text-xs">
-                  <span className="text-slate-500 font-mono w-32 truncate">
-                    {new Date(e.created_at as string).toLocaleString()}
-                  </span>
-                  <span className="font-bold text-slate-200 w-32 truncate">{e.action as string}</span>
-                  <span className="text-slate-400 truncate">{(e.org_name as string) ?? (e.org_id as string)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          <RawJsonDrawer payload={state.data} />
-        </>
-      )}
+      <AuditLogView scope="platform" showOrgFilter />
     </SectionShell>
   );
 }

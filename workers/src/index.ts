@@ -10,7 +10,9 @@ import { feedbackRoutes } from './routes/feedback';
 import { platformRoutes } from './routes/platform';
 import { forumRoutes } from './routes/forum';
 import { permitRoutes } from './routes/permits';
+import { auditRoutes } from './routes/audit';
 import { authMiddleware } from './middleware/auth';
+import { auditMiddleware } from './middleware/audit';
 
 export interface Env {
   DB: D1Database;
@@ -45,6 +47,9 @@ app.route('/api/auth', authRoutes);
 
 // Protected routes
 app.use('/api/*', authMiddleware);
+// Audit middleware runs AFTER auth so user context is on c — every mutation
+// gets logged with HTTP envelope; handlers add semantic detail via setAudit.
+app.use('/api/*', auditMiddleware());
 app.route('/api/org', orgRoutes);
 app.route('/api/projects', projectRoutes);
 app.route('/api/calculations', calcRoutes);
@@ -54,5 +59,6 @@ app.route('/api/feedback', feedbackRoutes);
 app.route('/api/platform', platformRoutes);
 app.route('/api/forum', forumRoutes);
 app.route('/api/permits', permitRoutes);
+app.route('/api/audit-log', auditRoutes);
 
 export default app;

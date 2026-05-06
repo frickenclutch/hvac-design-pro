@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { generateId } from '../utils/id';
+import { setAudit } from '../middleware/audit';
 
 interface Env {
   DB: D1Database;
@@ -37,6 +38,30 @@ calcRoutes.post('/', async (c) => {
   ).bind(id, body.projectId, user.orgId, body.calcType, version,
          JSON.stringify(body.inputs), JSON.stringify(body.outputs),
          body.engineVersion || '1.0.0', user.id, body.durationMs || 0).run();
+
+  // Calc records are immutable, so audit just notes the run; the calc
+  // itself IS the audit record for the inputs/outputs. We capture the
+  // identifying metadata here so the audit feed surfaces "Nathan ran a
+  // Manual J on Smith Residence" without the reviewer needing to load
+  // the calc detail.
+  const project = await c.env.DB.prepare(
+    'SELECT name FROM projects WHERE id = ? AND org_id = ?'
+  ).bind(body.projectId, user.orgId).first();
+
+  setAudit(c, {
+    action: `calculation.${String(body.calcType ?? 'unknown').toLowerCase()}.run`,
+    entityType: 'calculation',
+    entityId: id,
+    entityLabel: `${body.calcType} v${version}${project?.name ? ` — ${project.name}` : ''}`,
+    projectId: body.projectId,
+    detail: {
+      calcType: body.calcType,
+      version,
+      engineVersion: body.engineVersion || '1.0.0',
+      durationMs: body.durationMs || 0,
+      projectName: project?.name ?? null,
+    },
+  });
 
   return c.json({ id, version }, 201);
 });

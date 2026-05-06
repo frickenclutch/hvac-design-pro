@@ -15,7 +15,7 @@ import {
   Search, X, FileText, Home, Thermometer, PenTool, Settings, Users, Sun, GitBranch,
   MapPin, Star, Wrench, Package, Navigation,
   ArrowRight, FolderOpen, Zap, Gauge, FileDown, Shield,
-  Globe, ShieldCheck, BookOpen,
+  Globe, ShieldCheck, BookOpen, Activity,
 } from 'lucide-react';
 import { useAuthStore } from '../auth/store/useAuthStore';
 import { ALL_RETAILERS } from '../retailer/data/retailers';
@@ -55,6 +55,7 @@ function getPageResults(navigate: (path: string) => void, isPlatformAdmin: boole
     { id: 'page-team', category: 'page', title: 'Team Management', subtitle: 'Members, invites, claimed domain', icon: <Users className="w-4 h-4" />, action: () => navigate('/team') },
     { id: 'page-community', category: 'page', title: 'Community', subtitle: 'Cross-tenant project board + comments', icon: <Globe className="w-4 h-4" />, action: () => navigate('/community') },
     { id: 'page-permits', category: 'page', title: 'Permits', subtitle: 'Submission queue + decisions (authority + submitter views)', icon: <ShieldCheck className="w-4 h-4" />, action: () => navigate('/permits') },
+    { id: 'page-audit-log', category: 'page', title: 'Audit log', subtitle: 'Who did what — every action, your tenant', icon: <Activity className="w-4 h-4" />, action: () => navigate('/audit-log') },
     { id: 'page-guide', category: 'page', title: 'User Guide', subtitle: 'Easy-mode + advanced docs for every feature', icon: <BookOpen className="w-4 h-4" />, action: () => navigate('/guide') },
     { id: 'page-terms', category: 'page', title: 'Terms of Service', subtitle: 'C4 Technologies legal terms', icon: <Shield className="w-4 h-4" />, action: () => navigate('/terms') },
   ];

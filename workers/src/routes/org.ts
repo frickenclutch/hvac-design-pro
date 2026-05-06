@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { setAudit } from '../middleware/audit';
 
 interface Env {
   DB: D1Database;
@@ -81,6 +82,13 @@ orgRoutes.put('/authority', async (c) => {
     return cleaned.length === 0 ? null : JSON.stringify(cleaned);
   };
 
+  const before = await c.env.DB.prepare(
+    `SELECT authority_type, authority_title, jurisdiction_states,
+            jurisdiction_counties, jurisdiction_zips, authority_intake_notes,
+            authority_intake_email
+     FROM organisations WHERE id = ?`
+  ).bind(user.orgId).first();
+
   await c.env.DB.prepare(
     `UPDATE organisations
        SET authority_type = ?,
@@ -102,6 +110,22 @@ orgRoutes.put('/authority', async (c) => {
     user.orgId,
   ).run();
 
+  setAudit(c, {
+    action: authorityType ? 'org.authority.configure' : 'org.authority.clear',
+    entityType: 'organisation',
+    entityId: user.orgId,
+    entityLabel: body.authorityTitle || null,
+    beforeValue: before as Record<string, unknown>,
+    afterValue: {
+      authority_type: authorityType,
+      authority_title: body.authorityTitle ?? null,
+      jurisdiction_states: body.jurisdictionStates ?? null,
+      jurisdiction_counties: body.jurisdictionCounties ?? null,
+      jurisdiction_zips: body.jurisdictionZips ?? null,
+      authority_intake_email: body.intakeEmail ?? null,
+    },
+  });
+
   return c.json({ ok: true });
 });
 
@@ -116,11 +140,25 @@ orgRoutes.patch('/users/:id/authority', async (c) => {
   const body = await c.req.json();
   const flag = !!body.isPermitAuthority;
 
+  const target = await c.env.DB.prepare(
+    `SELECT email, is_permit_authority FROM users WHERE id = ? AND org_id = ?`
+  ).bind(targetId, user.orgId).first();
+
   const r = await c.env.DB.prepare(
     `UPDATE users SET is_permit_authority = ? WHERE id = ? AND org_id = ?`
   ).bind(flag ? 1 : 0, targetId, user.orgId).run();
 
   if (!r.meta.changes) return c.json({ error: 'Member not found' }, 404);
+
+  setAudit(c, {
+    action: flag ? 'user.authority.grant' : 'user.authority.revoke',
+    entityType: 'user',
+    entityId: targetId,
+    entityLabel: target?.email as string,
+    beforeValue: { is_permit_authority: Number(target?.is_permit_authority ?? 0) === 1 },
+    afterValue: { is_permit_authority: flag },
+  });
+
   return c.json({ ok: true, isPermitAuthority: flag });
 });
 
@@ -186,6 +224,11 @@ orgRoutes.put('/', async (c) => {
     return c.json({ error: 'No fields to update' }, 400);
   }
 
+  const before = await db.prepare(
+    `SELECT name, org_type, region_code, city, state, zip, country, phone, default_standard
+     FROM organisations WHERE id = ?`
+  ).bind(user.orgId).first();
+
   values.push(user.orgId);
 
   await db.prepare(
@@ -197,6 +240,23 @@ orgRoutes.put('/', async (c) => {
     `SELECT id, name, org_type, region_code, address_line1, city, state, zip, country, phone, settings, default_standard
      FROM organisations WHERE id = ?`
   ).bind(user.orgId).first();
+
+  setAudit(c, {
+    action: 'org.update',
+    entityType: 'organisation',
+    entityId: user.orgId,
+    entityLabel: org!.name as string,
+    beforeValue: before as Record<string, unknown>,
+    afterValue: {
+      name: org!.name,
+      orgType: org!.org_type,
+      regionCode: org!.region_code,
+      city: org!.city,
+      state: org!.state,
+      defaultStandard: org!.default_standard,
+    },
+    detail: { fieldsChanged: Object.keys(body).filter((k) => body[k] !== undefined) },
+  });
 
   return c.json({
     organisation: {
@@ -288,12 +348,25 @@ orgRoutes.put('/domain', async (c) => {
     }
   }
 
+  const before = await c.env.DB.prepare(
+    `SELECT claimed_domain FROM organisations WHERE id = ?`
+  ).bind(user.orgId).first();
+
   await c.env.DB.prepare(
     `UPDATE organisations
      SET claimed_domain = ?,
          domain_verified_at = NULL
      WHERE id = ?`
   ).bind(domain || null, user.orgId).run();
+
+  setAudit(c, {
+    action: domain ? 'org.domain.claim' : 'org.domain.clear',
+    entityType: 'organisation',
+    entityId: user.orgId,
+    entityLabel: domain || (before?.claimed_domain as string) || null,
+    beforeValue: { claimed_domain: before?.claimed_domain ?? null },
+    afterValue: { claimed_domain: domain || null },
+  });
 
   return c.json({ domain: domain || null, verifiedAt: null });
 });
@@ -354,6 +427,14 @@ orgRoutes.post('/invite', async (c) => {
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).bind(id, user.orgId, email, role, user.id, token, expiresAt).run();
 
+  setAudit(c, {
+    action: 'org.invite.create',
+    entityType: 'org_invite',
+    entityId: id,
+    entityLabel: email,
+    detail: { invitedEmail: email, invitedRole: role, expiresAt },
+  });
+
   return c.json({
     id,
     invitedEmail: email,
@@ -371,6 +452,10 @@ orgRoutes.delete('/invites/:id', async (c) => {
   }
   const id = c.req.param('id');
 
+  const before = await c.env.DB.prepare(
+    `SELECT invited_email, invited_role FROM org_invites WHERE id = ? AND org_id = ?`
+  ).bind(id, user.orgId).first();
+
   const r = await c.env.DB.prepare(
     `UPDATE org_invites
        SET status = 'revoked'
@@ -378,6 +463,15 @@ orgRoutes.delete('/invites/:id', async (c) => {
   ).bind(id, user.orgId).run();
 
   if (!r.meta.changes) return c.json({ error: 'Invite not found' }, 404);
+
+  setAudit(c, {
+    action: 'org.invite.revoke',
+    entityType: 'org_invite',
+    entityId: id,
+    entityLabel: (before?.invited_email as string) ?? null,
+    beforeValue: before as Record<string, unknown>,
+  });
+
   return c.json({ ok: true });
 });
 
@@ -408,11 +502,26 @@ orgRoutes.patch('/users/:id', async (c) => {
     }
   }
 
+  const target = await c.env.DB.prepare(
+    `SELECT email, role FROM users WHERE id = ? AND org_id = ?`
+  ).bind(targetId, user.orgId).first();
+
   const r = await c.env.DB.prepare(
     `UPDATE users SET role = ? WHERE id = ? AND org_id = ?`
   ).bind(role, targetId, user.orgId).run();
 
   if (!r.meta.changes) return c.json({ error: 'Member not found' }, 404);
+
+  setAudit(c, {
+    action: 'user.role_changed',
+    entityType: 'user',
+    entityId: targetId,
+    entityLabel: target?.email as string,
+    beforeValue: { role: target?.role },
+    afterValue: { role },
+    detail: { selfDemotion: targetId === user.id },
+  });
+
   return c.json({ ok: true, role });
 });
 
@@ -431,11 +540,24 @@ orgRoutes.delete('/users/:id', async (c) => {
     return c.json({ error: 'You cannot remove yourself.' }, 400);
   }
 
+  const target = await c.env.DB.prepare(
+    `SELECT email, role, first_name, last_name FROM users WHERE id = ? AND org_id = ?`
+  ).bind(targetId, user.orgId).first();
+
   const r = await c.env.DB.prepare(
     `DELETE FROM users WHERE id = ? AND org_id = ?`
   ).bind(targetId, user.orgId).run();
 
   if (!r.meta.changes) return c.json({ error: 'Member not found' }, 404);
+
+  setAudit(c, {
+    action: 'user.remove',
+    entityType: 'user',
+    entityId: targetId,
+    entityLabel: target?.email as string,
+    beforeValue: target as Record<string, unknown>,
+  });
+
   return c.json({ ok: true });
 });
 
@@ -483,11 +605,24 @@ orgRoutes.put('/profile', async (c) => {
     return c.json({ error: 'No fields to update' }, 400);
   }
 
+  const before = await db.prepare(
+    `SELECT first_name, last_name, phone FROM users WHERE id = ?`
+  ).bind(user.id).first();
+
   values.push(user.id);
 
   await db.prepare(
     `UPDATE users SET ${updates.join(', ')} WHERE id = ?`
   ).bind(...values).run();
+
+  setAudit(c, {
+    action: 'user.profile.update',
+    entityType: 'user',
+    entityId: user.id,
+    entityLabel: user.email,
+    beforeValue: before as Record<string, unknown>,
+    afterValue: { firstName, lastName, phone, preferencesUpdated: preferences !== undefined },
+  });
 
   // Return updated profile
   const row = await db.prepare(

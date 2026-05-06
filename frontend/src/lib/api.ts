@@ -4,6 +4,51 @@ import { toast } from '../stores/useToastStore';
 // When unset, API calls go to same origin (Pages functions or local dev proxy)
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
+// ── Audit log types — exported so pages and tabs can share them ──────────
+export interface AuditEvent {
+  id: string;
+  createdAt: string;
+  action: string;
+  method: string | null;
+  path: string | null;
+  statusCode: number | null;
+  durationMs: number | null;
+  actor: {
+    userId: string | null;
+    orgId: string | null;
+    role: string | null;
+    email: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    orgName: string | null;
+    isPlatformAction: boolean;
+  };
+  target: { orgId: string | null; orgName: string | null };
+  entity: {
+    type: string | null;
+    id: string | null;
+    label: string | null;
+    projectId: string | null;
+  };
+  detail: unknown;
+  beforeValue: unknown;
+  afterValue: unknown;
+  network: { ip: string | null; userAgent: string | null; requestId: string | null };
+}
+
+export interface AuditLogQuery {
+  scope?: 'platform' | 'tenant';
+  userId?: string;
+  entityType?: string;
+  entityId?: string;
+  projectId?: string;
+  action?: string;
+  orgId?: string;
+  since?: string;
+  limit?: number;
+  cursor?: string;
+}
+
 const MAX_RETRIES = 2;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -280,6 +325,47 @@ class ApiClient {
       events: Array<Record<string, unknown>>;
       limit: number;
     }>(`/api/platform/audit?limit=${limit}`);
+  }
+
+  // ── Audit log ────────────────────────────────────────────────────────────
+  // Tenant scope: admins see org-wide feed (own + target_org_id), non-admins
+  // see only their own. Pass scope='platform' to get the cross-tenant view
+  // (server checks isPlatformAdmin and falls through to tenant scope if not).
+  auditLog(opts: AuditLogQuery = {}) {
+    const qs = new URLSearchParams();
+    if (opts.scope) qs.set('scope', opts.scope);
+    if (opts.userId) qs.set('userId', opts.userId);
+    if (opts.entityType) qs.set('entityType', opts.entityType);
+    if (opts.entityId) qs.set('entityId', opts.entityId);
+    if (opts.projectId) qs.set('projectId', opts.projectId);
+    if (opts.action) qs.set('action', opts.action);
+    if (opts.orgId) qs.set('orgId', opts.orgId);
+    if (opts.since) qs.set('since', opts.since);
+    if (opts.limit) qs.set('limit', String(opts.limit));
+    if (opts.cursor) qs.set('cursor', opts.cursor);
+    return this.request<{
+      events: AuditEvent[];
+      scope: 'platform' | 'tenant';
+      nextCursor: string | null;
+      limit: number;
+    }>(`/api/audit-log${qs.toString() ? `?${qs.toString()}` : ''}`);
+  }
+
+  auditLogActions(scope?: 'platform' | 'tenant') {
+    const qs = scope ? `?scope=${scope}` : '';
+    return this.request<{ actions: string[] }>(`/api/audit-log/actions${qs}`);
+  }
+
+  auditLogEntity(type: string, id: string) {
+    return this.request<{
+      events: AuditEvent[];
+      entityType: string;
+      entityId: string;
+    }>(`/api/audit-log/entity/${encodeURIComponent(type)}/${encodeURIComponent(id)}`);
+  }
+
+  auditLogDetail(id: string) {
+    return this.request<{ event: AuditEvent }>(`/api/audit-log/${encodeURIComponent(id)}`);
   }
 
   async platformQaBenchmarks() {

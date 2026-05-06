@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { generateId } from '../utils/id';
 import { sendEmail, buildFeedbackEmail, parseEmailList } from '../utils/email';
+import { setAudit } from '../middleware/audit';
 
 interface Env {
   DB: D1Database;
@@ -81,6 +82,14 @@ feedbackRoutes.post('/', async (c) => {
 
     attachments.push({ filename: entry.name, contentType: entry.type, sizeBytes: entry.size });
   }
+
+  setAudit(c, {
+    action: `feedback.${type}.submit`,
+    entityType: 'feedback',
+    entityId: feedbackId,
+    entityLabel: text.trim().slice(0, 80),
+    detail: { type, context, attachmentCount: attachments.length },
+  });
 
   // Resolve recipients based on feedback type + env config
   const recipients = resolveRecipients(type, c.env);

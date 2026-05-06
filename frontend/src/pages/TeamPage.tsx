@@ -10,9 +10,10 @@
  */
 
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Users, UserPlus, Globe, Mail, Trash2, Shield, RefreshCw,
-  AlertTriangle, CheckCircle2, Copy, Crown, ShieldCheck,
+  AlertTriangle, CheckCircle2, Copy, Crown, ShieldCheck, Activity,
 } from 'lucide-react';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { api } from '../lib/api';
@@ -82,12 +83,20 @@ export default function TeamPage() {
             <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
               <Users className="w-6 h-6 text-emerald-400" />
             </div>
-            <div>
+            <div className="flex-1">
               <h2 className="text-3xl font-bold text-white">Team</h2>
               <p className="text-slate-400 text-sm">
                 {orgName ? `${orgName} · ` : ''}members of your organisation
               </p>
             </div>
+            <Link
+              to="/audit-log"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900/60 hover:bg-slate-800 border border-slate-700 text-sm text-slate-300 hover:text-emerald-300 transition-colors min-h-[44px]"
+              title="See every action taken by anyone in your organisation"
+            >
+              <Activity className="w-4 h-4" />
+              <span className="hidden md:inline">Audit log</span>
+            </Link>
           </div>
           {!isAdmin && (
             <p className="text-xs text-slate-500 mt-3">

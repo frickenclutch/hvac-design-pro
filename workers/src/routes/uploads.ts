@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { generateId } from '../utils/id';
+import { setAudit } from '../middleware/audit';
 
 interface Env {
   DB: D1Database;
@@ -33,6 +34,15 @@ uploadRoutes.post('/', async (c) => {
     `INSERT INTO file_uploads (id, org_id, project_id, r2_key, filename, content_type, size_bytes, purpose, uploaded_by)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(id, user.orgId, projectId, r2Key, file.name, file.type, file.size, purpose, user.id).run();
+
+  setAudit(c, {
+    action: `file.upload.${purpose}`,
+    entityType: 'file_upload',
+    entityId: id,
+    entityLabel: file.name,
+    projectId: projectId || undefined,
+    detail: { contentType: file.type, sizeBytes: file.size, purpose },
+  });
 
   return c.json({ id, r2Key, filename: file.name, contentType: file.type, sizeBytes: file.size }, 201);
 });
@@ -77,7 +87,7 @@ uploadRoutes.delete('/:id', async (c) => {
   const id = c.req.param('id');
 
   const record = await c.env.DB.prepare(
-    'SELECT r2_key FROM file_uploads WHERE id = ? AND org_id = ?'
+    'SELECT r2_key, filename, project_id, purpose FROM file_uploads WHERE id = ? AND org_id = ?'
   ).bind(id, user.orgId).first();
 
   if (!record) return c.json({ error: 'Not found' }, 404);
@@ -85,6 +95,15 @@ uploadRoutes.delete('/:id', async (c) => {
   // Delete from R2 and D1
   await c.env.STORAGE.delete(record.r2_key as string);
   await c.env.DB.prepare('DELETE FROM file_uploads WHERE id = ? AND org_id = ?').bind(id, user.orgId).run();
+
+  setAudit(c, {
+    action: 'file.delete',
+    entityType: 'file_upload',
+    entityId: id,
+    entityLabel: record.filename as string,
+    projectId: (record.project_id as string) ?? undefined,
+    beforeValue: { filename: record.filename, purpose: record.purpose, r2Key: record.r2_key },
+  });
 
   return c.json({ ok: true });
 });

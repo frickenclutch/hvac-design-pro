@@ -18,6 +18,7 @@
 
 import { Hono } from 'hono';
 import type { AuthUser } from '../middleware/auth';
+import { setAudit } from '../middleware/audit';
 
 interface Env {
   DB: D1Database;
@@ -71,6 +72,15 @@ forumRoutes.post('/projects/:id/share', async (c) => {
        WHERE id = ?`
     ).bind(id).run();
   }
+
+  setAudit(c, {
+    action: isPublic ? 'project.share.public' : 'project.share.private',
+    entityType: 'project',
+    entityId: id,
+    entityLabel: project.name as string,
+    projectId: id,
+    afterValue: { isPublic, summaryLength: isPublic ? summary.length : 0 },
+  });
 
   return c.json({ id, isPublic, summary: isPublic ? summary : null });
 });
@@ -177,6 +187,24 @@ forumRoutes.post('/projects/:id/comments', async (c) => {
      VALUES (?, ?, ?, ?, ?)`
   ).bind(commentId, id, user.id, user.orgId, text).run();
 
+  // Cross-tenant action — comments on someone else's public project show
+  // up in the project owner's audit feed via target_org_id. Same-tenant
+  // comments are still logged but target_org_id stays null.
+  const owner = await c.env.DB.prepare(
+    `SELECT org_id FROM projects WHERE id = ?`
+  ).bind(id).first();
+  const targetOrgId =
+    owner && owner.org_id !== user.orgId ? (owner.org_id as string) : undefined;
+
+  setAudit(c, {
+    action: 'project.comment',
+    entityType: 'project_comment',
+    entityId: commentId,
+    projectId: id,
+    targetOrgId,
+    detail: { length: text.length },
+  });
+
   return c.json({
     id: commentId,
     body: text,
@@ -191,6 +219,10 @@ forumRoutes.delete('/comments/:id', async (c) => {
   const user = c.get('user') as AuthUser;
   const id = c.req.param('id');
 
+  const before = await c.env.DB.prepare(
+    `SELECT project_id FROM project_comments WHERE id = ? AND author_user_id = ?`
+  ).bind(id, user.id).first();
+
   const r = await c.env.DB.prepare(
     `UPDATE project_comments
        SET deleted_at = datetime('now'),
@@ -201,5 +233,13 @@ forumRoutes.delete('/comments/:id', async (c) => {
   if (!r.meta.changes) {
     return c.json({ error: 'Comment not found or not yours' }, 404);
   }
+
+  setAudit(c, {
+    action: 'project.comment.delete',
+    entityType: 'project_comment',
+    entityId: id,
+    projectId: before?.project_id as string,
+  });
+
   return c.json({ ok: true });
 });

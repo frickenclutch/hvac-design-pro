@@ -18,6 +18,7 @@
 
 import { Hono } from 'hono';
 import type { AuthUser } from '../middleware/auth';
+import { setAudit } from '../middleware/audit';
 
 interface Env { DB: D1Database; }
 
@@ -96,6 +97,22 @@ permitRoutes.post('/submit', async (c) => {
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).bind(id, projectId, user.orgId, user.id, authorityOrgId,
          submissionType || null, coverLetter || null).run();
+
+  // Cross-tenant action — surfaces in BOTH the submitter's audit feed AND
+  // the authority org's feed via target_org_id.
+  setAudit(c, {
+    action: 'permit.submit',
+    entityType: 'permit_submission',
+    entityId: id,
+    entityLabel: `${authority.name} — ${project.name}`,
+    projectId,
+    targetOrgId: authorityOrgId,
+    detail: {
+      submissionType: submissionType || null,
+      authorityName: authority.name,
+      projectName: project.name,
+    },
+  });
 
   return c.json({ id, status: 'submitted' }, 201);
 });
@@ -229,6 +246,17 @@ permitRoutes.patch('/submissions/:id', async (c) => {
          SET status = 'withdrawn', updated_at = datetime('now')
        WHERE id = ?`,
     ).bind(id).run();
+
+    setAudit(c, {
+      action: 'permit.withdraw',
+      entityType: 'permit_submission',
+      entityId: id,
+      projectId: row.project_id as string,
+      targetOrgId: row.authority_org_id as string,
+      beforeValue: { status: row.status },
+      afterValue: { status: 'withdrawn' },
+    });
+
     return c.json({ ok: true, status: 'withdrawn' });
   }
 
@@ -276,6 +304,19 @@ permitRoutes.patch('/submissions/:id', async (c) => {
       ).bind(newStatus, user.id, id).run();
     }
 
+    // Authority decisions affect the SUBMITTER's tenant — log with
+    // target_org_id = submitter so the submitter's audit feed sees it.
+    setAudit(c, {
+      action: `permit.${action}`,
+      entityType: 'permit_submission',
+      entityId: id,
+      projectId: row.project_id as string,
+      targetOrgId: row.submitter_org_id as string,
+      beforeValue: { status: row.status },
+      afterValue: { status: newStatus, decisionNotes: decisionNotes || null,
+                    permitNumber: action === 'approve' ? (permitNumber || null) : null },
+    });
+
     return c.json({ ok: true, status: newStatus });
   }
 
@@ -308,6 +349,26 @@ permitRoutes.post('/submissions/:id/comments', async (c) => {
        (id, submission_id, author_user_id, author_org_id, body, is_internal)
      VALUES (?, ?, ?, ?, ?, ?)`,
   ).bind(cid, id, user.id, user.orgId, text, isInternal ? 1 : 0).run();
+
+  // Public comments cross to the other party's audit feed; internal ones
+  // stay within the authority org. Look up the other party for the
+  // target_org_id so the cross-tenant feed lights up correctly.
+  const sub = await c.env.DB.prepare(
+    `SELECT submitter_org_id, authority_org_id, project_id
+     FROM permit_submissions WHERE id = ?`
+  ).bind(id).first();
+  const otherOrgId = !isInternal && sub
+    ? (party === 'submitter' ? sub.authority_org_id : sub.submitter_org_id)
+    : null;
+
+  setAudit(c, {
+    action: isInternal ? 'permit.comment.internal' : 'permit.comment',
+    entityType: 'permit_submission',
+    entityId: id,
+    projectId: sub?.project_id as string,
+    targetOrgId: otherOrgId as string ?? undefined,
+    detail: { commentId: cid, length: text.length, party },
+  });
 
   return c.json({ id: cid, isInternal, created_at: new Date().toISOString() }, 201);
 });
