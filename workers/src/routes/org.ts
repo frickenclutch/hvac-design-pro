@@ -1,8 +1,17 @@
 import { Hono } from 'hono';
 import { setAudit } from '../middleware/audit';
+import { sendEmail, buildInviteEmail } from '../utils/email';
 
 interface Env {
   DB: D1Database;
+  RESEND_API_KEY?: string;
+  /** Override the From: address on outbound invitations.
+   *  Falls back to FEEDBACK_FROM_ADDRESS, then DEFAULT_FROM_ADDRESS in email.ts. */
+  INVITE_FROM_ADDRESS?: string;
+  FEEDBACK_FROM_ADDRESS?: string;
+  /** Public URL of the frontend — used to build the redemption link.
+   *  Defaults to the production Pages URL. */
+  FRONTEND_BASE_URL?: string;
 }
 
 export const orgRoutes = new Hono<{ Bindings: Env }>();
@@ -427,20 +436,79 @@ orgRoutes.post('/invite', async (c) => {
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).bind(id, user.orgId, email, role, user.id, token, expiresAt).run();
 
+  // Pull org name + inviter name for the email body. Both are denormalized
+  // into the email so the recipient can verify the invite is from someone
+  // they expect before clicking through.
+  const orgRow = await c.env.DB.prepare(
+    `SELECT name FROM organisations WHERE id = ?`
+  ).bind(user.orgId).first();
+  const inviterRow = await c.env.DB.prepare(
+    `SELECT first_name, last_name, email FROM users WHERE id = ?`
+  ).bind(user.id).first();
+
+  const inviterName = [
+    inviterRow?.first_name as string | undefined,
+    inviterRow?.last_name as string | undefined,
+  ].filter(Boolean).join(' ').trim() || (inviterRow?.email as string) || 'A teammate';
+  const inviterEmail = (inviterRow?.email as string) || '';
+  const orgName = (orgRow?.name as string) || 'their workspace';
+
+  // Where the redemption link points. The path resolves to OnboardingPage,
+  // which detects the ?invite query param and walks the new user through
+  // password setup before calling /api/auth/invite/:token/redeem.
+  const frontendBase = c.env.FRONTEND_BASE_URL || 'https://hvac-design-pro.pages.dev';
+  const redeemUrl = `${frontendBase}/onboarding?invite=${encodeURIComponent(token)}`;
+
+  // Send the email. waitUntil keeps the response fast — the API call
+  // returns immediately even if Resend is slow / down.
+  const inviteEmail = buildInviteEmail({
+    orgName,
+    inviterName,
+    inviterEmail,
+    invitedRole: role,
+    redeemUrl,
+    expiresAt,
+  });
+  inviteEmail.to = email;
+  const fromAddress = c.env.INVITE_FROM_ADDRESS || c.env.FEEDBACK_FROM_ADDRESS;
+  if (fromAddress) inviteEmail.from = fromAddress;
+
+  // Track delivery outcome so we can surface "email sent / failed" in the
+  // invite list. Awaited only to capture the result for the API response;
+  // the audit row gets the truth either way.
+  let emailResult: Awaited<ReturnType<typeof sendEmail>> | null = null;
+  try {
+    emailResult = await sendEmail(c.env.RESEND_API_KEY, inviteEmail);
+  } catch (err) {
+    console.error('[org.invite] email send threw:', err);
+  }
+
   setAudit(c, {
     action: 'org.invite.create',
     entityType: 'org_invite',
     entityId: id,
     entityLabel: email,
-    detail: { invitedEmail: email, invitedRole: role, expiresAt },
+    detail: {
+      invitedEmail: email,
+      invitedRole: role,
+      expiresAt,
+      emailSent: emailResult?.ok === true,
+      emailStatus: emailResult?.status ?? null,
+      emailError: emailResult?.error ?? null,
+    },
   });
 
   return c.json({
     id,
     invitedEmail: email,
     invitedRole: role,
-    token,           // Phase 2: drop from response once email delivery ships
+    // Token still returned so admins can copy the link out-of-band when
+    // email delivery is unreliable (corporate filters, etc).
+    token,
     expiresAt,
+    redeemUrl,
+    emailSent: emailResult?.ok === true,
+    emailError: emailResult?.ok ? null : (emailResult?.error ?? 'Email delivery is not configured'),
   }, 201);
 });
 

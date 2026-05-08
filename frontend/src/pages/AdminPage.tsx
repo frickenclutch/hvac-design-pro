@@ -18,7 +18,7 @@ import { Navigate } from 'react-router-dom';
 import {
   ShieldCheck, Activity, Building2, Users, FlaskConical, ChevronRight,
   RefreshCw, Cloud, AlertTriangle, Search, Eye, EyeOff,
-  CheckCircle2, Gauge, Database, BadgeCheck,
+  CheckCircle2, Gauge, Database, BadgeCheck, Trash2,
 } from 'lucide-react';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { api } from '../lib/api';
@@ -525,6 +525,29 @@ function OrgsSection() {
 
 function OrgDetailPanel({ id, onClose }: { id: string; onClose: () => void }) {
   const [state, refresh] = useLoad(() => api.platformOrgDetail(id), [id]);
+  // Banner messages for the cross-tenant role/authority/remove flow.
+  // Local state — the L0 admin sees their own success/failure for the
+  // action they just took without polluting the rest of the page.
+  const [info, setInfo] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+
+  const callerId = useAuthStore((s) => s.user?.id) ?? null;
+
+  const wrap = async (userId: string, fn: () => Promise<string>) => {
+    setErr(null);
+    setInfo(null);
+    setPendingId(userId);
+    try {
+      const msg = await fn();
+      setInfo(msg);
+      refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPendingId(null);
+    }
+  };
 
   return (
     <div className="mt-3 p-4 rounded-xl border border-amber-500/20 bg-amber-500/5">
@@ -558,32 +581,114 @@ function OrgDetailPanel({ id, onClose }: { id: string; onClose: () => void }) {
             <Stat label="Drawings" value={state.data.counts.drawing_count} compact />
           </div>
 
-          <h5 className="text-xs uppercase tracking-wider text-slate-500 font-bold mb-2">
-            Members ({state.data.users.length})
+          {info && (
+            <div className="mb-3 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 flex items-center gap-2">
+              <CheckCircle2 className="w-3.5 h-3.5" /> {info}
+            </div>
+          )}
+          {err && (
+            <div className="mb-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-300 flex items-center gap-2">
+              <AlertTriangle className="w-3.5 h-3.5" /> {err}
+            </div>
+          )}
+
+          <h5 className="text-xs uppercase tracking-wider text-slate-500 font-bold mb-2 flex items-center gap-2">
+            <span>Members ({state.data.users.length})</span>
+            <span className="text-[10px] text-slate-600 font-normal normal-case tracking-normal">
+              · L0 actions log to audit feed with platform_action=1
+            </span>
           </h5>
           <div className="space-y-1">
-            {state.data.users.map((u) => (
-              <div
-                key={u.id as string}
-                className="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-900/40 border border-slate-800/40 text-xs"
-              >
-                <div className="flex-1">
-                  <span className="font-bold text-slate-200">{u.first_name as string} {u.last_name as string}</span>
-                  <span className="text-slate-500 ml-2 font-mono">{u.email as string}</span>
+            {state.data.users.map((u) => {
+              const userId = u.id as string;
+              const isSelf = callerId === userId;
+              const role = u.role as 'admin' | 'engineer' | 'tech' | 'viewer';
+              const isAuth = Number(u.is_permit_authority ?? 0) === 1;
+              const busy = pendingId === userId;
+              return (
+                <div
+                  key={userId}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-900/40 border border-slate-800/40 text-xs"
+                >
+                  <div className="flex-1 min-w-0">
+                    <span className="font-bold text-slate-200">{u.first_name as string} {u.last_name as string}</span>
+                    <span className="text-slate-500 ml-2 font-mono truncate">{u.email as string}</span>
+                  </div>
+
+                  {u.is_platform_admin === 1 && (
+                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">
+                      Platform
+                    </span>
+                  )}
+                  {!u.is_verified && (
+                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-700/40 text-slate-500">
+                      Pending
+                    </span>
+                  )}
+                  {isSelf && (
+                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-700/40 text-slate-400">
+                      You
+                    </span>
+                  )}
+
+                  {/* Role dropdown — disabled for self (server enforces). */}
+                  <select
+                    value={role}
+                    disabled={isSelf || busy}
+                    onChange={(e) => {
+                      const next = e.target.value as 'admin' | 'engineer' | 'tech' | 'viewer';
+                      if (next === role) return;
+                      void wrap(userId, async () => {
+                        await api.platformUpdateUser(id, userId, { role: next });
+                        return `${u.email as string}: role → ${next}`;
+                      });
+                    }}
+                    className="bg-slate-900 border border-slate-700 rounded text-xs text-slate-200 px-1.5 py-1 disabled:opacity-50"
+                    title={isSelf ? "Use your tenant's /team page to change your own role" : 'Change role'}
+                  >
+                    <option value="admin">admin</option>
+                    <option value="engineer">engineer</option>
+                    <option value="tech">tech</option>
+                    <option value="viewer">viewer</option>
+                  </select>
+
+                  {/* Authority flag toggle */}
+                  <button
+                    disabled={isSelf || busy}
+                    onClick={() => {
+                      void wrap(userId, async () => {
+                        await api.platformUpdateUser(id, userId, { isPermitAuthority: !isAuth });
+                        return `${u.email as string}: authority ${!isAuth ? 'enabled' : 'disabled'}`;
+                      });
+                    }}
+                    className={`px-2 py-1 rounded border text-[10px] font-bold uppercase tracking-wider transition-colors min-w-[44px] ${
+                      isAuth
+                        ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500/30'
+                        : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-amber-500/30'
+                    } disabled:opacity-50`}
+                    title="Toggle permit-authority flag"
+                  >
+                    {isAuth ? 'Auth' : 'Off'}
+                  </button>
+
+                  {/* Remove button — destructive, requires confirm. */}
+                  <button
+                    disabled={isSelf || busy}
+                    onClick={() => {
+                      if (!confirm(`Remove ${u.email as string} from this organisation? This cannot be undone.`)) return;
+                      void wrap(userId, async () => {
+                        await api.platformRemoveUser(id, userId);
+                        return `${u.email as string}: removed from organisation`;
+                      });
+                    }}
+                    className="p-1.5 rounded text-slate-500 hover:text-red-400 hover:bg-red-500/10 disabled:opacity-30 min-w-[28px] min-h-[28px] flex items-center justify-center"
+                    title={isSelf ? 'You cannot remove yourself' : 'Remove member from organisation'}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-                <span className="text-slate-500">{u.role as string}</span>
-                {u.is_platform_admin === 1 && (
-                  <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">
-                    Platform
-                  </span>
-                )}
-                {!u.is_verified && (
-                  <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-700/40 text-slate-500">
-                    Pending
-                  </span>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <RawJsonDrawer payload={state.data} />

@@ -1,10 +1,269 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuthStore, type OrgType, type RegionCode, type Address } from '../features/auth/store/useAuthStore';
 import { SecureInput, SecurityBadge } from '../features/auth/components/SecurityComponents';
-import { Building2, Globe, User, ArrowRight, ArrowLeft, ChevronRight, MapPin, Phone, Mail, Lock, Eye, EyeOff, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Building2, Globe, User, ArrowRight, ArrowLeft, ChevronRight, MapPin, Phone, Mail, Lock, Eye, EyeOff, CheckCircle2, AlertCircle, ShieldCheck } from 'lucide-react';
+
+interface InvitePreview {
+  invitedEmail: string;
+  invitedRole: string;
+  expiresAt: string;
+  organisation: { name: string; type: string; slug: string };
+  inviter: { firstName: string | null; lastName: string | null; email: string };
+}
 
 export default function OnboardingPage() {
+  const [searchParams] = useSearchParams();
+  const inviteToken = searchParams.get('invite');
+
+  // When an invite token is present, take over the entire page with the
+  // accept-invitation flow. The regular org-creation wizard is the fallback
+  // for visitors without a token.
+  if (inviteToken) {
+    return <InviteAcceptance token={inviteToken} />;
+  }
+
+  return <OnboardingWizard />;
+}
+
+// ── Invite acceptance flow ─────────────────────────────────────────────────
+// Steps: 1) fetch the invite preview to confirm it's valid + show the org
+// they're joining; 2) collect first/last name + password; 3) POST redeem;
+// 4) on success redirect to dashboard. The user arrives session-authenticated.
+
+function InviteAcceptance({ token }: { token: string }) {
+  const navigate = useNavigate();
+  const { redeemInvite, authLoading, authError, isAuthenticated, clearError } = useAuthStore();
+
+  const [preview, setPreview] = useState<InvitePreview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(true);
+
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+
+  // Fetch invite preview on mount.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+        const res = await fetch(`${apiBase}/api/auth/invite/${encodeURIComponent(token)}`);
+        const body = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!res.ok) {
+          setPreviewError(body?.error ?? 'This invitation could not be loaded.');
+        } else {
+          setPreview(body as InvitePreview);
+        }
+      } catch (e) {
+        if (cancelled) return;
+        setPreviewError('Unable to reach the server. Please check your connection.');
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
+
+  // After successful redemption, the auth store sets isAuthenticated true.
+  useEffect(() => {
+    if (isAuthenticated) navigate('/dashboard', { replace: true });
+  }, [isAuthenticated, navigate]);
+
+  const passwordsMatch = password.length > 0 && password === confirmPassword;
+  const canSubmit =
+    firstName.trim().length > 0 &&
+    lastName.trim().length > 0 &&
+    password.length >= 8 &&
+    passwordsMatch &&
+    !authLoading;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canSubmit) return;
+    clearError();
+    await redeemInvite(token, {
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      password,
+    });
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center px-4 py-6 md:p-8 overflow-y-auto relative selection:bg-emerald-500/30 selection:text-emerald-300">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,_var(--color-slate-900),_var(--color-slate-950))] opacity-50" />
+
+      <div className="relative w-full max-w-md">
+        <div className="flex items-center gap-3 mb-8">
+          <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+            <ShieldCheck className="w-5 h-5 text-emerald-400" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-white">Accept invitation</h1>
+            <p className="text-sm text-slate-400">Join your team on HVAC DesignPro</p>
+          </div>
+        </div>
+
+        {previewLoading && (
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 flex items-center gap-3">
+            <div className="w-4 h-4 rounded-full border-2 border-emerald-400 border-t-transparent animate-spin" />
+            <span className="text-sm text-slate-400">Loading invitation…</span>
+          </div>
+        )}
+
+        {!previewLoading && previewError && (
+          <div className="rounded-2xl border border-red-500/30 bg-red-500/5 p-6 space-y-3">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-red-300">Invitation unavailable</p>
+                <p className="text-sm text-slate-400 mt-1">{previewError}</p>
+              </div>
+            </div>
+            <Link
+              to="/login"
+              className="inline-flex items-center gap-1.5 text-sm text-emerald-400 hover:text-emerald-300"
+            >
+              Go to sign in
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+        )}
+
+        {!previewLoading && preview && (
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {/* Invitation summary */}
+            <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5">
+              <p className="text-xs uppercase tracking-wider text-emerald-400/70 font-bold mb-2">You're invited</p>
+              <p className="text-base text-white leading-snug">
+                <span className="font-bold">{preview.inviter.firstName ?? preview.inviter.email}</span>
+                {preview.inviter.lastName ? ` ${preview.inviter.lastName}` : ''} added you as a{' '}
+                <span className="font-bold text-emerald-300">{preview.invitedRole}</span> on{' '}
+                <span className="font-bold text-emerald-300">{preview.organisation.name}</span>.
+              </p>
+              <p className="text-xs text-slate-500 mt-3 font-mono">{preview.invitedEmail}</p>
+            </div>
+
+            {/* Name */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                  First name
+                </label>
+                <input
+                  type="text"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  required
+                  autoFocus
+                  className="w-full px-3 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 min-h-[44px]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                  Last name
+                </label>
+                <input
+                  type="text"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  required
+                  className="w-full px-3 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 min-h-[44px]"
+                />
+              </div>
+            </div>
+
+            {/* Password */}
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                Password
+                <span className="text-slate-600 ml-1 normal-case">(min 8 characters)</span>
+              </label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={8}
+                  className="w-full pl-9 pr-10 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 min-h-[44px]"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 min-w-[44px] min-h-[44px] flex items-center justify-center"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                Confirm password
+              </label>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                required
+                className={`w-full px-3 py-2.5 bg-slate-900 border rounded-xl text-white placeholder-slate-500 focus:outline-none min-h-[44px] ${
+                  confirmPassword && !passwordsMatch
+                    ? 'border-red-500/50 focus:border-red-500/70'
+                    : 'border-slate-800 focus:border-emerald-500/50'
+                }`}
+              />
+              {confirmPassword && !passwordsMatch && (
+                <p className="text-xs text-red-400 mt-1.5">Passwords don't match</p>
+              )}
+            </div>
+
+            {authError && (
+              <div className="rounded-xl bg-red-500/10 border border-red-500/30 p-3 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-red-300">{authError}</p>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={!canSubmit}
+              className="w-full px-4 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed rounded-xl text-slate-950 font-bold flex items-center justify-center gap-2 transition-colors min-h-[48px] shadow-[0_0_20px_rgba(16,185,129,0.2)]"
+            >
+              {authLoading ? (
+                <>
+                  <div className="w-4 h-4 rounded-full border-2 border-slate-950 border-t-transparent animate-spin" />
+                  Joining…
+                </>
+              ) : (
+                <>
+                  Accept &amp; join {preview.organisation.name}
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+
+            <p className="text-xs text-center text-slate-600">
+              Expires {new Date(preview.expiresAt).toLocaleDateString()} ·{' '}
+              <Link to="/login" className="text-slate-500 hover:text-slate-400 underline">
+                Already have an account? Sign in
+              </Link>
+            </p>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Standard org-creation wizard ───────────────────────────────────────────
+
+function OnboardingWizard() {
   const [step, setStep] = useState(1);
   const [role, setRole] = useState<OrgType | null>(null);
   const [region, setRegion] = useState<RegionCode>('NA_ASHRAE');

@@ -133,6 +133,12 @@ interface AuthState {
   ssoMicrosoft: () => Promise<void>;
   ssoCloudflare: () => Promise<void>;
   ssoCallback: (code: string, provider?: 'microsoft' | 'cloudflare') => Promise<void>;
+
+  // Invite redemption — accepts a pending org_invites token, creates the
+  // user inside the inviter's tenant, and immediately authenticates them.
+  // The recipient is marked verified on creation (the email link itself
+  // is proof of email ownership, so no second OTP loop).
+  redeemInvite: (token: string, data: { firstName: string; lastName: string; password: string }) => Promise<void>;
 }
 
 // Hydrate from persisted session on creation
@@ -360,6 +366,32 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       user: data.user,
       organisation: data.organisation,
       token: data.token,
+      isAuthenticated: true,
+      authLoading: false,
+      authError: null,
+      pendingVerification: false,
+      pendingEmail: null,
+    });
+  },
+
+  redeemInvite: async (token, data) => {
+    set({ authLoading: true, authError: null });
+
+    const { data: resp, error } = await apiFetch<{ token: string; user: User; organisation: Organisation }>(
+      `/api/auth/invite/${encodeURIComponent(token)}/redeem`,
+      { method: 'POST', body: JSON.stringify(data) },
+    );
+
+    if (error || !resp?.token) {
+      set({ authLoading: false, authError: error || 'Could not redeem invitation. Please try again.' });
+      return;
+    }
+
+    persistSession(resp.token, resp.user, resp.organisation);
+    set({
+      user: resp.user,
+      organisation: resp.organisation,
+      token: resp.token,
       isAuthenticated: true,
       authLoading: false,
       authError: null,

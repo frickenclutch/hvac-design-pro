@@ -618,6 +618,179 @@ authRoutes.post('/sso/cloudflare/callback', async (c) => {
   });
 });
 
+// ── Invite preview ──────────────────────────────────────────────────────────
+//
+// GET /api/auth/invite/:token — return the invite details so the
+// OnboardingPage can show "You're invited to join {Org} as a {role}" before
+// the recipient sets a password. No auth required (the token IS the auth).
+//
+// Returns 404 for: unknown token, revoked invite, expired invite, OR if the
+// invited email already belongs to a registered user (cannot redeem twice).
+authRoutes.get('/invite/:token', async (c) => {
+  const token = c.req.param('token');
+  const db = c.env.DB;
+
+  const invite = await db.prepare(
+    `SELECT i.id, i.invited_email, i.invited_role, i.status, i.expires_at,
+            o.name AS org_name, o.org_type, o.slug,
+            u.first_name AS inviter_first_name, u.last_name AS inviter_last_name,
+            u.email AS inviter_email
+     FROM org_invites i
+     LEFT JOIN organisations o ON o.id = i.org_id
+     LEFT JOIN users u ON u.id = i.invited_by
+     WHERE i.token = ?`
+  ).bind(token).first();
+
+  if (!invite) return c.json({ error: 'Invitation not found' }, 404);
+  if (invite.status !== 'pending') {
+    return c.json({ error: `This invitation has already been ${invite.status}.` }, 410);
+  }
+  if (new Date(invite.expires_at as string).getTime() < Date.now()) {
+    return c.json({ error: 'This invitation has expired. Ask the inviter to send a new one.' }, 410);
+  }
+  // Block re-redemption: if the email is already registered, kick them to
+  // sign-in instead of creating a duplicate account.
+  const existing = await db.prepare(
+    'SELECT id FROM users WHERE email = ?'
+  ).bind(invite.invited_email).first();
+  if (existing) {
+    return c.json({
+      error: 'This email is already registered. Please sign in instead.',
+      alreadyRegistered: true,
+    }, 409);
+  }
+
+  return c.json({
+    invitedEmail: invite.invited_email,
+    invitedRole: invite.invited_role,
+    expiresAt: invite.expires_at,
+    organisation: {
+      name: invite.org_name,
+      type: invite.org_type,
+      slug: invite.slug,
+    },
+    inviter: {
+      firstName: invite.inviter_first_name,
+      lastName: invite.inviter_last_name,
+      email: invite.inviter_email,
+    },
+  });
+});
+
+// ── Invite redeem ───────────────────────────────────────────────────────────
+//
+// POST /api/auth/invite/:token/redeem
+// Body: { firstName, lastName, password }
+//
+// The token-bearing recipient creates their account inside the inviter's
+// org with the role set on the invite row. They are MARKED VERIFIED on
+// creation — the email link itself proves they own the address, so we
+// don't need a second OTP loop for invited members. A session is returned
+// immediately; the OnboardingPage saves it and lands them in the dashboard.
+//
+// Concurrency safety: invites are atomically marked 'accepted' by binding
+// the UPDATE to status='pending', which fails the second of two parallel
+// redemptions with rows-affected=0.
+authRoutes.post('/invite/:token/redeem', async (c) => {
+  const token = c.req.param('token');
+  const body = await c.req.json();
+  const firstName = (body.firstName ?? '').toString().trim();
+  const lastName = (body.lastName ?? '').toString().trim();
+  const password = (body.password ?? '').toString();
+
+  if (!firstName || !lastName) {
+    return c.json({ error: 'First and last name are required' }, 400);
+  }
+  if (password.length < 8) {
+    return c.json({ error: 'Password must be at least 8 characters' }, 400);
+  }
+
+  const db = c.env.DB;
+  const invite = await db.prepare(
+    `SELECT id, org_id, invited_email, invited_role, status, expires_at
+     FROM org_invites WHERE token = ?`
+  ).bind(token).first();
+
+  if (!invite) return c.json({ error: 'Invitation not found' }, 404);
+  if (invite.status !== 'pending') {
+    return c.json({ error: `This invitation has already been ${invite.status}.` }, 410);
+  }
+  if (new Date(invite.expires_at as string).getTime() < Date.now()) {
+    return c.json({ error: 'This invitation has expired.' }, 410);
+  }
+
+  const email = invite.invited_email as string;
+
+  // Double-check the email isn't already taken (between preview and redeem
+  // someone could have registered separately).
+  const existing = await db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
+  if (existing) {
+    return c.json({
+      error: 'This email is already registered. Please sign in instead.',
+      alreadyRegistered: true,
+    }, 409);
+  }
+
+  const userId = generateId();
+  const passwordHash = await hashPassword(password);
+
+  // Create the user FIRST so we have a valid user id to point accepted_by
+  // at — the org_invites foreign key requires accepted_by to reference an
+  // existing user. The atomic claim below uses status='pending' as the
+  // race-protection flag, so a duplicate redemption still fails cleanly.
+  await db.prepare(
+    `INSERT INTO users
+       (id, org_id, email, password_hash, role, first_name, last_name, is_verified)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 1)`
+  ).bind(userId, invite.org_id, email, passwordHash,
+         invite.invited_role, firstName, lastName).run();
+
+  // Atomic redemption: only marks the invite accepted if it's still pending.
+  const claim = await db.prepare(
+    `UPDATE org_invites
+       SET status = 'accepted',
+           accepted_by = ?,
+           accepted_at = datetime('now')
+     WHERE id = ? AND status = 'pending'`
+  ).bind(userId, invite.id).run();
+  if (!claim.meta.changes) {
+    // Rollback the user we just created — the invite was claimed by another
+    // request between our SELECT and UPDATE.
+    await db.prepare('DELETE FROM users WHERE id = ?').bind(userId).run();
+    return c.json({ error: 'Invitation was redeemed by someone else.' }, 409);
+  }
+
+  // Mint a session.
+  const sessionToken = generateId() + '-' + generateId();
+  const sessionId = generateId();
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  await db.prepare(
+    'INSERT INTO sessions (id, user_id, org_id, token, expires_at) VALUES (?, ?, ?, ?, ?)'
+  ).bind(sessionId, userId, invite.org_id, sessionToken, expiresAt).run();
+
+  // Pull org/user shape for the response.
+  const userData = await db.prepare(
+    `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_platform_admin, u.is_permit_authority, u.org_id,
+            o.name as org_name, o.org_type, o.slug, o.region_code
+     FROM users u JOIN organisations o ON o.id = u.org_id
+     WHERE u.id = ?`
+  ).bind(userId).first();
+
+  return c.json({
+    token: sessionToken,
+    user: {
+      id: userData!.id, email: userData!.email, firstName: userData!.first_name,
+      lastName: userData!.last_name, role: userData!.role, isVerified: true,
+      isPlatformAdmin: Number(userData!.is_platform_admin ?? 0) === 1,
+      isPermitAuthority: Number(userData!.is_permit_authority ?? 0) === 1,
+    },
+    organisation: {
+      id: userData!.org_id, name: userData!.org_name, type: userData!.org_type,
+      slug: userData!.slug, regionCode: userData!.region_code,
+    },
+  });
+});
+
 // ── Logout ───────────────────────────────────────────────────────────────────
 authRoutes.post('/logout', async (c) => {
   const authHeader = c.req.header('Authorization');

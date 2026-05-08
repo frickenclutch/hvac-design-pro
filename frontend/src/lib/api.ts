@@ -327,6 +327,25 @@ class ApiClient {
     }>(`/api/platform/audit?limit=${limit}`);
   }
 
+  // ── L0 cross-tenant user management ─────────────────────────────────────
+  // PATCH role and/or authority flag on a user inside any tenant. Server
+  // gates on isPlatformAdmin and writes audit rows with target_org_id +
+  // is_platform_action=1 so the action surfaces in BOTH the L0 audit feed
+  // AND the affected tenant's tenant-scoped feed.
+  async platformUpdateUser(orgId: string, userId: string, body: { role?: 'admin' | 'engineer' | 'tech' | 'viewer'; isPermitAuthority?: boolean }) {
+    return this.request<{ ok: true; role: string; isPermitAuthority: boolean }>(
+      `/api/platform/orgs/${encodeURIComponent(orgId)}/users/${encodeURIComponent(userId)}`,
+      { method: 'PATCH', body: JSON.stringify(body) },
+    );
+  }
+
+  async platformRemoveUser(orgId: string, userId: string) {
+    return this.request<{ ok: true }>(
+      `/api/platform/orgs/${encodeURIComponent(orgId)}/users/${encodeURIComponent(userId)}`,
+      { method: 'DELETE' },
+    );
+  }
+
   // ── Audit log ────────────────────────────────────────────────────────────
   // Tenant scope: admins see org-wide feed (own + target_org_id), non-admins
   // see only their own. Pass scope='platform' to get the cross-tenant view
@@ -449,8 +468,15 @@ class ApiClient {
 
   async teamInvite(email: string, role: 'admin' | 'engineer' | 'tech' | 'viewer' = 'tech') {
     return this.request<{
-      id: string; invitedEmail: string; invitedRole: string;
-      token: string; expiresAt: string;
+      id: string;
+      invitedEmail: string;
+      invitedRole: string;
+      token: string;
+      expiresAt: string;
+      // New since email delivery shipped:
+      redeemUrl: string;
+      emailSent: boolean;
+      emailError: string | null;
     }>('/api/org/invite', {
       method: 'POST',
       body: JSON.stringify({ email, role }),

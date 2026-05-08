@@ -137,7 +137,17 @@ export default function TeamPage() {
               onInvite={async (email, role) => {
                 try {
                   const r = await api.teamInvite(email, role);
-                  setInfo(`Invite created for ${email}. Token: ${r.token.slice(0, 12)}…`);
+                  // Surface email delivery status — a green message means
+                  // the recipient should already see the invitation in
+                  // their inbox; a yellow message means delivery failed
+                  // and the admin should copy the link manually.
+                  if (r.emailSent) {
+                    setInfo(`Invitation emailed to ${email}.`);
+                  } else {
+                    setInfo(
+                      `Invite created for ${email}, but email delivery failed${r.emailError ? ` (${r.emailError})` : ''}. Use the copy button below to share the link manually.`
+                    );
+                  }
                   refresh();
                 } catch (e) {
                   setErr(e instanceof Error ? e.message : String(e));

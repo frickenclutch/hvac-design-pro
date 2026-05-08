@@ -15,6 +15,7 @@
 
 import { Hono } from 'hono';
 import { requirePlatformAdmin, type AuthUser } from '../middleware/auth';
+import { setAudit } from '../middleware/audit';
 
 interface Env {
   DB: D1Database;
@@ -308,6 +309,144 @@ platformRoutes.get('/qa-benchmarks', async (c) => {
     shadowRunReliability: shadowReliability,
     generatedAt: new Date().toISOString(),
   });
+});
+
+// ── L0 cross-tenant user management ────────────────────────────────────────
+//
+// These three endpoints let a platform admin act on a user inside ANY
+// tenant — the normal `/api/org/users/:id` family is gated to the caller's
+// own org. Useful for support workflows, fixing an all-admin tenant where
+// no L1 admin is available, and the smoke-test of the audit log itself
+// (every L0 action lands in the audit feed with `is_platform_action=1`
+// and `target_org_id` set to the affected tenant).
+//
+// Important contract:
+//   - The L0 admin canNOT remove themselves via this surface — they must
+//     use the regular `/api/org/users/:id` flow inside their own tenant
+//     (which has the last-admin guard).
+//   - All three write audit rows that show up in BOTH the L0's audit feed
+//     AND the affected tenant's tenant-scoped feed (target_org_id match).
+
+// PATCH /api/platform/orgs/:orgId/users/:userId
+// Body: { role?: 'admin'|'engineer'|'tech'|'viewer', isPermitAuthority?: boolean }
+//
+// Either field optional — pass one or both. Skip the same-tenant
+// last-admin guard because L0 acting cross-tenant is the explicit
+// recovery path for it.
+platformRoutes.patch('/orgs/:orgId/users/:userId', async (c) => {
+  const caller = c.get('user') as AuthUser;
+  const orgId = c.req.param('orgId');
+  const userId = c.req.param('userId');
+  const body = await c.req.json();
+
+  const target = await c.env.DB.prepare(
+    `SELECT id, email, role, is_permit_authority, is_platform_admin, org_id
+     FROM users WHERE id = ? AND org_id = ?`
+  ).bind(userId, orgId).first();
+  if (!target) return c.json({ error: 'User not found in that organisation' }, 404);
+
+  // L0 cannot demote themselves via this path — too easy to accidentally
+  // brick the platform-admin role. They go through their own tenant's
+  // /team UI which has the last-admin guard.
+  if (caller.id === userId) {
+    return c.json({
+      error: 'Use your own tenant\'s Team page to change your role. This endpoint is for cross-tenant operations.',
+    }, 400);
+  }
+
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  const after: Record<string, unknown> = {};
+
+  if (typeof body.role === 'string') {
+    if (!['admin', 'engineer', 'tech', 'viewer'].includes(body.role)) {
+      return c.json({ error: 'Invalid role' }, 400);
+    }
+    updates.push('role = ?');
+    values.push(body.role);
+    after.role = body.role;
+  }
+
+  if (typeof body.isPermitAuthority === 'boolean') {
+    updates.push('is_permit_authority = ?');
+    values.push(body.isPermitAuthority ? 1 : 0);
+    after.is_permit_authority = body.isPermitAuthority;
+  }
+
+  if (updates.length === 0) {
+    return c.json({ error: 'No fields to update' }, 400);
+  }
+
+  values.push(userId);
+  await c.env.DB.prepare(
+    `UPDATE users SET ${updates.join(', ')} WHERE id = ?`
+  ).bind(...values).run();
+
+  setAudit(c, {
+    action: 'platform.user.update',
+    entityType: 'user',
+    entityId: userId,
+    entityLabel: target.email as string,
+    targetOrgId: orgId,
+    isPlatformAction: true,
+    beforeValue: {
+      role: target.role,
+      is_permit_authority: Number(target.is_permit_authority ?? 0) === 1,
+    },
+    afterValue: after,
+    detail: { fieldsChanged: Object.keys(after) },
+  });
+
+  return c.json({
+    ok: true,
+    role: 'role' in after ? after.role : target.role,
+    isPermitAuthority: 'is_permit_authority' in after
+      ? after.is_permit_authority
+      : Number(target.is_permit_authority ?? 0) === 1,
+  });
+});
+
+// DELETE /api/platform/orgs/:orgId/users/:userId
+// Hard-removes a user from a tenant. L0-only. Cannot remove yourself.
+// Cannot remove the LAST member of a tenant — orgs need at least one user
+// for their data to be reachable. (Removing the org itself is a separate
+// future endpoint.)
+platformRoutes.delete('/orgs/:orgId/users/:userId', async (c) => {
+  const caller = c.get('user') as AuthUser;
+  const orgId = c.req.param('orgId');
+  const userId = c.req.param('userId');
+
+  if (caller.id === userId) {
+    return c.json({ error: 'You cannot remove yourself via this endpoint.' }, 400);
+  }
+
+  const target = await c.env.DB.prepare(
+    `SELECT id, email, role, first_name, last_name FROM users WHERE id = ? AND org_id = ?`
+  ).bind(userId, orgId).first();
+  if (!target) return c.json({ error: 'User not found in that organisation' }, 404);
+
+  const orgUserCount = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM users WHERE org_id = ?`
+  ).bind(orgId).first();
+  if (Number(orgUserCount?.n ?? 0) <= 1) {
+    return c.json({
+      error: 'Cannot remove the last member of an organisation. Delete the org instead.',
+    }, 409);
+  }
+
+  await c.env.DB.prepare('DELETE FROM users WHERE id = ?').bind(userId).run();
+
+  setAudit(c, {
+    action: 'platform.user.remove',
+    entityType: 'user',
+    entityId: userId,
+    entityLabel: target.email as string,
+    targetOrgId: orgId,
+    isPlatformAction: true,
+    beforeValue: target as Record<string, unknown>,
+  });
+
+  return c.json({ ok: true });
 });
 
 // ── GET /api/platform/me ────────────────────────────────────────────────────
