@@ -33,7 +33,7 @@ export default function OnboardingPage() {
 
 function InviteAcceptance({ token }: { token: string }) {
   const navigate = useNavigate();
-  const { redeemInvite, authLoading, authError, isAuthenticated, clearError } = useAuthStore();
+  const { redeemInvite, logout, authLoading, authError, isAuthenticated, user, clearError } = useAuthStore();
 
   const [preview, setPreview] = useState<InvitePreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -44,6 +44,13 @@ function InviteAcceptance({ token }: { token: string }) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  // Track whether we just successfully redeemed this invite. Without this
+  // flag the redirect-after-auth would also fire on page MOUNT for a user
+  // who's already signed in as someone else, bouncing them past the form
+  // before they can accept. The flag flips true only after redeemInvite()
+  // resolves, which is the actual moment we want to send them to /dashboard.
+  const [redeemed, setRedeemed] = useState(false);
 
   // Fetch invite preview on mount.
   useEffect(() => {
@@ -69,10 +76,20 @@ function InviteAcceptance({ token }: { token: string }) {
     return () => { cancelled = true; };
   }, [token]);
 
-  // After successful redemption, the auth store sets isAuthenticated true.
+  // ONLY redirect after a successful redemption — never on page mount.
+  // The redeemed flag plus isAuthenticated together mean "we just minted
+  // the new session," not "the visitor is already signed in as someone
+  // else." This is the bug the previous version had.
   useEffect(() => {
-    if (isAuthenticated) navigate('/dashboard', { replace: true });
-  }, [isAuthenticated, navigate]);
+    if (redeemed && isAuthenticated) navigate('/dashboard', { replace: true });
+  }, [redeemed, isAuthenticated, navigate]);
+
+  // True when an existing session is in the way — the visitor is logged in
+  // as someone OTHER than the email this invite was sent to. They can't
+  // redeem cleanly without first releasing the existing session, because
+  // both sessions can't coexist in this browser.
+  const otherSessionInWay =
+    isAuthenticated && !!user && !!preview && user.email !== preview.invitedEmail;
 
   const passwordsMatch = password.length > 0 && password === confirmPassword;
   const canSubmit =
@@ -80,7 +97,8 @@ function InviteAcceptance({ token }: { token: string }) {
     lastName.trim().length > 0 &&
     password.length >= 8 &&
     passwordsMatch &&
-    !authLoading;
+    !authLoading &&
+    !otherSessionInWay;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,6 +109,17 @@ function InviteAcceptance({ token }: { token: string }) {
       lastName: lastName.trim(),
       password,
     });
+    // Mark redeemed so the navigation effect fires. If the redemption
+    // failed (authError set), this still flips the flag but the effect
+    // requires isAuthenticated which won't have changed → no redirect.
+    setRedeemed(true);
+  };
+
+  const signOutAndStay = () => {
+    logout();
+    // Effect-driven re-render after logout will clear otherSessionInWay
+    // and re-enable the form. No navigation needed — we want to stay on
+    // this page so the visitor can complete redemption.
   };
 
   return (
@@ -147,6 +176,38 @@ function InviteAcceptance({ token }: { token: string }) {
               </p>
               <p className="text-xs text-slate-500 mt-3 font-mono">{preview.invitedEmail}</p>
             </div>
+
+            {/* Existing-session conflict — happens when the inviter is
+                using their own browser to test the invite, or when a
+                visitor already has an account on a different tenant. The
+                form is disabled until they sign out (or they can switch
+                browsers/incognito to skip this entirely). */}
+            {otherSessionInWay && user && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 space-y-3">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-amber-200 mb-1">
+                      You're signed in as a different account
+                    </p>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      This browser has an active session for{' '}
+                      <span className="font-mono text-slate-100">{user.email}</span>.
+                      To accept the invitation for{' '}
+                      <span className="font-mono text-slate-100">{preview.invitedEmail}</span>,
+                      sign out first — or open the link in an incognito window to keep both accounts separate.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={signOutAndStay}
+                  className="w-full px-3 py-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 rounded-lg text-sm font-bold text-amber-200 min-h-[44px]"
+                >
+                  Sign out of {user.email} and continue
+                </button>
+              </div>
+            )}
 
             {/* Name */}
             <div className="grid grid-cols-2 gap-3">
