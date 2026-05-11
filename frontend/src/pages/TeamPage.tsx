@@ -329,7 +329,7 @@ function InviteCard({ defaultDomain, onInvite }: { defaultDomain: string | null;
         </button>
       </div>
       <p className="text-[11px] text-slate-500 mt-3">
-        Email delivery ships in Phase 2 — for now, copy the redemption link from the pending list below and pass it along directly.
+        The invited address gets an email with a one-click acceptance link. If delivery fails (corporate filter, typo'd domain) use the copy button in the pending list to share the link manually.
       </p>
     </Section>
   );

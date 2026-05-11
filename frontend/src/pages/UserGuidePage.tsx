@@ -528,7 +528,7 @@ const sections: GuideSection[] = [
     advancedContent: (
       <div className="space-y-3">
         <p>Worker endpoints under <code className="text-emerald-400/70">/api/org/*</code>: <code>GET /team</code> (list members + invites + claimed domain), <code>POST /invite</code>, <code>DELETE /invites/:id</code>, <code>PATCH /users/:id</code> (role change), <code>DELETE /users/:id</code> (remove). All mutations require <code>role === 'admin'</code>.</p>
-        <p>Email delivery is deferred to Phase 2 — invites are stored as token records with a 14-day expiration in the <code className="text-emerald-400/70">org_invites</code> table. The redemption link the admin copies points to <code>/onboarding?invite=&#123;token&#125;</code>.</p>
+        <p>Invites are stored as token records with a 14-day expiration in the <code className="text-emerald-400/70">org_invites</code> table. <strong>Send invite</strong> emails the address via Resend with a one-click acceptance link pointing at <code>/onboarding?invite=&#123;token&#125;</code>; the OnboardingPage detects the query param, previews the invite (org name, role, inviter) via <code className="text-emerald-400/70">GET /api/auth/invite/:token</code>, and on submit calls <code className="text-emerald-400/70">POST /api/auth/invite/:token/redeem</code> which atomically creates the user inside the inviter's org and mints a session. If email delivery fails (corporate filter, etc) the copy-link button in the pending list lets you share the URL out-of-band.</p>
         <p>Last-admin demotion is enforced server-side — every tenant must always retain at least one user with <code>role='admin'</code> so the manage-team door stays open.</p>
       </div>
     ),
