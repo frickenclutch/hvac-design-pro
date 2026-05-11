@@ -18,7 +18,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import {
-  X, History, RotateCcw, User, Clock, AlertTriangle, RefreshCw, Check,
+  X, History, RotateCcw, User, Clock, AlertTriangle, RefreshCw, Check, Eye,
 } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { useCadStore } from '../store/useCadStore';
@@ -39,9 +39,21 @@ interface Version {
 interface Props {
   isOpen: boolean;
   onClose: () => void;
+  /** Triggered when the user clicks Preview on a historical version.
+   *  The parent (CadWorkspace) snapshots the current canvas, swaps in
+   *  the version's state, and renders a banner with "Back to live" /
+   *  "Restore this version" controls. */
+  onPreview?: (info: {
+    versionId: string;
+    versionNumber: number;
+    canvasJson: unknown;
+    authorName: string;
+    createdAt: string;
+    totalVersions: number;
+  }) => void;
 }
 
-export default function VersionHistoryModal({ isOpen, onClose }: Props) {
+export default function VersionHistoryModal({ isOpen, onClose, onPreview }: Props) {
   const drawingId = useCadStore((s) => s.drawingId);
   const loadDrawing = useCadStore((s) => s.loadDrawing);
 
@@ -49,6 +61,7 @@ export default function VersionHistoryModal({ isOpen, onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
 
   const refresh = async () => {
     if (!drawingId) return;
@@ -78,6 +91,32 @@ export default function VersionHistoryModal({ isOpen, onClose }: Props) {
     () => (versions.length > 0 ? versions[0].version_number : null),
     [versions],
   );
+
+  const handlePreview = async (v: Version) => {
+    if (!onPreview) return;
+    setPreviewingId(v.id);
+    try {
+      const full = await api.getDrawingVersion(v.id);
+      const authorName =
+        [v.author_first_name, v.author_last_name]
+          .filter(Boolean)
+          .join(' ')
+          .trim() || v.author_email || 'Unknown user';
+      onPreview({
+        versionId: v.id,
+        versionNumber: v.version_number,
+        canvasJson: full.canvasJson,
+        authorName,
+        createdAt: v.created_at,
+        totalVersions: versions.length,
+      });
+      onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Preview failed');
+    } finally {
+      setPreviewingId(null);
+    }
+  };
 
   const handleRestore = async (v: Version) => {
     const confirmMsg =
@@ -221,19 +260,40 @@ export default function VersionHistoryModal({ isOpen, onClose }: Props) {
                     </div>
 
                     {!isLatest && (
-                      <button
-                        onClick={() => void handleRestore(v)}
-                        disabled={restoring}
-                        className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-emerald-500/20 hover:text-emerald-300 hover:border-emerald-500/30 text-slate-300 text-xs font-bold flex items-center gap-1.5 border border-slate-700 transition-colors min-h-[36px] disabled:opacity-50"
-                        title={`Restore version ${v.version_number}`}
-                      >
-                        {restoring ? (
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <RotateCcw className="w-3.5 h-3.5" />
+                      <div className="flex items-center gap-1">
+                        {/* Preview is non-destructive — loads the version
+                            state into the canvas read-only while auto-save
+                            is suppressed. Restore can be invoked from the
+                            preview banner after inspecting. */}
+                        {onPreview && (
+                          <button
+                            onClick={() => void handlePreview(v)}
+                            disabled={previewingId === v.id || restoring}
+                            className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-sky-500/20 hover:text-sky-300 hover:border-sky-500/30 text-slate-300 text-xs font-bold flex items-center gap-1.5 border border-slate-700 transition-colors min-h-[36px] disabled:opacity-50"
+                            title={`Preview version ${v.version_number} without changing the live state`}
+                          >
+                            {previewingId === v.id ? (
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Eye className="w-3.5 h-3.5" />
+                            )}
+                            Preview
+                          </button>
                         )}
-                        Restore
-                      </button>
+                        <button
+                          onClick={() => void handleRestore(v)}
+                          disabled={restoring}
+                          className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-emerald-500/20 hover:text-emerald-300 hover:border-emerald-500/30 text-slate-300 text-xs font-bold flex items-center gap-1.5 border border-slate-700 transition-colors min-h-[36px] disabled:opacity-50"
+                          title={`Restore version ${v.version_number}`}
+                        >
+                          {restoring ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <RotateCcw className="w-3.5 h-3.5" />
+                          )}
+                          Restore
+                        </button>
+                      </div>
                     )}
                     {isLatest && (
                       <div className="px-3 py-2 rounded-lg text-emerald-400 text-xs font-bold flex items-center gap-1.5 min-h-[36px]">

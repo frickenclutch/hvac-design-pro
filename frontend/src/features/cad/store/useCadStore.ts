@@ -471,6 +471,14 @@ interface CadState {
   setSaving: (saving: boolean) => void;
   setSaveError: (error: string | null) => void;
 
+  // ── Version preview mode ────────────────────────────────────────────────
+  // True when the user is viewing a historical version snapshot (not the
+  // live drawing). The auto-save hook checks this flag and skips writes
+  // so a peek doesn't accidentally restore. CadWorkspace renders a banner
+  // above the canvas whenever this is true; the banner controls toggle it.
+  previewMode: boolean;
+  setPreviewMode: (on: boolean) => void;
+
   // ── Serialize / Deserialize ─────────────────────────────────────────────────
   serializeDrawing: () => object;
   loadDrawing: (data: any) => void;
@@ -1014,6 +1022,9 @@ export const useCadStore = create<CadState>((set, get) => {
       }),
     setSaving: (saving) => set({ isSaving: saving }),
     setSaveError: (error) => set({ saveError: error, isSaving: false }),
+
+    previewMode: false,
+    setPreviewMode: (on) => set({ previewMode: on }),
 
     // ── Serialize / Deserialize ───────────────────────────────────────────────
     serializeDrawing: () => {

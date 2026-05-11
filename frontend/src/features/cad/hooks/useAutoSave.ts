@@ -9,6 +9,11 @@ export function useAutoSave() {
   const isSaving = useCadStore(s => s.isSaving);
   const drawingId = useCadStore(s => s.drawingId);
   const projectId = useCadStore(s => s.projectId);
+  // When the user is previewing a historical version, suppress auto-save
+  // entirely — otherwise any incidental canvas interaction during a peek
+  // would write the version's content back as the new live state. Restore
+  // is an explicit operator action; preview must stay non-destructive.
+  const previewMode = useCadStore(s => s.previewMode);
   const serializeDrawing = useCadStore(s => s.serializeDrawing);
   const markSaved = useCadStore(s => s.markSaved);
   const setSaving = useCadStore(s => s.setSaving);
@@ -17,6 +22,7 @@ export function useAutoSave() {
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (previewMode) return;
     if (!isDirty || isSaving) return;
 
     // Clear existing timer
