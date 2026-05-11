@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
-import { ArrowLeft, Save, Undo2, Redo2, Download, Zap, Box, Search, ChevronDown, ChevronUp, HelpCircle, Pencil, X, ArrowRight, Building2, Home, MapPin, Briefcase, Check } from 'lucide-react';
+import { ArrowLeft, Save, Undo2, Redo2, Download, Zap, Box, Search, ChevronDown, ChevronUp, HelpCircle, Pencil, X, ArrowRight, Building2, Home, MapPin, Briefcase, Check, History } from 'lucide-react';
 import AssetSearch from './AssetSearch';
 import ErrorBoundary from '../../../components/ErrorBoundary';
 import { scopedKey } from '../../../utils/storage';
@@ -12,7 +12,7 @@ import { useProjectStore } from '../../../stores/useProjectStore';
 // Lazy-load heavy dependencies (Three.js ~1.2MB, jsPDF ~200KB)
 const Viewer3D = lazy(() => import('./Viewer3D'));
 
-export default function TopNavigationBar({ onHelpOpen }: { onHelpOpen?: () => void }) {
+export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHelpOpen?: () => void; onVersionsOpen?: () => void }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const { canvas, undo, redo, isDirty, isSaving, lastSavedAt, saveError, panelNavBar, setPanelNavBar, setIs3DViewOpen } = useCadStore();
@@ -279,6 +279,7 @@ export default function TopNavigationBar({ onHelpOpen }: { onHelpOpen?: () => vo
           <ActionButton icon={<Zap className="w-4 h-4" />} tooltip="Auto-Calculate Load" highlight />
           <div className="w-px h-4 bg-slate-700/60 mx-2" />
           <ActionButton icon={<Search className="w-4 h-4" />} tooltip="Search (Ctrl+K)" onClick={() => setShowSearch(true)} />
+          <ActionButton icon={<History className="w-4 h-4" />} tooltip="Version history — restore any prior save" onClick={onVersionsOpen} />
           <ActionButton icon={<HelpCircle className="w-4 h-4" />} tooltip="Help Center" onClick={onHelpOpen} />
         </div>
 

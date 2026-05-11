@@ -271,6 +271,56 @@ class ApiClient {
     return this.request<{ ok: boolean }>(`/api/cad/${id}`, { method: 'DELETE' });
   }
 
+  // ── CAD drawing version history ─────────────────────────────────────────
+  // Every save (POST/PUT) appends a snapshot to cad_drawing_versions.
+  // This is the forensic-recall side-channel that complements the
+  // throttled audit log: full canvas state, every save, append-only.
+  async listDrawingVersions(drawingId: string, limit = 100) {
+    return this.request<{
+      drawingId: string;
+      limit: number;
+      versions: Array<{
+        id: string;
+        version_number: number;
+        size_bytes: number;
+        thumbnail_key: string | null;
+        author_user_id: string | null;
+        author_first_name: string | null;
+        author_last_name: string | null;
+        author_email: string | null;
+        created_at: string;
+      }>;
+    }>(`/api/cad/${encodeURIComponent(drawingId)}/versions?limit=${limit}`);
+  }
+
+  async getDrawingVersion(versionId: string) {
+    return this.request<{
+      id: string;
+      drawing_id: string;
+      project_id: string;
+      org_id: string;
+      version_number: number;
+      size_bytes: number;
+      author_user_id: string | null;
+      author_first_name: string | null;
+      author_last_name: string | null;
+      author_email: string | null;
+      created_at: string;
+      canvasJson: unknown;
+    }>(`/api/cad/versions/${encodeURIComponent(versionId)}`);
+  }
+
+  async restoreDrawingVersion(versionId: string) {
+    return this.request<{
+      ok: true;
+      drawingId: string;
+      versionNumber: number;
+      versionId: string;
+    }>(`/api/cad/versions/${encodeURIComponent(versionId)}/restore`, {
+      method: 'POST',
+    });
+  }
+
   // ── Platform admin (L0 creator layer) ───────────────────────────────────
   // All routes here require is_platform_admin = 1 in D1 + a valid session.
   // 403 on call means the session user is not a platform admin.

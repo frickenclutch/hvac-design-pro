@@ -10,6 +10,7 @@ import FloorSelector from '../features/cad/components/FloorSelector';
 import LayerManager from '../features/cad/components/LayerManager';
 import ThermalLegend from '../features/cad/components/ThermalLegend';
 import HelpCenter from '../features/cad/components/HelpCenter';
+import VersionHistoryModal from '../features/cad/components/VersionHistoryModal';
 import { useAutoSave, loadDrawing } from '../features/cad/hooks/useAutoSave';
 import { useCadStore } from '../features/cad/store/useCadStore';
 import Mason from '../components/Mason';
@@ -21,6 +22,7 @@ export default function CadWorkspace() {
   // Auto-save drawing to D1 / localStorage
   useAutoSave();
   const [helpOpen, setHelpOpen] = useState(false);
+  const [versionsOpen, setVersionsOpen] = useState(false);
 
   // Hydrate the active project store from the route param
   const { id } = useParams<{ id: string }>();
@@ -107,7 +109,10 @@ export default function CadWorkspace() {
 
       {/* Global header overlaid on canvas (contains 3D Viewer + PDF export) */}
       <ErrorBoundary label="Navigation">
-        <TopNavigationBar onHelpOpen={() => setHelpOpen(true)} />
+        <TopNavigationBar
+          onHelpOpen={() => setHelpOpen(true)}
+          onVersionsOpen={() => setVersionsOpen(true)}
+        />
       </ErrorBoundary>
 
       {/* Multi-floor selector (below header) */}
@@ -137,6 +142,9 @@ export default function CadWorkspace() {
 
       {/* Help Center modal */}
       <HelpCenter isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
+
+      {/* Version history modal — append-only forensic snapshot trail */}
+      <VersionHistoryModal isOpen={versionsOpen} onClose={() => setVersionsOpen(false)} />
 
     </div>
   );
