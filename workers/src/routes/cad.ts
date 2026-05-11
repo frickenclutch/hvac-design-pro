@@ -23,7 +23,14 @@ async function nextVersionNumber(db: D1Database, drawingId: string): Promise<num
 }
 
 /** Insert an immutable version snapshot. Used by both POST (v1) and PUT
- *  (v2..vN). Append-only. */
+ *  (v2..vN). Append-only.
+ *
+ *  thumbnailDataUrl is stored verbatim in the thumbnail_key column when
+ *  provided. The column was originally typed for an R2 object key (hence
+ *  the name), but for MVP we store the data URL inline so the frontend
+ *  can render it directly via <img src=...> without an authenticated
+ *  fetch + blob roundtrip. If thumbnail storage cost grows, migrate the
+ *  payload to R2 in a follow-up and switch column contents to keys. */
 async function writeVersion(
   db: D1Database,
   args: {
@@ -32,15 +39,22 @@ async function writeVersion(
     orgId: string;
     canvasJson: string;
     authorUserId: string | null;
+    thumbnailDataUrl?: string | null;
   },
 ): Promise<{ versionId: string; versionNumber: number }> {
   const versionNumber = await nextVersionNumber(db, args.drawingId);
   const versionId = generateId();
+  // Cap thumbnail size at 200 KB to prevent a runaway frontend (or an
+  // attacker injecting a massive payload) from bloating D1. Most real
+  // thumbnails are 5-30 KB at our default capture multiplier.
+  const safeThumb = args.thumbnailDataUrl && args.thumbnailDataUrl.length < 200_000
+    ? args.thumbnailDataUrl
+    : null;
   await db.prepare(
     `INSERT INTO cad_drawing_versions
        (id, drawing_id, project_id, org_id, version_number, canvas_json,
-        size_bytes, author_user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        size_bytes, thumbnail_key, author_user_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     versionId,
     args.drawingId,
@@ -49,6 +63,7 @@ async function writeVersion(
     versionNumber,
     args.canvasJson,
     args.canvasJson.length,
+    safeThumb,
     args.authorUserId,
   ).run();
   return { versionId, versionNumber };
@@ -127,6 +142,7 @@ cadRoutes.post('/', async (c) => {
     orgId: user.orgId,
     canvasJson,
     authorUserId: user.id,
+    thumbnailDataUrl: typeof body.thumbnailDataUrl === 'string' ? body.thumbnailDataUrl : null,
   });
 
   setAudit(c, {
@@ -184,6 +200,7 @@ cadRoutes.put('/:id', async (c) => {
     orgId: user.orgId,
     canvasJson,
     authorUserId: user.id,
+    thumbnailDataUrl: typeof body.thumbnailDataUrl === 'string' ? body.thumbnailDataUrl : null,
   });
 
   // Audit throttle — skip the audit row if we wrote one for this drawing

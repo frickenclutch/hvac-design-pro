@@ -253,15 +253,15 @@ class ApiClient {
     return this.request<any>(`/api/cad/${id}`);
   }
 
-  async saveDrawing(data: { projectId: string; name?: string; floorIndex?: number; canvasJson: any }) {
-    return this.request<{ id: string }>('/api/cad', {
+  async saveDrawing(data: { projectId: string; name?: string; floorIndex?: number; canvasJson: any; thumbnailDataUrl?: string }) {
+    return this.request<{ id: string; versionNumber?: number }>('/api/cad', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
-  async updateDrawing(id: string, data: { canvasJson: any; name?: string }) {
-    return this.request<{ ok: boolean }>(`/api/cad/${id}`, {
+  async updateDrawing(id: string, data: { canvasJson: any; name?: string; thumbnailDataUrl?: string }) {
+    return this.request<{ ok: boolean; versionNumber?: number; audited?: boolean }>(`/api/cad/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });

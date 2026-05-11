@@ -4,6 +4,31 @@ import { api } from '../../../lib/api';
 import { toast } from '../../../stores/useToastStore';
 import { scopedKey } from '../../../utils/storage';
 
+/** Capture a low-res thumbnail of the current canvas state for the
+ *  version-history sidebar. Returns null on any failure — thumbnail is a
+ *  nice-to-have, never block a save on it.
+ *
+ *  Default multiplier=0.3 brings a 1920x1200-ish workspace down to roughly
+ *  570x360 pixels; PNG compresses line art aggressively so the resulting
+ *  data URL is typically 8-30 KB. Worker caps inbound thumbnails at 200 KB. */
+function captureCanvasThumbnail(): string | null {
+  try {
+    const canvas = useCadStore.getState().canvas;
+    if (!canvas) return null;
+    // Fabric.js Canvas.toDataURL accepts { format, quality, multiplier }.
+    // multiplier scales the export (1 = native canvas pixel size).
+    // multiplier is required in Fabric's TDataUrlOptions so it must be set.
+    const dataUrl = canvas.toDataURL({
+      format: 'png',
+      multiplier: 0.3,
+      enableRetinaScaling: false,
+    });
+    return typeof dataUrl === 'string' ? dataUrl : null;
+  } catch {
+    return null;
+  }
+}
+
 export function useAutoSave() {
   const isDirty = useCadStore(s => s.isDirty);
   const isSaving = useCadStore(s => s.isSaving);
@@ -48,11 +73,19 @@ export function useAutoSave() {
       setSaving(true);
       setSaveError(null);
 
+      // Snapshot the canvas pixel state alongside the serialized geometry.
+      // Sent through with the save so the new version row gets its
+      // thumbnail at write time — no second roundtrip from the version
+      // modal. Returns null if anything blows up, which is harmless: the
+      // version still saves, just without a visual preview.
+      const thumbnailDataUrl = captureCanvasThumbnail() ?? undefined;
+
       try {
         if (drawingId) {
           // Update existing drawing
           await api.updateDrawing(drawingId, {
             canvasJson: data,
+            thumbnailDataUrl,
           });
           markSaved(drawingId);
         } else {
@@ -61,6 +94,7 @@ export function useAutoSave() {
             projectId,
             canvasJson: data,
             name: 'Floor Plan',
+            thumbnailDataUrl,
           });
           markSaved(result.id);
         }

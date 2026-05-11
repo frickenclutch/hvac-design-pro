@@ -232,12 +232,31 @@ export default function VersionHistoryModal({ isOpen, onClose, onPreview }: Prop
                         : 'bg-slate-900/40 border-slate-800/60 hover:bg-slate-900/60'
                     } transition-colors`}
                   >
-                    <div className="flex flex-col items-center justify-center w-12 flex-shrink-0">
+                    <div className="flex flex-col items-center justify-center w-10 flex-shrink-0">
                       <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">v</div>
                       <div className="text-lg font-bold text-slate-200 tabular-nums leading-none">
                         {v.version_number}
                       </div>
                     </div>
+
+                    {/* Visual thumbnail of the canvas state at this version.
+                        thumbnail_key historically held an R2 key; for MVP we
+                        store the data URL inline (see writeVersion in cad.ts).
+                        Falls back to a placeholder when no thumbnail was
+                        captured — e.g. versions saved before this feature
+                        shipped, or versions where toDataURL failed. */}
+                    {v.thumbnail_key ? (
+                      <img
+                        src={v.thumbnail_key}
+                        alt={`Version ${v.version_number} preview`}
+                        className="w-20 h-14 object-cover rounded border border-slate-800/80 bg-slate-950 flex-shrink-0"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="w-20 h-14 rounded border border-dashed border-slate-800 bg-slate-950/60 flex items-center justify-center flex-shrink-0">
+                        <span className="text-[9px] uppercase tracking-wider text-slate-700">no preview</span>
+                      </div>
+                    )}
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 text-sm">
