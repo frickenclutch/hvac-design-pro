@@ -20,11 +20,12 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ShieldCheck, ArrowLeft, RefreshCw, AlertTriangle, Clock,
   Building2, FileText, MessageSquare, Send, CheckCircle2,
-  XCircle, AlertCircle, EyeOff, Eye, Hash,
+  XCircle, AlertCircle, EyeOff, Eye, Hash, Activity,
 } from 'lucide-react';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { api } from '../lib/api';
 import AuthorityBadge from '../components/AuthorityBadge';
+import EntityAuditModal from '../components/EntityAuditModal';
 
 type Status = 'submitted' | 'under_review' | 'approved' | 'denied' | 'changes_requested' | 'withdrawn';
 
@@ -259,6 +260,7 @@ function PermitDetail({ id }: { id: string }) {
   const [decisionDraft, setDecisionDraft] = useState('');
   const [permitNumberDraft, setPermitNumberDraft] = useState('');
   const [acting, setActing] = useState(false);
+  const [auditOpen, setAuditOpen] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
@@ -309,9 +311,36 @@ function PermitDetail({ id }: { id: string }) {
   return (
     <div className="h-full overflow-y-auto">
       <div className="max-w-4xl mx-auto px-4 py-6 pt-8 pb-24 md:p-8 md:pt-12 md:pb-24">
-        <Link to="/permits" className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-amber-400 mb-4">
-          <ArrowLeft className="w-3.5 h-3.5" /> Back to Permits
-        </Link>
+        <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
+          <Link to="/permits" className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-amber-400">
+            <ArrowLeft className="w-3.5 h-3.5" /> Back to Permits
+          </Link>
+          {/* Audit trail of every action on this submission — claim,
+              decision, comments, status changes. Critical for legal
+              defensibility of the permit decision itself. */}
+          <button
+            type="button"
+            onClick={() => setAuditOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-slate-900/60 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-emerald-300 min-h-[36px]"
+            title="Full audit trail for this permit submission"
+          >
+            <Activity className="w-3.5 h-3.5" />
+            Activity
+          </button>
+        </div>
+
+        <EntityAuditModal
+          isOpen={auditOpen}
+          onClose={() => setAuditOpen(false)}
+          entityType="permit_submission"
+          entityId={id}
+          label={
+            (data?.project?.name as string) ||
+            (data?.submission?.permit_number as string) ||
+            `Submission ${id.slice(0, 8)}`
+          }
+          context="Permit submission"
+        />
 
         {err && (
           <div className="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-400">

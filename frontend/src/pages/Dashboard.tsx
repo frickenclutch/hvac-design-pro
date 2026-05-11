@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, MapPin, Calendar, ArrowRight, Pencil, Check, X, Trash2, Building2, Home, GripVertical, ChevronDown, ChevronRight, RotateCcw, Minus, Cloud, CloudOff, UploadCloud, AlertTriangle, Globe, Lock, Send, ShieldCheck } from 'lucide-react';
+import { Plus, Search, MapPin, Calendar, ArrowRight, Pencil, Check, X, Trash2, Building2, Home, GripVertical, ChevronDown, ChevronRight, RotateCcw, Minus, Cloud, CloudOff, UploadCloud, AlertTriangle, Globe, Lock, Send, ShieldCheck, Activity } from 'lucide-react';
 import { api } from '../lib/api';
 import { toast } from '../stores/useToastStore';
 import SubmitForReviewModal from '../features/permits/SubmitForReviewModal';
 import NewProjectModal from '../features/projects/components/NewProjectModal';
+import EntityAuditModal from '../components/EntityAuditModal';
 import {
   loadProjects as loadProjectsSynced,
   updateProject as updateProjectSynced,
@@ -74,6 +75,7 @@ export default function Dashboard() {
 
   // ── Submit-for-permit-review modal state ───────────────────────────────
   const [reviewTarget, setReviewTarget] = useState<Project | null>(null);
+  const [auditTarget, setAuditTarget] = useState<Project | null>(null);
 
   const openShare = (proj: Project) => {
     setShareTarget(proj);
@@ -522,8 +524,15 @@ export default function Dashboard() {
                       </>
                     ) : (
                       <>
-                        {/* Hover-visible action row: submit for review, share, edit */}
+                        {/* Hover-visible action row: activity, submit for review, share, edit */}
                         <div className="flex justify-end -mt-1 mb-2 gap-1">
+                          <button
+                            onClick={() => setAuditTarget(proj)}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors opacity-0 group-hover:opacity-100"
+                            title="Activity — every action on this project"
+                          >
+                            <Activity className="w-3.5 h-3.5" />
+                          </button>
                           <button
                             onClick={() => openReview(proj)}
                             className="p-1.5 rounded-lg text-slate-500 hover:text-amber-400 hover:bg-amber-500/10 transition-colors opacity-0 group-hover:opacity-100"
@@ -586,6 +595,16 @@ export default function Dashboard() {
           }}
         />
       )}
+
+      {/* ── Per-project activity log ─────────────────────────────────────── */}
+      <EntityAuditModal
+        isOpen={!!auditTarget}
+        onClose={() => setAuditTarget(null)}
+        entityType="project"
+        entityId={auditTarget?.id ?? ''}
+        label={auditTarget?.name ?? ''}
+        context={auditTarget ? [auditTarget.address, auditTarget.city, auditTarget.state].filter(Boolean).join(', ') || undefined : undefined}
+      />
 
       {/* ── Share-to-Community modal ─────────────────────────────────────── */}
       {shareTarget && (

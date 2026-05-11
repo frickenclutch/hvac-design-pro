@@ -18,6 +18,7 @@ import {
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { api } from '../lib/api';
 import AuthorityBadge from '../components/AuthorityBadge';
+import EntityAuditModal from '../components/EntityAuditModal';
 
 type Role = 'admin' | 'engineer' | 'tech' | 'viewer';
 
@@ -55,6 +56,10 @@ export default function TeamPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  // Per-member activity modal — set to the member object you want to audit,
+  // null when closed. Admin-only; non-admins see their own history via
+  // the global /audit-log page instead.
+  const [auditTarget, setAuditTarget] = useState<Member | null>(null);
 
   const isAdmin = sessionUser?.role === 'admin';
 
@@ -211,6 +216,20 @@ export default function TeamPage() {
                 setErr(e instanceof Error ? e.message : String(e));
               }
             }}
+            onViewActivity={(member) => setAuditTarget(member)}
+          />
+
+          <EntityAuditModal
+            isOpen={!!auditTarget}
+            onClose={() => setAuditTarget(null)}
+            entityType="user"
+            entityId={auditTarget?.id ?? ''}
+            label={
+              auditTarget
+                ? ([auditTarget.first_name, auditTarget.last_name].filter(Boolean).join(' ') || auditTarget.email)
+                : ''
+            }
+            context={auditTarget?.email}
           />
         </div>
       </div>
@@ -373,12 +392,13 @@ function PendingInvitesCard({ invites, isAdmin, onRevoke, onCopy }: { invites: I
   );
 }
 
-function MembersCard({ members, sessionUserId, isAdmin, loading, onRefresh, onSetRole, onSetAuthority, onRemove }: {
+function MembersCard({ members, sessionUserId, isAdmin, loading, onRefresh, onSetRole, onSetAuthority, onRemove, onViewActivity }: {
   members: Member[]; sessionUserId: string | null; isAdmin: boolean; loading: boolean;
   onRefresh: () => void;
   onSetRole: (userId: string, role: Role) => void;
   onSetAuthority: (userId: string, isAuthority: boolean) => void;
   onRemove: (userId: string) => void;
+  onViewActivity: (member: Member) => void;
 }) {
   return (
     <Section
@@ -461,15 +481,27 @@ function MembersCard({ members, sessionUserId, isAdmin, loading, onRefresh, onSe
                     </td>
                     {isAdmin && (
                       <td className="px-3 py-2 text-right">
-                        {!isSelf && (
+                        <div className="inline-flex items-center gap-1">
+                          {/* Per-member activity — every action by or
+                              targeting this user. Available for self too
+                              so admins can audit their own trail. */}
                           <button
-                            onClick={() => onRemove(m.id)}
-                            className="text-slate-500 hover:text-red-400 transition-colors"
-                            title="Remove from organisation"
+                            onClick={() => onViewActivity(m)}
+                            className="text-slate-500 hover:text-emerald-400 transition-colors p-1 rounded-lg hover:bg-emerald-500/10"
+                            title="View activity log for this member"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Activity className="w-4 h-4" />
                           </button>
-                        )}
+                          {!isSelf && (
+                            <button
+                              onClick={() => onRemove(m.id)}
+                              className="text-slate-500 hover:text-red-400 transition-colors p-1 rounded-lg hover:bg-red-500/10"
+                              title="Remove from organisation"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     )}
                   </tr>
