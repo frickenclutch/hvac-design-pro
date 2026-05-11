@@ -7,6 +7,11 @@
     <!-- PWA -->
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#10b981" />
+    <!-- mobile-web-app-capable is the modern name; apple-mobile-web-app-capable
+         is the legacy alias still consumed by iOS Safari. Keep both for now
+         so iOS home-screen install stays as standalone PWA, but the modern
+         tag silences the Chromium deprecation warning. -->
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="DesignPro" />
