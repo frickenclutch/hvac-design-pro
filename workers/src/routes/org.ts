@@ -1,6 +1,12 @@
 import { Hono } from 'hono';
 import { setAudit } from '../middleware/audit';
 import { sendEmail, buildInviteEmail } from '../utils/email';
+import {
+  resolveAccessPolicy,
+  sanitizeAccessPolicyPatch,
+  mergeAccessPolicyIntoSettings,
+  capabilitiesFor,
+} from '../utils/accessPolicy';
 
 interface Env {
   DB: D1Database;
@@ -169,6 +175,71 @@ orgRoutes.patch('/users/:id/authority', async (c) => {
   });
 
   return c.json({ ok: true, isPermitAuthority: flag });
+});
+
+// ── GET /api/org/access-policy ──────────────────────────────────────────────
+// Any authenticated member can READ the resolved policy — the frontend
+// needs the caller's capabilities to gate UI. Returns the raw thresholds,
+// the caller's concrete yes/no capabilities, and whether the caller may
+// edit the policy (tenant admin or L0).
+orgRoutes.get('/access-policy', async (c) => {
+  const user = c.get('user');
+  const org = await c.env.DB.prepare(
+    `SELECT settings FROM organisations WHERE id = ?`
+  ).bind(user.orgId).first();
+  if (!org) return c.json({ error: 'Organisation not found' }, 404);
+
+  const policy = resolveAccessPolicy(org.settings);
+  const capabilities = capabilitiesFor(
+    { role: user.role, isPlatformAdmin: user.isPlatformAdmin },
+    policy,
+  );
+  return c.json({ policy, capabilities });
+});
+
+// ── PUT /api/org/access-policy ──────────────────────────────────────────────
+// Tenant admin OR L0 sets the org's policy. Partial — only the keys in
+// the body change; others keep their current resolved value. Other
+// settings JSON keys are preserved.
+orgRoutes.put('/access-policy', async (c) => {
+  const user = c.get('user');
+  if (user.role !== 'admin' && !user.isPlatformAdmin) {
+    return c.json({ error: 'Only the tenant admin or platform owner can change the access policy' }, 403);
+  }
+
+  const body = await c.req.json();
+  const patch = sanitizeAccessPolicyPatch(body);
+  if (Object.keys(patch).length === 0) {
+    return c.json({ error: 'No valid policy fields. Expected one of: versionView, versionRestore, auditView with a role value (viewer|tech|engineer|admin).' }, 400);
+  }
+
+  const org = await c.env.DB.prepare(
+    `SELECT settings FROM organisations WHERE id = ?`
+  ).bind(user.orgId).first();
+  if (!org) return c.json({ error: 'Organisation not found' }, 404);
+
+  const before = resolveAccessPolicy(org.settings);
+  const next = { ...before, ...patch };
+  const mergedSettings = mergeAccessPolicyIntoSettings(org.settings, next);
+
+  await c.env.DB.prepare(
+    `UPDATE organisations SET settings = ? WHERE id = ?`
+  ).bind(mergedSettings, user.orgId).run();
+
+  setAudit(c, {
+    action: 'org.access_policy.update',
+    entityType: 'organisation',
+    entityId: user.orgId,
+    beforeValue: before as unknown as Record<string, unknown>,
+    afterValue: next as unknown as Record<string, unknown>,
+    detail: { fieldsChanged: Object.keys(patch) },
+  });
+
+  const capabilities = capabilitiesFor(
+    { role: user.role, isPlatformAdmin: user.isPlatformAdmin },
+    next,
+  );
+  return c.json({ policy: next, capabilities });
 });
 
 // ── GET /api/org — get current user's org profile ───────────────────────────

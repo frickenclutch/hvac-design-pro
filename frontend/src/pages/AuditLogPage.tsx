@@ -15,14 +15,26 @@ import { Navigate } from 'react-router-dom';
 import { Activity, ShieldCheck, Building2, ChevronLeft } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
+import { useAccessPolicyStore } from '../stores/useAccessPolicyStore';
 import AuditLogView from '../components/AuditLogView';
 
 export default function AuditLogPage() {
   const user = useAuthStore((s) => s.user);
   const organisation = useAuthStore((s) => s.organisation);
+  const canViewAudit = useAccessPolicyStore((s) => s.capabilities.canViewAudit);
+  const policyLoaded = useAccessPolicyStore((s) => s.loaded);
   const [scope, setScope] = useState<'tenant' | 'platform'>('tenant');
 
   if (!user) return <Navigate to="/" replace />;
+
+  // Defense-in-depth: the server 403s every audit endpoint below the
+  // auditView threshold, but we also block the route so a direct URL
+  // visit doesn't render an empty shell that fires doomed requests.
+  // Wait for the policy to load before deciding (avoids a flash-redirect
+  // for admins on a cold load).
+  if (policyLoaded && !canViewAudit) {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   return (
     <div className="px-4 py-6 md:p-8 md:pt-12 h-full flex flex-col overflow-y-auto">

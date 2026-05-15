@@ -26,6 +26,7 @@ import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { api } from '../lib/api';
 import AuthorityBadge from '../components/AuthorityBadge';
 import EntityAuditModal from '../components/EntityAuditModal';
+import { useAccessPolicyStore } from '../stores/useAccessPolicyStore';
 
 type Status = 'submitted' | 'under_review' | 'approved' | 'denied' | 'changes_requested' | 'withdrawn';
 
@@ -261,6 +262,7 @@ function PermitDetail({ id }: { id: string }) {
   const [permitNumberDraft, setPermitNumberDraft] = useState('');
   const [acting, setActing] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
+  const canViewAudit = useAccessPolicyStore((s) => s.capabilities.canViewAudit);
 
   const refresh = async () => {
     setLoading(true);
@@ -318,15 +320,17 @@ function PermitDetail({ id }: { id: string }) {
           {/* Audit trail of every action on this submission — claim,
               decision, comments, status changes. Critical for legal
               defensibility of the permit decision itself. */}
-          <button
-            type="button"
-            onClick={() => setAuditOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-slate-900/60 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-emerald-300 min-h-[36px]"
-            title="Full audit trail for this permit submission"
-          >
-            <Activity className="w-3.5 h-3.5" />
-            Activity
-          </button>
+          {canViewAudit && (
+            <button
+              type="button"
+              onClick={() => setAuditOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-slate-900/60 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-emerald-300 min-h-[36px]"
+              title="Full audit trail for this permit submission"
+            >
+              <Activity className="w-3.5 h-3.5" />
+              Activity
+            </button>
+          )}
         </div>
 
         <EntityAuditModal

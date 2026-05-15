@@ -1,12 +1,22 @@
 import { Hono } from 'hono';
 import { generateId } from '../utils/id';
 import { setAudit } from '../middleware/audit';
+import { resolveAccessPolicy, roleSatisfies } from '../utils/accessPolicy';
 
 interface Env {
   DB: D1Database;
 }
 
 export const cadRoutes = new Hono<{ Bindings: Env }>();
+
+/** Resolve the caller's org access policy. Cheap single-row read; the
+ *  version endpoints all need it so it's centralized here. */
+async function orgPolicy(db: D1Database, orgId: string) {
+  const row = await db.prepare(
+    `SELECT settings FROM organisations WHERE id = ?`
+  ).bind(orgId).first();
+  return resolveAccessPolicy(row?.settings);
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -259,6 +269,13 @@ cadRoutes.get('/:id/versions', async (c) => {
   const user = c.get('user');
   const id = c.req.param('id');
 
+  // Policy gate: who may VIEW version history (default: everyone with
+  // org access — it's their own work).
+  const policy = await orgPolicy(c.env.DB, user.orgId);
+  if (!roleSatisfies(user.role, policy.versionView, user.isPlatformAdmin)) {
+    return c.json({ error: 'Your role does not have access to version history.' }, 403);
+  }
+
   // Confirm the drawing belongs to caller's org before we expose the
   // version trail.
   const drawing = await c.env.DB.prepare(
@@ -290,6 +307,12 @@ cadRoutes.get('/versions/:versionId', async (c) => {
   const user = c.get('user');
   const versionId = c.req.param('versionId');
 
+  // Same view gate as the list endpoint — previewing a version is a read.
+  const policy = await orgPolicy(c.env.DB, user.orgId);
+  if (!roleSatisfies(user.role, policy.versionView, user.isPlatformAdmin)) {
+    return c.json({ error: 'Your role does not have access to version history.' }, 403);
+  }
+
   // Join through cad_drawings to enforce org_id ownership — versions
   // inherit access from the parent drawing.
   const row = await c.env.DB.prepare(
@@ -319,6 +342,14 @@ cadRoutes.get('/versions/:versionId', async (c) => {
 cadRoutes.post('/versions/:versionId/restore', async (c) => {
   const user = c.get('user');
   const versionId = c.req.param('versionId');
+
+  // Policy gate: RESTORE is destructive (overwrites the live canvas).
+  // Default threshold is `admin` — observers/engineers can look but the
+  // overwrite stays with admins + L0 unless the tenant admin loosens it.
+  const policy = await orgPolicy(c.env.DB, user.orgId);
+  if (!roleSatisfies(user.role, policy.versionRestore, user.isPlatformAdmin)) {
+    return c.json({ error: 'Your role cannot restore versions. Ask a tenant admin.' }, 403);
+  }
 
   const source = await c.env.DB.prepare(
     `SELECT v.id, v.drawing_id, v.project_id, v.org_id, v.version_number,

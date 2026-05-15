@@ -28,6 +28,7 @@ const PermitsPage = lazy(() => import('./pages/PermitsPage'));
 const AuditLogPage = lazy(() => import('./pages/AuditLogPage'));
 import { useAuthStore } from './features/auth/store/useAuthStore';
 import { usePreferencesStore } from './stores/usePreferencesStore';
+import { useAccessPolicyStore } from './stores/useAccessPolicyStore';
 import SpotlightSearch, { SpotlightTrigger } from './features/spotlight/SpotlightSearch';
 import SkipLinks from './components/accessibility/SkipLinks';
 import A11yProvider from './components/accessibility/A11yProvider';
@@ -49,7 +50,22 @@ function AppLayout() {
 
   // Validate persisted session on mount
   useEffect(() => { restoreSession(); }, [restoreSession]);
+
+  // Load the tenant's access-policy capabilities once authenticated so
+  // the UI can hide surfaces the caller's role can't use. Reset on
+  // logout so the next session doesn't inherit stale capabilities.
+  const refreshAccessPolicy = useAccessPolicyStore((s) => s.refresh);
+  const resetAccessPolicy = useAccessPolicyStore((s) => s.reset);
+  useEffect(() => {
+    if (isAuthenticated) {
+      void refreshAccessPolicy();
+    } else {
+      resetAccessPolicy();
+    }
+  }, [isAuthenticated, refreshAccessPolicy, resetAccessPolicy]);
+
   const { sidebarCollapsed, update: updatePrefs } = usePreferencesStore();
+  const canViewAudit = useAccessPolicyStore((s) => s.capabilities.canViewAudit);
   const location = useLocation();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
@@ -98,7 +114,7 @@ function AppLayout() {
             <MobileNavLink to="/team" icon={<Users className="w-5 h-5" />} label="Team" onClick={() => setMobileNavOpen(false)} />
             <MobileNavLink to="/community" icon={<Globe className="w-5 h-5" />} label="Community" onClick={() => setMobileNavOpen(false)} />
             <MobileNavLink to="/permits" icon={<ShieldCheck className="w-5 h-5" />} label="Permits" onClick={() => setMobileNavOpen(false)} />
-            <MobileNavLink to="/audit-log" icon={<Activity className="w-5 h-5" />} label="Audit log" onClick={() => setMobileNavOpen(false)} />
+            {canViewAudit && <MobileNavLink to="/audit-log" icon={<Activity className="w-5 h-5" />} label="Audit log" onClick={() => setMobileNavOpen(false)} />}
             <MobileNavLink to="/settings" icon={<Settings className="w-5 h-5" />} label="Settings" onClick={() => setMobileNavOpen(false)} />
             <MobileNavLink to="/guide" icon={<BookOpen className="w-5 h-5" />} label="Guide" onClick={() => setMobileNavOpen(false)} />
             <div className="h-px bg-slate-800/60 my-2" />
@@ -139,7 +155,7 @@ function AppLayout() {
               <NavigationLink to="/team" icon={<Users className="w-5 h-5" />} label="Team" collapsed={sidebarCollapsed} />
               <NavigationLink to="/community" icon={<Globe className="w-5 h-5" />} label="Community" collapsed={sidebarCollapsed} />
               <NavigationLink to="/permits" icon={<ShieldCheck className="w-5 h-5" />} label="Permits" collapsed={sidebarCollapsed} />
-              <NavigationLink to="/audit-log" icon={<Activity className="w-5 h-5" />} label="Audit log" collapsed={sidebarCollapsed} />
+              {canViewAudit && <NavigationLink to="/audit-log" icon={<Activity className="w-5 h-5" />} label="Audit log" collapsed={sidebarCollapsed} />}
               <NavigationLink to="/settings" icon={<Settings className="w-5 h-5" />} label="Settings" collapsed={sidebarCollapsed} />
               <NavigationLink to="/guide" icon={<BookOpen className="w-5 h-5" />} label="Guide" collapsed={sidebarCollapsed} />
             </div>

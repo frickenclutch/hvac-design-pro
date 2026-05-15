@@ -8,6 +8,7 @@ import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useCadStore } from '../store/useCadStore';
 import { useAuthStore } from '../../auth/store/useAuthStore';
 import { useProjectStore } from '../../../stores/useProjectStore';
+import { useAccessPolicyStore } from '../../../stores/useAccessPolicyStore';
 
 // Lazy-load heavy dependencies (Three.js ~1.2MB, jsPDF ~200KB)
 const Viewer3D = lazy(() => import('./Viewer3D'));
@@ -18,6 +19,7 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
   const { canvas, undo, redo, isDirty, isSaving, lastSavedAt, saveError, panelNavBar, setPanelNavBar, setIs3DViewOpen } = useCadStore();
   const [show3D, setShow3DLocal] = useState(false);
   const setShow3D = (v: boolean) => { setShow3DLocal(v); setIs3DViewOpen(v); };
+  const canViewVersions = useAccessPolicyStore((s) => s.capabilities.canViewVersions);
   const [showSearch, setShowSearch] = useState(false);
   const { user, organisation } = useAuthStore();
   const { activeProjectName, activeProjectType, activeProjectAddress, renameProject, createProject, activeProjectId } = useProjectStore();
@@ -279,7 +281,9 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
           <ActionButton icon={<Zap className="w-4 h-4" />} tooltip="Auto-Calculate Load" highlight />
           <div className="w-px h-4 bg-slate-700/60 mx-2" />
           <ActionButton icon={<Search className="w-4 h-4" />} tooltip="Search (Ctrl+K)" onClick={() => setShowSearch(true)} />
-          <ActionButton icon={<History className="w-4 h-4" />} tooltip="Version history — restore any prior save" onClick={onVersionsOpen} />
+          {canViewVersions && (
+            <ActionButton icon={<History className="w-4 h-4" />} tooltip="Version history — restore any prior save" onClick={onVersionsOpen} />
+          )}
           <ActionButton icon={<HelpCircle className="w-4 h-4" />} tooltip="Help Center" onClick={onHelpOpen} />
         </div>
 

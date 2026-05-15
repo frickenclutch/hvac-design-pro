@@ -17,12 +17,15 @@ interface Props {
   authorName: string;
   createdAt: string;
   busy?: boolean;
+  /** Hide the Restore action when the caller's role can't restore
+   *  (policy-gated). They can still inspect + Back to live. */
+  canRestore?: boolean;
   onExit: () => void;
   onRestore: () => void;
 }
 
 export default function VersionPreviewBanner({
-  versionNumber, totalVersions, authorName, createdAt, busy, onExit, onRestore,
+  versionNumber, totalVersions, authorName, createdAt, busy, canRestore = true, onExit, onRestore,
 }: Props) {
   return (
     <div
@@ -50,15 +53,17 @@ export default function VersionPreviewBanner({
       </div>
 
       <div className="flex items-center gap-1.5 ml-3">
-        <button
-          onClick={onRestore}
-          disabled={busy}
-          className="px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center gap-1.5 min-h-[36px] disabled:opacity-50"
-          title="Make this version the new live state (creates a new version pointing at this content)"
-        >
-          {busy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
-          Restore this version
-        </button>
+        {canRestore && (
+          <button
+            onClick={onRestore}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center gap-1.5 min-h-[36px] disabled:opacity-50"
+            title="Make this version the new live state (creates a new version pointing at this content)"
+          >
+            {busy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+            Restore this version
+          </button>
+        )}
         <button
           onClick={onExit}
           disabled={busy}

@@ -16,6 +16,11 @@
 import { Hono } from 'hono';
 import { requirePlatformAdmin, type AuthUser } from '../middleware/auth';
 import { setAudit } from '../middleware/audit';
+import {
+  resolveAccessPolicy,
+  sanitizeAccessPolicyPatch,
+  mergeAccessPolicyIntoSettings,
+} from '../utils/accessPolicy';
 
 interface Env {
   DB: D1Database;
@@ -447,6 +452,60 @@ platformRoutes.delete('/orgs/:orgId/users/:userId', async (c) => {
   });
 
   return c.json({ ok: true });
+});
+
+// ── L0 cross-tenant access-policy override ─────────────────────────────────
+// The platform owner can set ANY tenant's compliance access policy. The
+// tenant's own admin sets their policy via /api/org/access-policy; this
+// is the L0 escape hatch for support / forced-compliance scenarios.
+//
+// GET returns the resolved policy for inspection; PUT patches it.
+platformRoutes.get('/orgs/:orgId/access-policy', async (c) => {
+  const orgId = c.req.param('orgId');
+  const org = await c.env.DB.prepare(
+    `SELECT id, name, settings FROM organisations WHERE id = ?`
+  ).bind(orgId).first();
+  if (!org) return c.json({ error: 'Organisation not found' }, 404);
+  return c.json({
+    orgId,
+    orgName: org.name,
+    policy: resolveAccessPolicy(org.settings),
+  });
+});
+
+platformRoutes.put('/orgs/:orgId/access-policy', async (c) => {
+  const orgId = c.req.param('orgId');
+  const body = await c.req.json();
+  const patch = sanitizeAccessPolicyPatch(body);
+  if (Object.keys(patch).length === 0) {
+    return c.json({ error: 'No valid policy fields (versionView|versionRestore|auditView → viewer|tech|engineer|admin).' }, 400);
+  }
+
+  const org = await c.env.DB.prepare(
+    `SELECT name, settings FROM organisations WHERE id = ?`
+  ).bind(orgId).first();
+  if (!org) return c.json({ error: 'Organisation not found' }, 404);
+
+  const before = resolveAccessPolicy(org.settings);
+  const next = { ...before, ...patch };
+  const merged = mergeAccessPolicyIntoSettings(org.settings, next);
+  await c.env.DB.prepare(
+    `UPDATE organisations SET settings = ? WHERE id = ?`
+  ).bind(merged, orgId).run();
+
+  setAudit(c, {
+    action: 'platform.org.access_policy.update',
+    entityType: 'organisation',
+    entityId: orgId,
+    entityLabel: org.name as string,
+    targetOrgId: orgId,
+    isPlatformAction: true,
+    beforeValue: before as unknown as Record<string, unknown>,
+    afterValue: next as unknown as Record<string, unknown>,
+    detail: { fieldsChanged: Object.keys(patch) },
+  });
+
+  return c.json({ orgId, policy: next });
 });
 
 // ── GET /api/platform/me ────────────────────────────────────────────────────

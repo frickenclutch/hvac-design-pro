@@ -34,10 +34,28 @@
 
 import { Hono } from 'hono';
 import type { AuthUser } from '../middleware/auth';
+import { resolveAccessPolicy, roleSatisfies } from '../utils/accessPolicy';
 
 interface Env { DB: D1Database; }
 
 export const auditRoutes = new Hono<{ Bindings: Env }>();
+
+// Every audit-log endpoint is gated by the org's `auditView` policy
+// (default: admin + L0 only — it's a compliance/oversight tool, not a
+// working tool). Below threshold the endpoint 403s entirely; it does NOT
+// degrade to "your own rows" — that's a deliberate product decision so
+// observers don't even see the surface exists.
+auditRoutes.use('*', async (c, next) => {
+  const user = c.get('user') as AuthUser;
+  const org = await c.env.DB.prepare(
+    `SELECT settings FROM organisations WHERE id = ?`
+  ).bind(user.orgId).first();
+  const policy = resolveAccessPolicy(org?.settings);
+  if (!roleSatisfies(user.role, policy.auditView, user.isPlatformAdmin)) {
+    return c.json({ error: 'Your role does not have access to the audit log.' }, 403);
+  }
+  await next();
+});
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

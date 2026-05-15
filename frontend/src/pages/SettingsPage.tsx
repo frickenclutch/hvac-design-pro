@@ -1,9 +1,10 @@
 import { useRef, useState, useEffect } from 'react';
 import { usePreferencesStore, type ThemeMode, type UIDensity, type UnitSystem, type EngineVersion } from '../stores/usePreferencesStore';
-import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck } from 'lucide-react';
+import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock } from 'lucide-react';
 import { api } from '../lib/api';
 import A11yPanel from '../components/accessibility/A11yPanel';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
+import { useAccessPolicyStore } from '../stores/useAccessPolicyStore';
 import { toast } from '../stores/useToastStore';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
@@ -33,6 +34,10 @@ export default function SettingsPage() {
               Shows whenever the user is an admin so they can configure
               their tenant as a permit authority. */}
           {user?.role === 'admin' && <AuthorityProfileSection />}
+
+          {/* Access Policy — who in the tenant can see audit/version
+              surfaces. Admin + L0 only. */}
+          {(user?.role === 'admin' || user?.isPlatformAdmin) && <AccessPolicySection />}
 
           {/* User Profile */}
           <UserProfileSection token={token} user={user} />
@@ -720,6 +725,136 @@ function AuthorityProfileSection() {
           className="flex items-center gap-2 bg-amber-500/10 text-amber-400 border border-amber-500/30 px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-amber-500/20 transition-all disabled:opacity-50"
         >
           <Save className="w-4 h-4" /> {saving ? 'Saving…' : 'Save Authority Profile'}
+        </button>
+      </div>
+    </Section>
+  );
+}
+
+// ── Access Policy ─────────────────────────────────────────────────────────────
+// Tenant admin (or L0) decides which roles can reach the compliance /
+// forensic surfaces. Defaults implement "Option C":
+//   versionView=viewer (everyone with org access — it's their own work)
+//   versionRestore=admin (destructive overwrite stays with admins + L0)
+//   auditView=admin (oversight tool, not a working tool)
+// The server re-enforces this on every request; this editor is the
+// owner's control surface.
+const ROLE_OPTIONS: { value: 'viewer' | 'tech' | 'engineer' | 'admin'; label: string }[] = [
+  { value: 'viewer', label: 'Everyone (viewer+)' },
+  { value: 'tech', label: 'Tech and up' },
+  { value: 'engineer', label: 'Engineer and up' },
+  { value: 'admin', label: 'Admin only' },
+];
+
+function AccessPolicySection() {
+  const storePolicy = useAccessPolicyStore((s) => s.policy);
+  const refreshPolicy = useAccessPolicyStore((s) => s.refresh);
+
+  const [versionView, setVersionView] = useState<string>('viewer');
+  const [versionRestore, setVersionRestore] = useState<string>('admin');
+  const [auditView, setAuditView] = useState<string>('admin');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.getAccessPolicy();
+        if (cancelled) return;
+        setVersionView(res.policy.versionView);
+        setVersionRestore(res.policy.versionRestore);
+        setAuditView(res.policy.auditView);
+      } catch {
+        // Fall back to whatever the store cached, else Option C defaults.
+        if (storePolicy && !cancelled) {
+          setVersionView(storePolicy.versionView);
+          setVersionRestore(storePolicy.versionRestore);
+          setAuditView(storePolicy.auditView);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.setAccessPolicy({
+        versionView: versionView as 'viewer' | 'tech' | 'engineer' | 'admin',
+        versionRestore: versionRestore as 'viewer' | 'tech' | 'engineer' | 'admin',
+        auditView: auditView as 'viewer' | 'tech' | 'engineer' | 'admin',
+      });
+      // Refresh the cached capabilities so gated UI updates immediately
+      // for the admin's own session if they changed their own access.
+      await refreshPolicy();
+      toast.success('Access policy updated.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save access policy');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return null;
+
+  return (
+    <Section icon={<Lock className="w-5 h-5 text-emerald-400" />} title="Access Policy">
+      <p className="text-xs text-slate-500 mb-4">
+        Control which roles can reach compliance and forensic surfaces. The server enforces this on every request — these
+        controls are the source of truth. Platform owners (L0) always have full access regardless of these settings.
+      </p>
+
+      <OptionGroup label="Version history — view & preview">
+        <select
+          value={versionView}
+          onChange={(e) => setVersionView(e.target.value)}
+          className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+        >
+          {ROLE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <p className="text-[11px] text-slate-600 mt-1.5">
+          Who can open the CAD version history and preview prior saves. Default: everyone — it's their own work.
+        </p>
+      </OptionGroup>
+
+      <OptionGroup label="Version restore (destructive — overwrites the live drawing)">
+        <select
+          value={versionRestore}
+          onChange={(e) => setVersionRestore(e.target.value)}
+          className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+        >
+          {ROLE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <p className="text-[11px] text-slate-600 mt-1.5">
+          Who can roll a drawing back to a prior version. Default: admin only — restore overwrites current work.
+        </p>
+      </OptionGroup>
+
+      <OptionGroup label="Audit log — page & per-entity activity">
+        <select
+          value={auditView}
+          onChange={(e) => setAuditView(e.target.value)}
+          className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+        >
+          {ROLE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <p className="text-[11px] text-slate-600 mt-1.5">
+          Who can open the audit log and per-entity activity views. Default: admin only — it's an oversight tool.
+          Below this threshold the surface is hidden entirely, not degraded.
+        </p>
+      </OptionGroup>
+
+      <div className="flex justify-end pt-2">
+        <button
+          onClick={save}
+          disabled={saving}
+          className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-500/20 border border-emerald-500/30 transition-all disabled:opacity-50 min-h-[44px]"
+        >
+          <Save className="w-4 h-4" /> {saving ? 'Saving…' : 'Save access policy'}
         </button>
       </div>
     </Section>

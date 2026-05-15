@@ -23,6 +23,7 @@ import {
 import { api } from '../../../lib/api';
 import { useCadStore } from '../store/useCadStore';
 import { toast } from '../../../stores/useToastStore';
+import { useAccessPolicyStore } from '../../../stores/useAccessPolicyStore';
 
 interface Version {
   id: string;
@@ -62,6 +63,7 @@ export default function VersionHistoryModal({ isOpen, onClose, onPreview }: Prop
   const [error, setError] = useState<string | null>(null);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [previewingId, setPreviewingId] = useState<string | null>(null);
+  const canRestore = useAccessPolicyStore((s) => s.capabilities.canRestoreVersions);
 
   const refresh = async () => {
     if (!drawingId) return;
@@ -299,19 +301,21 @@ export default function VersionHistoryModal({ isOpen, onClose, onPreview }: Prop
                             Preview
                           </button>
                         )}
-                        <button
-                          onClick={() => void handleRestore(v)}
-                          disabled={restoring}
-                          className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-emerald-500/20 hover:text-emerald-300 hover:border-emerald-500/30 text-slate-300 text-xs font-bold flex items-center gap-1.5 border border-slate-700 transition-colors min-h-[36px] disabled:opacity-50"
-                          title={`Restore version ${v.version_number}`}
-                        >
-                          {restoring ? (
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <RotateCcw className="w-3.5 h-3.5" />
-                          )}
-                          Restore
-                        </button>
+                        {canRestore && (
+                          <button
+                            onClick={() => void handleRestore(v)}
+                            disabled={restoring}
+                            className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-emerald-500/20 hover:text-emerald-300 hover:border-emerald-500/30 text-slate-300 text-xs font-bold flex items-center gap-1.5 border border-slate-700 transition-colors min-h-[36px] disabled:opacity-50"
+                            title={`Restore version ${v.version_number}`}
+                          >
+                            {restoring ? (
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <RotateCcw className="w-3.5 h-3.5" />
+                            )}
+                            Restore
+                          </button>
+                        )}
                       </div>
                     )}
                     {isLatest && (

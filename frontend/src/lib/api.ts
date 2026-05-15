@@ -377,6 +377,40 @@ class ApiClient {
     }>(`/api/platform/audit?limit=${limit}`);
   }
 
+  // ── Access policy (per-tenant compliance gating) ────────────────────────
+  // Defaults implement "Option C": versionView=viewer (all), versionRestore
+  // =admin, auditView=admin. Tenant admin or L0 can change thresholds.
+  async getAccessPolicy() {
+    return this.request<{
+      policy: { versionView: string; versionRestore: string; auditView: string };
+      capabilities: {
+        canViewVersions: boolean;
+        canRestoreVersions: boolean;
+        canViewAudit: boolean;
+        canEditPolicy: boolean;
+      };
+    }>('/api/org/access-policy');
+  }
+
+  async setAccessPolicy(patch: {
+    versionView?: 'viewer' | 'tech' | 'engineer' | 'admin';
+    versionRestore?: 'viewer' | 'tech' | 'engineer' | 'admin';
+    auditView?: 'viewer' | 'tech' | 'engineer' | 'admin';
+  }) {
+    return this.request<{
+      policy: { versionView: string; versionRestore: string; auditView: string };
+      capabilities: {
+        canViewVersions: boolean;
+        canRestoreVersions: boolean;
+        canViewAudit: boolean;
+        canEditPolicy: boolean;
+      };
+    }>('/api/org/access-policy', {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    });
+  }
+
   // ── L0 cross-tenant user management ─────────────────────────────────────
   // PATCH role and/or authority flag on a user inside any tenant. Server
   // gates on isPlatformAdmin and writes audit rows with target_org_id +

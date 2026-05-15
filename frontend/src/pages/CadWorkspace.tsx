@@ -15,6 +15,7 @@ import VersionPreviewBanner from '../features/cad/components/VersionPreviewBanne
 import { api } from '../lib/api';
 import { useAutoSave, loadDrawing } from '../features/cad/hooks/useAutoSave';
 import { useCadStore } from '../features/cad/store/useCadStore';
+import { useAccessPolicyStore } from '../stores/useAccessPolicyStore';
 import Mason from '../components/Mason';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { useProjectStore } from '../stores/useProjectStore';
@@ -39,6 +40,7 @@ export default function CadWorkspace() {
   } | null>(null);
   const [restoringFromPreview, setRestoringFromPreview] = useState(false);
   const liveSnapshotRef = useRef<unknown | null>(null);
+  const canRestoreVersions = useAccessPolicyStore((s) => s.capabilities.canRestoreVersions);
 
   const enterPreview = (info: {
     versionId: string;
@@ -235,6 +237,7 @@ export default function CadWorkspace() {
           authorName={previewInfo.authorName}
           createdAt={previewInfo.createdAt}
           busy={restoringFromPreview}
+          canRestore={canRestoreVersions}
           onExit={exitPreview}
           onRestore={() => void restoreFromPreview()}
         />
