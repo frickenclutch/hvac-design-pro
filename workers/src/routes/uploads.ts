@@ -61,10 +61,38 @@ uploadRoutes.get('/:id', async (c) => {
   const object = await c.env.STORAGE.get(record.r2_key as string);
   if (!object) return c.json({ error: 'File not found in storage' }, 404);
 
+  // SECURITY: harden file serving against stored-XSS + header injection.
+  //  - Only a small allowlist of inert types is served `inline`; anything
+  //    else (esp. text/html, svg, xml) is forced to `attachment` so the
+  //    browser downloads instead of rendering it in the Workers origin.
+  //  - The filename in Content-Disposition is sanitized (strip quotes,
+  //    CR/LF, control chars) AND RFC 5987-encoded so a crafted filename
+  //    can't inject extra headers or break out of the quoted string.
+  const rawType = String(record.content_type || 'application/octet-stream');
+  const INLINE_SAFE = new Set([
+    'image/png', 'image/jpeg', 'image/gif', 'image/webp',
+    'application/pdf', 'text/plain',
+  ]);
+  const disposition = INLINE_SAFE.has(rawType) ? 'inline' : 'attachment';
+  // Collapse anything non-trivial to octet-stream so an attacker can't
+  // get text/html (or image/svg+xml) rendered same-origin.
+  const safeType = INLINE_SAFE.has(rawType) ? rawType : 'application/octet-stream';
+  const rawName = String(record.filename || 'download');
+  // Positive allowlist — keep only safe printable filename chars. This
+  // implicitly drops CR/LF, quotes, backslashes, and all control chars
+  // (no control-char regex literal needed), neutralizing header injection
+  // and quoted-string breakout in the Content-Disposition value.
+  const asciiName = rawName
+    .replace(/[^A-Za-z0-9._ ()-]/g, "_")   // allowlist; drops CR/LF, quotes, ctrl
+    .slice(0, 200) || "download";
+  const encodedName = encodeURIComponent(rawName).slice(0, 300);
+
   return new Response(object.body, {
     headers: {
-      'Content-Type': record.content_type as string,
-      'Content-Disposition': `inline; filename="${record.filename}"`,
+      'Content-Type': safeType,
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Disposition':
+        `${disposition}; filename="${asciiName}"; filename*=UTF-8''${encodedName}`,
     },
   });
 });

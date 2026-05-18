@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { generateId } from '../utils/id';
 import { setAudit } from '../middleware/audit';
+import { roleSatisfies } from '../utils/accessPolicy';
 
 interface Env {
   DB: D1Database;
@@ -23,9 +24,39 @@ calcRoutes.get('/project/:projectId', async (c) => {
 // Save a calculation result
 calcRoutes.post('/', async (c) => {
   const user = c.get('user');
+  // CLAUDE.md §5 matrix: tech+ may "trigger calcs". Viewers are read-only.
+  if (!roleSatisfies(user.role, 'tech', user.isPlatformAdmin)) {
+    return c.json({ error: 'Your role cannot save calculations' }, 403);
+  }
   const body = await c.req.json();
   const id = generateId();
 
+  // SECURITY (tenant isolation): the project MUST belong to the caller's
+  // org before we write anything keyed to it. Without this an authed user
+  // in org A could POST { projectId: <org-B-project> } and inject an
+  // append-only (unremovable) calc row into another tenant's project.
+  // The org_id stamp on the INSERT is not sufficient on its own — a row
+  // with org_id=A but project_id=B still surfaces to org B via the
+  // permit-detail calc query, which joins by project_id only.
+  if (!body.projectId || typeof body.projectId !== 'string') {
+    return c.json({ error: 'projectId is required' }, 400);
+  }
+  const ownProject = await c.env.DB.prepare(
+    'SELECT id FROM projects WHERE id = ? AND org_id = ?'
+  ).bind(body.projectId, user.orgId).first();
+  if (!ownProject) {
+    return c.json({ error: 'Project not found in your organisation' }, 404);
+  }
+
+  // NOTE on the version-number "race" flagged in the May-2026 audit:
+  // we intentionally do NOT add a UNIQUE(project_id, calc_type, version)
+  // constraint here. The Manual J Phase-1 shadow-run writes TWO calc rows
+  // per user click — the legacy display engine and the cert-grade engine
+  // — which share project_id + calc_type and may share version. A unique
+  // constraint would reject the second write and silently kill drift
+  // telemetry. calculations is an append-only audit-style table; rows are
+  // distinguished by id + engine_version + created_at, so a duplicate
+  // version ordinal under concurrency is benign (it's a label, not a key).
   // Get next version number
   const latest = await c.env.DB.prepare(
     `SELECT MAX(version) as maxVer FROM calculations WHERE project_id = ? AND calc_type = ?`

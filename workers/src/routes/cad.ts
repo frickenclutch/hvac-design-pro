@@ -138,6 +138,26 @@ cadRoutes.post('/', async (c) => {
   const id = generateId();
   const canvasJson = JSON.stringify(body.canvasJson);
 
+  // CLAUDE.md §5 matrix: viewers are view-only. tech+ may author drawings.
+  if (!roleSatisfies(user.role, 'tech', user.isPlatformAdmin)) {
+    return c.json({ error: 'Your role cannot create drawings' }, 403);
+  }
+
+  // SECURITY (tenant isolation): same class of hole as calculations POST.
+  // The project must belong to the caller's org before we create a
+  // drawing (and a cascading cad_drawing_versions snapshot) keyed to it.
+  // Without this an authed user could inject a drawing into another
+  // tenant's project, which then leaks via the permit-detail payload.
+  if (!body.projectId || typeof body.projectId !== 'string') {
+    return c.json({ error: 'projectId is required' }, 400);
+  }
+  const ownProject = await c.env.DB.prepare(
+    'SELECT id FROM projects WHERE id = ? AND org_id = ?'
+  ).bind(body.projectId, user.orgId).first();
+  if (!ownProject) {
+    return c.json({ error: 'Project not found in your organisation' }, 404);
+  }
+
   await c.env.DB.prepare(
     `INSERT INTO cad_drawings (id, project_id, org_id, name, floor_index, canvas_json, created_by)
      VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -186,6 +206,10 @@ cadRoutes.post('/', async (c) => {
 // for operator workflows, not every keystroke.
 cadRoutes.put('/:id', async (c) => {
   const user = c.get('user');
+  // tech+ may save drawings (auto-save included). Viewers are read-only.
+  if (!roleSatisfies(user.role, 'tech', user.isPlatformAdmin)) {
+    return c.json({ error: 'Your role cannot edit drawings' }, 403);
+  }
   const id = c.req.param('id');
   const body = await c.req.json();
   const canvasJson = JSON.stringify(body.canvasJson);
@@ -233,6 +257,11 @@ cadRoutes.put('/:id', async (c) => {
 // Delete a CAD drawing
 cadRoutes.delete('/:id', async (c) => {
   const user = c.get('user');
+  // Destructive + cascades the entire cad_drawing_versions history via
+  // ON DELETE CASCADE. Admin-only, matching the project-delete gate.
+  if (!roleSatisfies(user.role, 'admin', user.isPlatformAdmin)) {
+    return c.json({ error: 'Only admins can delete drawings' }, 403);
+  }
   const id = c.req.param('id');
 
   const before = await c.env.DB.prepare(

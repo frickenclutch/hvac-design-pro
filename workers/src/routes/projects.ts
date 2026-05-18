@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { generateId } from '../utils/id';
 import { setAudit } from '../middleware/audit';
+import { roleSatisfies } from '../utils/accessPolicy';
 
 interface Env {
   DB: D1Database;
@@ -41,6 +42,11 @@ projectRoutes.get('/:id', async (c) => {
 // Create project
 projectRoutes.post('/', async (c) => {
   const user = c.get('user');
+  // CLAUDE.md §5 matrix: viewers are view-only. tech+ may create/update.
+  // (L0 always passes via roleSatisfies.)
+  if (!roleSatisfies(user.role, 'tech', user.isPlatformAdmin)) {
+    return c.json({ error: 'Your role cannot create projects' }, 403);
+  }
   const body = await c.req.json();
   const id = generateId();
 
@@ -78,6 +84,9 @@ projectRoutes.post('/', async (c) => {
 // Update project
 projectRoutes.put('/:id', async (c) => {
   const user = c.get('user');
+  if (!roleSatisfies(user.role, 'tech', user.isPlatformAdmin)) {
+    return c.json({ error: 'Your role cannot update projects' }, 403);
+  }
   const id = c.req.param('id');
   const body = await c.req.json();
 
@@ -132,6 +141,10 @@ projectRoutes.put('/:id', async (c) => {
 // Delete project
 projectRoutes.delete('/:id', async (c) => {
   const user = c.get('user');
+  // CLAUDE.md §5 matrix is explicit: "Delete projects" = admin only.
+  if (!roleSatisfies(user.role, 'admin', user.isPlatformAdmin)) {
+    return c.json({ error: 'Only admins can delete projects' }, 403);
+  }
   const id = c.req.param('id');
 
   // Capture entity name before delete so the audit row stays meaningful
