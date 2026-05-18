@@ -42,6 +42,14 @@ CREATE TABLE IF NOT EXISTS users (
     zip TEXT,
     country TEXT DEFAULT 'US',
     is_verified INTEGER NOT NULL DEFAULT 0,
+    -- L0 platform-admin flag (creator layer, C4 Technologies). Orthogonal
+    -- to `role`. Read by authMiddleware on EVERY authed request, so it
+    -- MUST exist. Historically this was added to production out-of-band
+    -- and was absent from every migration — a fresh rebuild would 500 on
+    -- login. Codified here 2026-05-15 (schema reconciliation). On an
+    -- already-provisioned DB this CREATE TABLE IF NOT EXISTS no-ops, so
+    -- adding the column here does not alter production.
+    is_platform_admin INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     last_seen_at TEXT
 );

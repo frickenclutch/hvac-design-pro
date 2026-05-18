@@ -1,7 +1,15 @@
 -- 0006_audit_log.sql — extend audit_log into the platform-wide accountability spine.
 --
--- The bare table existed from migration 0001 but was never written to. This
--- migration:
+-- SCHEMA-RECONCILIATION NOTE (2026-05-15): the original header claimed the
+-- bare audit_log table "existed from migration 0001". It did NOT — it was
+-- never in any migration; production got it via an out-of-band CREATE. On
+-- a fresh rebuild the ALTER TABLE statements below would fail (no table to
+-- alter). Fixed by self-creating the base table here, idempotently, before
+-- the ALTERs. On production the table already exists so CREATE TABLE IF
+-- NOT EXISTS no-ops and the ALTERs were already applied — zero change.
+--
+-- This migration:
+--   0. Self-creates the base audit_log table if absent (reconciliation).
 --   1. Adds columns we need to capture WHO did WHAT to WHICH entity, including
 --      cross-tenant context (target_org_id) for L0 admin and Permit Authority
 --      actions, before/after diffs for edits, and the HTTP-level metadata
@@ -13,14 +21,30 @@
 --        - drill-through to a specific entity (entity_type, entity_id)
 --        - filtering by semantic action ("project.create", "user.role_changed")
 --
--- The table was introduced read-empty in 0001, so ALTER TABLE ADD COLUMN is
--- safe — no data to migrate. New columns are nullable / default-zero so the
--- existing INSERT shape used in older code paths (none currently) stays valid.
+-- New columns are nullable / default-zero so the base INSERT shape stays valid.
 --
 -- The audit_log is APPEND-ONLY. There are no UPDATE / DELETE handlers that
 -- touch it — the integrity of the log depends on this. If a future feature
 -- ever needs to "redact" a row (e.g. GDPR right-to-erasure), do it by adding
 -- a `redacted_at` column rather than DELETE.
+
+-- Base table — the 11-column shape the ALTERs below extend. Matches the
+-- schema production was manually given out-of-band. Idempotent: no-op when
+-- the table already exists (production), creates it on a fresh rebuild so
+-- the subsequent ALTERs succeed.
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          TEXT PRIMARY KEY,
+    org_id      TEXT NOT NULL REFERENCES organisations(id),
+    user_id     TEXT REFERENCES users(id),
+    project_id  TEXT REFERENCES projects(id),
+    action      TEXT NOT NULL,
+    entity_type TEXT,
+    entity_id   TEXT,
+    detail      TEXT,
+    ip_address  TEXT,
+    user_agent  TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 ALTER TABLE audit_log ADD COLUMN target_org_id TEXT;
 ALTER TABLE audit_log ADD COLUMN entity_label TEXT;
