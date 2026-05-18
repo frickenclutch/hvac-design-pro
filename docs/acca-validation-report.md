@@ -23,7 +23,7 @@ Every Form J1 total reproduces ACCA's published reference value within
 **±0.5% cert tolerance**, with the worst drift across all three tests
 being **0.017%** — two orders of magnitude below the tolerance threshold.
 
-**vitest harness:** 30/30 tests pass on every commit (4 cert tests + 7 registry sanity + 19 unit cases for Liang-Barsky clip, storage scoping, prefs persistence). Cert tests run in <1 s.
+**vitest harness:** 43/43 tests pass on every commit (23 Manual J 8 cert cases across Smith/Walker/Cobb + 7 registry sanity + 13 storage/prefs infra cases). Cert tests run in <1 s; full suite ~1.9 s.
 
 This report is organized into:
 
@@ -86,12 +86,12 @@ production engine end-to-end:
 cd frontend && npm test
 ```
 
-Output:
+Output (current — suite has grown since first capture):
 ```
  RUN  v4.1.5
- Test Files  3 passed (3)
-      Tests  23 passed (23)
-   Duration  305ms
+ Test Files  6 passed (6)
+      Tests  43 passed (43)
+   Duration  ~1.9s
 ```
 
 Both layers are CI-runnable. Layer 1 proves the captured data and
@@ -460,9 +460,9 @@ Layer 1 — Standalone validation harnesses (vanilla Node.js):
 Layer 2 — Vitest typed-engine tests:
   $ cd frontend && npm test
     RUN  v4.1.5
-    Test Files  3 passed (3)
-         Tests  23 passed (23)
-      Duration  305ms
+    Test Files  6 passed (6)
+         Tests  43 passed (43)
+      Duration  ~1.9s
 
 Worst total drift across all three test cases:
   Smith total sens:   0.006%
@@ -507,7 +507,7 @@ implementation.
 
 ```typescript
 // frontend/src/engines/manualJ8/index.ts
-export const MANUAL_J8_ENGINE_VERSION = 'manualJ8-ts-1.0.0';
+export const MANUAL_J8_ENGINE_VERSION = 'manualJ8-ts-1.1.0';
 ```
 
 This version stamp is persisted with every calculation result in the

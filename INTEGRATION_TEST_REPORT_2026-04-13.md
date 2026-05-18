@@ -1,3 +1,10 @@
+> ⚠️ **HISTORICAL DOCUMENT — DO NOT CITE AS CURRENT STATE.** Dated
+> 2026-04-13. The localStorage keys shown here are UNSCOPED (`hvac_manualj_inputs`,
+> `hvac_cad_drawing`) — that pattern was a critical bug since fixed; all
+> user-data keys are now project-scoped via `scopedKey()` (CLAUDE.md §4.1).
+> Engine references predate the cert-grade `manualJ8` engine. Building-input
+> fixtures remain valid; do not cite the storage/engine narrative as current.
+
 # HVAC DesignPro — Full-Scale Integration Test Report
 
 **Date:** April 13, 2026  

@@ -1,6 +1,6 @@
 # HVAC Design Pro — Manual J 8th Edition Methodology
 
-**Engine version:** `manualJ8-ts-1.0.0`
+**Engine version:** `manualJ8-ts-1.1.0`
 **Reference standard:** ACCA Manual J 8th Edition, v2.50
 **Document status:** Submission package for ACCA software certification
 
@@ -542,7 +542,7 @@ Manual J §13. The engine respects this distinction.
 Every calculation result carries the engine version stamp:
 
 ```typescript
-export const MANUAL_J8_ENGINE_VERSION = 'manualJ8-ts-1.0.0';
+export const MANUAL_J8_ENGINE_VERSION = 'manualJ8-ts-1.1.0';
 ```
 
 This value is persisted in the D1 `calculations.engine_version` column

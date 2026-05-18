@@ -13,7 +13,7 @@
 | Adapter shim | `frontend/src/engines/manualJ8/adapters/legacy.ts` | ✅ shipped, ~460 LOC |
 | Feature flags | `frontend/src/stores/usePreferencesStore.ts` (`engineVersion`, `shadowRunManualJ8`) | ✅ shipped, defaults `legacy` + `true` |
 | Calculator wiring | `frontend/src/pages/ManualJCalculator.tsx` `runCalculation` | ✅ shadow-run + drift log |
-| Tests | 30/30 vitest pass (4 cert + 26 unit) | ✅ green |
+| Tests | 43/43 vitest pass (23 cert + 7 registry + 13 infra) | ✅ green |
 | Browser-verified | Smith-like climate produces drift telemetry; default conditions throw on sparse Table 4B ceiling cells (caught + logged) | ✅ verified |
 
 **Phase 1 findings (already surfaced):**
@@ -181,7 +181,7 @@ Surface in `/settings` page as a "Cert-grade engine (beta)" toggle. Don't expose
 - ✅ Saved projects load + recalc correctly
 - ✅ Console shows `[engine drift] heat: 0.X%, sens: 0.Y%, latent: 0.Z%` after each calc
 - ✅ Drift on real projects (Howland Pump's job book) stays under 5% — if larger, that's a finding, not a failure
-- ✅ vitest 30/30 still pass
+- ✅ vitest 43/43 still pass
 - ✅ Production build clean
 
 ## Success criteria for Phase 2

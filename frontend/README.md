@@ -16,7 +16,7 @@ npm run dev          # Vite on :5173, host=true
 npm run build        # tsc -b && vite build (target ≤660 KB gzip)
 npm run preview      # serve the built bundle
 npm run lint         # ESLint flat config
-npx vitest run       # cert + unit tests (30/30, <1 s)
+npx vitest run       # cert + unit tests (43/43, ~1.9 s)
 ```
 
 ## Where things live

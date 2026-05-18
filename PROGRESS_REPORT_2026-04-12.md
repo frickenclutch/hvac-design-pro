@@ -1,3 +1,9 @@
+> ⚠️ **HISTORICAL DOCUMENT — DO NOT CITE AS CURRENT STATE.** This is a
+> dated point-in-time snapshot from 2026-04-12. Nearly every metric here
+> (file count, "no test framework", "no audit log", single-chunk bundle,
+> "ACCA not pursued") has been superseded. For current state see
+> `CLAUDE.md`, `docs/acca-validation-report.md`, and the migrations dir.
+
 # HVAC Design Pro — Progress Report & Continuation Strategy
 **Date:** April 12, 2026 | **Codebase Snapshot:** commit `3f46029` on `main`
 

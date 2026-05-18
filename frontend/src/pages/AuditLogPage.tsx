@@ -30,10 +30,23 @@ export default function AuditLogPage() {
   // Defense-in-depth: the server 403s every audit endpoint below the
   // auditView threshold, but we also block the route so a direct URL
   // visit doesn't render an empty shell that fires doomed requests.
-  // Wait for the policy to load before deciding (avoids a flash-redirect
-  // for admins on a cold load).
   if (policyLoaded && !canViewAudit) {
     return <Navigate to="/dashboard" replace />;
+  }
+
+  // Until the policy resolves, render a skeleton rather than the page
+  // chrome. Previously an unauthorized user briefly saw the full header
+  // before the redirect fired (no data leak — server enforces — but a
+  // cosmetic exposure of a surface they shouldn't know exists).
+  if (!policyLoaded) {
+    return (
+      <div className="px-4 py-6 md:p-8 md:pt-12 h-full flex items-center justify-center">
+        <div className="flex items-center gap-2 text-slate-600 text-sm">
+          <div className="w-4 h-4 rounded-full border-2 border-slate-700 border-t-transparent animate-spin" />
+          Loading…
+        </div>
+      </div>
+    );
   }
 
   return (

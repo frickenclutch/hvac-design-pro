@@ -1,3 +1,8 @@
+> ⚠️ **HISTORICAL DOCUMENT — DO NOT CITE AS CURRENT STATE.** Dated
+> session log from 2026-04-13, retained as a historical record. Schema,
+> table counts, and roadmap here are long superseded. For current state
+> see `CLAUDE.md` and the `workers/migrations/` directory.
+
 # HVAC DesignPro — Session Summary: April 13, 2026
 
 ## What Shipped Tonight (10 Commits)
