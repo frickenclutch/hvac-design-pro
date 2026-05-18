@@ -5,6 +5,7 @@ import { sendEmail, buildWelcomeEmail, buildVerificationEmail, buildPasswordRese
 import { createVerificationCode, validateVerificationCode } from '../utils/verificationCodes';
 import { checkRateLimit, recordRateLimitEvent, cleanupRateLimitEvents } from '../utils/rateLimit';
 import { buildAuthUrl, exchangeCodeForTokens, fetchMicrosoftProfile, buildCfAccessAuthUrl, exchangeCfAccessCode, fetchCfAccessUserInfo } from '../utils/oauth';
+import { writeAuthAudit } from '../middleware/audit';
 
 interface Env {
   DB: D1Database;
@@ -84,6 +85,14 @@ authRoutes.post('/register', async (c) => {
   // Cleanup old rate limit events in the background
   c.executionCtx.waitUntil(cleanupRateLimitEvents(db));
 
+  await writeAuthAudit(c, {
+    action: 'auth.register', status: 201,
+    userId, orgId,
+    actorRole: 'admin', entityId: userId,
+    entityLabel: normalizedEmail,
+    detail: { orgName: orgName || `${firstName}'s Workspace`, orgType: orgType || 'individual' },
+  });
+
   return c.json({ pendingVerification: true, email: normalizedEmail }, 201);
 });
 
@@ -114,12 +123,24 @@ authRoutes.post('/login', async (c) => {
 
   if (!user || !user.password_hash) {
     await recordRateLimitEvent(db, normalizedEmail, 'login');
+    await writeAuthAudit(c, {
+      action: 'auth.login.failed', status: 401,
+      entityLabel: normalizedEmail,
+      detail: { reason: 'unknown_email_or_no_password', email: normalizedEmail },
+    });
     return c.json({ error: 'Invalid credentials' }, 401);
   }
 
   const valid = await verifyPassword(password, user.password_hash as string);
   if (!valid) {
     await recordRateLimitEvent(db, normalizedEmail, 'login');
+    await writeAuthAudit(c, {
+      action: 'auth.login.failed', status: 401,
+      userId: user.id as string, orgId: user.org_id as string,
+      actorRole: user.role as string, entityId: user.id as string,
+      entityLabel: normalizedEmail,
+      detail: { reason: 'bad_password' },
+    });
     return c.json({ error: 'Invalid credentials' }, 401);
   }
 
@@ -153,6 +174,14 @@ authRoutes.post('/login', async (c) => {
   await db.prepare(
     'INSERT INTO sessions (id, user_id, org_id, token, expires_at) VALUES (?, ?, ?, ?, ?)'
   ).bind(sessionId, user.id, user.org_id, token, expiresAt).run();
+
+  await writeAuthAudit(c, {
+    action: 'auth.login', status: 200,
+    userId: user.id as string, orgId: user.org_id as string,
+    actorRole: user.role as string, entityId: user.id as string,
+    entityLabel: user.email as string,
+    detail: { method: 'password' },
+  });
 
   return c.json({
     token,
@@ -213,6 +242,13 @@ authRoutes.post('/verify-email', async (c) => {
   ).bind(result.userId).first();
 
   if (!userData) return c.json({ error: 'User not found' }, 500);
+
+  await writeAuthAudit(c, {
+    action: 'auth.email_verified', status: 200,
+    userId: userData.id as string, orgId: userData.org_id as string,
+    actorRole: userData.role as string, entityId: userData.id as string,
+    entityLabel: userData.email as string,
+  });
 
   // Send welcome email (fire-and-forget)
   const welcomeEmail = buildWelcomeEmail(userData.first_name as string);
@@ -330,6 +366,14 @@ authRoutes.post('/reset-password', async (c) => {
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').bind(passwordHash, result.userId),
     db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(result.userId),
   ]);
+
+  await writeAuthAudit(c, {
+    action: 'auth.password_reset', status: 200,
+    userId: result.userId as string,
+    entityId: result.userId as string,
+    entityLabel: normalizedEmail,
+    detail: { allSessionsInvalidated: true },
+  });
 
   return c.json({ ok: true });
 });
@@ -462,6 +506,13 @@ authRoutes.post('/sso/microsoft/callback', async (c) => {
   await db.prepare(
     'INSERT INTO sessions (id, user_id, org_id, token, expires_at) VALUES (?, ?, ?, ?, ?)'
   ).bind(sessionId, userId, orgId, token, expiresAt).run();
+
+  await writeAuthAudit(c, {
+    action: 'auth.login', status: 200,
+    userId, orgId, actorRole: userRole, entityId: userId,
+    entityLabel: email,
+    detail: { method: 'sso_microsoft' },
+  });
 
   return c.json({
     token,
@@ -603,6 +654,13 @@ authRoutes.post('/sso/cloudflare/callback', async (c) => {
   await db.prepare(
     'INSERT INTO sessions (id, user_id, org_id, token, expires_at) VALUES (?, ?, ?, ?, ?)'
   ).bind(sessionId, userId, orgId, token, expiresAt).run();
+
+  await writeAuthAudit(c, {
+    action: 'auth.login', status: 200,
+    userId, orgId, actorRole: userRole, entityId: userId,
+    entityLabel: email,
+    detail: { method: 'sso_cloudflare' },
+  });
 
   return c.json({
     token,
@@ -776,6 +834,14 @@ authRoutes.post('/invite/:token/redeem', async (c) => {
      WHERE u.id = ?`
   ).bind(userId).first();
 
+  await writeAuthAudit(c, {
+    action: 'auth.invite_redeemed', status: 200,
+    userId, orgId: invite.org_id as string,
+    actorRole: invite.invited_role as string, entityId: userId,
+    entityLabel: userData!.email as string,
+    detail: { invitedRole: invite.invited_role, joinedOrg: userData!.org_name },
+  });
+
   return c.json({
     token: sessionToken,
     user: {
@@ -796,7 +862,23 @@ authRoutes.post('/logout', async (c) => {
   const authHeader = c.req.header('Authorization');
   if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.slice(7);
+    // Resolve the session owner BEFORE deleting so the audit row has
+    // identity. Best-effort — a stale/invalid token just logs an
+    // anonymous logout.
+    const sess = await c.env.DB.prepare(
+      `SELECT s.user_id, s.org_id, u.email, u.role
+       FROM sessions s LEFT JOIN users u ON u.id = s.user_id
+       WHERE s.token = ?`
+    ).bind(token).first();
     await c.env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run();
+    await writeAuthAudit(c, {
+      action: 'auth.logout', status: 200,
+      userId: (sess?.user_id as string) ?? null,
+      orgId: (sess?.org_id as string) ?? null,
+      actorRole: (sess?.role as string) ?? null,
+      entityId: (sess?.user_id as string) ?? null,
+      entityLabel: (sess?.email as string) ?? null,
+    });
   }
   return c.json({ ok: true });
 });

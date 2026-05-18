@@ -183,3 +183,80 @@ async function writeAuditRow(
     requestId,
   ).run();
 }
+
+/**
+ * Standalone audit writer for the AUTH routes.
+ *
+ * `/api/auth/*` is mounted BEFORE `auditMiddleware` (you can't require a
+ * valid session to log in), so login / logout / register / invite-redeem
+ * / password-reset / SSO never hit the auto-logger and produced NO audit
+ * trail at all — a SOC 2 CC7.2 hole exactly where auditors look first.
+ *
+ * This function writes a row directly with explicit identity (the handler
+ * resolves the user itself after authenticating). It never throws — an
+ * audit failure must not break a login. `userId` / `orgId` may be null
+ * for pre-identity events (failed login, unknown-email reset request).
+ */
+export async function writeAuthAudit(
+  c: Context,
+  ev: {
+    action: string;            // e.g. "auth.login", "auth.login.failed"
+    userId?: string | null;
+    orgId?: string | null;
+    actorRole?: string | null;
+    entityType?: string;       // usually "user"
+    entityId?: string | null;
+    entityLabel?: string | null;  // email — denormalized, survives deletion
+    status: number;            // HTTP status the handler is returning
+    detail?: Record<string, unknown>;
+  },
+): Promise<void> {
+  try {
+    const db = c.env.DB as D1Database;
+    if (!db) return;
+    const id = crypto.randomUUID();
+    const requestId = c.req.header('cf-ray') ?? null;
+    const ip =
+      c.req.header('cf-connecting-ip') ??
+      c.req.header('x-real-ip') ??
+      null;
+    const ua = c.req.header('user-agent')?.slice(0, 500) ?? null;
+    const path = new URL(c.req.url).pathname;
+    const detailStr = ev.detail
+      ? (() => { try { return JSON.stringify(ev.detail).slice(0, 50000); } catch { return null; } })()
+      : null;
+
+    await db.prepare(
+      `INSERT INTO audit_log
+         (id, org_id, user_id, project_id, action, entity_type, entity_id,
+          entity_label, target_org_id, detail, before_value, after_value,
+          method, path, status_code, duration_ms, ip_address, user_agent,
+          actor_role, is_platform_action, request_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id,
+      ev.orgId ?? null,
+      ev.userId ?? null,
+      null,
+      ev.action,
+      ev.entityType ?? 'user',
+      ev.entityId ?? null,
+      ev.entityLabel?.slice(0, 200) ?? null,
+      null,
+      detailStr,
+      null,
+      null,
+      c.req.method,
+      path.slice(0, 500),
+      ev.status,
+      null,
+      ip,
+      ua,
+      ev.actorRole ?? null,
+      0,
+      requestId,
+    ).run();
+  } catch (e) {
+    console.error('[audit] auth-event write failed:', e);
+  }
+}
