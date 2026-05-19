@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { Home, Compass, Settings, Users, LogOut, Thermometer, PenTool, Menu, X, Search, BookOpen, GitBranch, Sun, Globe, ShieldCheck, Activity } from 'lucide-react';
 import LandingPage from './pages/LandingPage';
@@ -29,6 +29,7 @@ const AuditLogPage = lazy(() => import('./pages/AuditLogPage'));
 import { useAuthStore } from './features/auth/store/useAuthStore';
 import { usePreferencesStore } from './stores/usePreferencesStore';
 import { useAccessPolicyStore } from './stores/useAccessPolicyStore';
+import { toast } from './stores/useToastStore';
 import SpotlightSearch, { SpotlightTrigger } from './features/spotlight/SpotlightSearch';
 import SkipLinks from './components/accessibility/SkipLinks';
 import A11yProvider from './components/accessibility/A11yProvider';
@@ -63,6 +64,67 @@ function AppLayout() {
       resetAccessPolicy();
     }
   }, [isAuthenticated, refreshAccessPolicy, resetAccessPolicy]);
+
+  // ── Live capability reconciliation (Phase 1) ──────────────────────────
+  // The server enforces role/status fresh on every request, so there is
+  // no security gap here — this is purely so the UI adapts in place when
+  // an admin (or L0) rotates someone's rank mid-session, instead of the
+  // moved user seeing stale chrome until they happen to reload.
+  //
+  // Mechanism already exists: restoreSession() re-pulls /api/auth/me and
+  // overwrites `user`; useAccessPolicyStore.refresh() re-pulls
+  // capabilities. We just trigger them on a heartbeat + on tab-focus,
+  // diff the result, and surface a non-disruptive toast on a real delta.
+  // No forced logout. Failure-safe: restoreSession keeps the session on
+  // network error (offline-PWA) and only clears on a real 401 (which is
+  // exactly the correct UX for a just-deactivated user — they fall out
+  // cleanly within a heartbeat); refresh() keeps last-good capabilities
+  // on a failed poll. A `reconciling` ref coalesces focus+interval so we
+  // never overlap.
+  const reconcilingRef = useRef(false);
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const snapshot = () => {
+      const role = useAuthStore.getState().user?.role ?? null;
+      const c = useAccessPolicyStore.getState().capabilities;
+      return `${role}|${c.canViewAudit}|${c.canRestoreVersions}|${c.canViewVersions}|${c.canEditPolicy}`;
+    };
+
+    const reconcile = async () => {
+      if (reconcilingRef.current) return;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      reconcilingRef.current = true;
+      const before = snapshot();
+      try {
+        await restoreSession();
+        // If restoreSession cleared the session (real 401 / deactivated),
+        // bail — the deauth path handles UX; don't toast "access changed".
+        if (!useAuthStore.getState().isAuthenticated) return;
+        await refreshAccessPolicy();
+        const after = snapshot();
+        if (after !== before) {
+          toast.info('Your access level was updated — the workspace has adjusted to your current role.');
+        }
+      } catch {
+        /* failure-safe: stores keep last-good state; try again next tick */
+      } finally {
+        reconcilingRef.current = false;
+      }
+    };
+
+    const HEARTBEAT_MS = 60_000;
+    const interval = setInterval(() => { void reconcile(); }, HEARTBEAT_MS);
+    const onFocus = () => { void reconcile(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
+  }, [isAuthenticated, restoreSession, refreshAccessPolicy]);
 
   const { sidebarCollapsed, update: updatePrefs } = usePreferencesStore();
   const canViewAudit = useAccessPolicyStore((s) => s.capabilities.canViewAudit);
