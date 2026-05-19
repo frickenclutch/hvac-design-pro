@@ -533,6 +533,7 @@ class ApiClient {
         role: 'admin' | 'engineer' | 'tech' | 'viewer';
         is_verified: number; last_seen_at: string | null;
         created_at: string;
+        status?: 'active' | 'deactivated';
       }>;
       invites: Array<{
         id: string; invited_email: string; invited_role: string;
@@ -579,7 +580,14 @@ class ApiClient {
   }
 
   async teamRemoveMember(userId: string) {
-    return this.request<{ ok: boolean }>(`/api/org/users/${userId}`, { method: 'DELETE' });
+    return this.request<{ ok: boolean; status: string }>(`/api/org/users/${userId}`, { method: 'DELETE' });
+  }
+
+  async teamReactivateMember(userId: string) {
+    return this.request<{ ok: boolean; status: string }>(
+      `/api/org/users/${userId}/reactivate`,
+      { method: 'POST' },
+    );
   }
 
   // ── Community / forum ───────────────────────────────────────────────────

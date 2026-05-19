@@ -13,7 +13,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Users, UserPlus, Globe, Mail, Trash2, Shield, RefreshCw,
-  AlertTriangle, CheckCircle2, Copy, Crown, ShieldCheck, Activity,
+  AlertTriangle, CheckCircle2, Copy, Crown, ShieldCheck, Activity, RotateCcw,
 } from 'lucide-react';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { api } from '../lib/api';
@@ -32,6 +32,7 @@ interface Member {
   is_permit_authority?: number;
   last_seen_at: string | null;
   created_at: string;
+  status?: 'active' | 'deactivated';
 }
 
 interface Invite {
@@ -207,10 +208,19 @@ export default function TeamPage() {
               }
             }}
             onRemove={async (userId) => {
-              if (!confirm('Remove this member from your organisation? They will lose access to all projects.')) return;
+              if (!confirm('Deactivate this member? They lose access immediately and their live sessions are revoked. Their projects, calcs and history are preserved, and you can reactivate them later.')) return;
               try {
                 await api.teamRemoveMember(userId);
-                setInfo('Member removed.');
+                setInfo('Member deactivated. Access revoked; data preserved.');
+                refresh();
+              } catch (e) {
+                setErr(e instanceof Error ? e.message : String(e));
+              }
+            }}
+            onReactivate={async (userId) => {
+              try {
+                await api.teamReactivateMember(userId);
+                setInfo('Member reactivated.');
                 refresh();
               } catch (e) {
                 setErr(e instanceof Error ? e.message : String(e));
@@ -392,12 +402,13 @@ function PendingInvitesCard({ invites, isAdmin, onRevoke, onCopy }: { invites: I
   );
 }
 
-function MembersCard({ members, sessionUserId, isAdmin, loading, onRefresh, onSetRole, onSetAuthority, onRemove, onViewActivity }: {
+function MembersCard({ members, sessionUserId, isAdmin, loading, onRefresh, onSetRole, onSetAuthority, onRemove, onReactivate, onViewActivity }: {
   members: Member[]; sessionUserId: string | null; isAdmin: boolean; loading: boolean;
   onRefresh: () => void;
   onSetRole: (userId: string, role: Role) => void;
   onSetAuthority: (userId: string, isAuthority: boolean) => void;
   onRemove: (userId: string) => void;
+  onReactivate: (userId: string) => void;
   onViewActivity: (member: Member) => void;
 }) {
   return (
@@ -432,12 +443,14 @@ function MembersCard({ members, sessionUserId, isAdmin, loading, onRefresh, onSe
             <tbody>
               {members.map((m) => {
                 const isSelf = m.id === sessionUserId;
+                const isDeactivated = m.status === 'deactivated';
                 return (
-                  <tr key={m.id} className="border-t border-slate-800/40">
+                  <tr key={m.id} className={`border-t border-slate-800/40 ${isDeactivated ? 'opacity-50' : ''}`}>
                     <td className="px-3 py-2 font-semibold text-white">
                       <span>{[m.first_name, m.last_name].filter(Boolean).join(' ') || <span className="text-slate-500 italic">Unnamed</span>}</span>
                       {isSelf && <span className="ml-2 text-[10px] uppercase tracking-wider text-emerald-400 font-bold">you</span>}
                       {!m.is_verified && <span className="ml-2 text-[10px] uppercase tracking-wider text-amber-400 font-bold">pending</span>}
+                      {isDeactivated && <span className="ml-2 text-[10px] uppercase tracking-wider text-red-400 font-bold">deactivated</span>}
                     </td>
                     <td className="px-3 py-2 text-slate-400 font-mono">{m.email}</td>
                     <td className="px-3 py-2">
@@ -493,13 +506,23 @@ function MembersCard({ members, sessionUserId, isAdmin, loading, onRefresh, onSe
                             <Activity className="w-4 h-4" />
                           </button>
                           {!isSelf && (
-                            <button
-                              onClick={() => onRemove(m.id)}
-                              className="text-slate-500 hover:text-red-400 transition-colors p-1 rounded-lg hover:bg-red-500/10"
-                              title="Remove from organisation"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            isDeactivated ? (
+                              <button
+                                onClick={() => onReactivate(m.id)}
+                                className="text-slate-500 hover:text-emerald-400 transition-colors p-1 rounded-lg hover:bg-emerald-500/10"
+                                title="Reactivate this member (restores access; data was never lost)"
+                              >
+                                <RotateCcw className="w-4 h-4" />
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => onRemove(m.id)}
+                                className="text-slate-500 hover:text-red-400 transition-colors p-1 rounded-lg hover:bg-red-500/10"
+                                title="Deactivate (revokes access immediately; data preserved; reversible)"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )
                           )}
                         </div>
                       </td>

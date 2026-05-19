@@ -115,7 +115,7 @@ authRoutes.post('/login', async (c) => {
 
   const user = await db.prepare(
     `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.is_platform_admin, u.is_permit_authority, u.org_id,
-            u.password_hash,
+            u.password_hash, u.status,
             o.name as org_name, o.org_type, o.slug, o.region_code
      FROM users u JOIN organisations o ON o.id = u.org_id
      WHERE u.email = ?`
@@ -142,6 +142,23 @@ authRoutes.post('/login', async (c) => {
       detail: { reason: 'bad_password' },
     });
     return c.json({ error: 'Invalid credentials' }, 401);
+  }
+
+  // Deactivated account: password was correct (so we're not leaking
+  // anything to a guesser), but the account is soft-deactivated. Reject
+  // session mint with a clear, distinct message + audit it.
+  if ((user.status as string) !== 'active') {
+    await writeAuthAudit(c, {
+      action: 'auth.login.deactivated', status: 403,
+      userId: user.id as string, orgId: user.org_id as string,
+      actorRole: user.role as string, entityId: user.id as string,
+      entityLabel: normalizedEmail,
+      detail: { status: user.status },
+    });
+    return c.json({
+      error: 'This account has been deactivated. Contact your organisation admin.',
+      deactivated: true,
+    }, 403);
   }
 
   // If using legacy hash, upgrade to PBKDF2 transparently
@@ -431,11 +448,26 @@ authRoutes.post('/sso/microsoft/callback', async (c) => {
 
   // Check if user already exists
   const existingUser = await db.prepare(
-    `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.is_platform_admin, u.is_permit_authority, u.org_id,
+    `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.is_platform_admin, u.is_permit_authority, u.org_id, u.status,
             o.name as org_name, o.org_type, o.slug, o.region_code
      FROM users u JOIN organisations o ON o.id = u.org_id
      WHERE u.email = ?`
   ).bind(email).first();
+
+  // SSO must not resurrect a deactivated account.
+  if (existingUser && (existingUser.status as string) !== 'active') {
+    await writeAuthAudit(c, {
+      action: 'auth.login.deactivated', status: 403,
+      userId: existingUser.id as string, orgId: existingUser.org_id as string,
+      actorRole: existingUser.role as string, entityId: existingUser.id as string,
+      entityLabel: email,
+      detail: { status: existingUser.status, method: 'sso_microsoft' },
+    });
+    return c.json({
+      error: 'This account has been deactivated. Contact your organisation admin.',
+      deactivated: true,
+    }, 403);
+  }
 
   let userId: string;
   let orgId: string;
@@ -582,11 +614,26 @@ authRoutes.post('/sso/cloudflare/callback', async (c) => {
 
   // Check if user already exists
   const existingUser = await db.prepare(
-    `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.is_platform_admin, u.is_permit_authority, u.org_id,
+    `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.is_platform_admin, u.is_permit_authority, u.org_id, u.status,
             o.name as org_name, o.org_type, o.slug, o.region_code
      FROM users u JOIN organisations o ON o.id = u.org_id
      WHERE u.email = ?`
   ).bind(email).first();
+
+  // SSO must not resurrect a deactivated account.
+  if (existingUser && (existingUser.status as string) !== 'active') {
+    await writeAuthAudit(c, {
+      action: 'auth.login.deactivated', status: 403,
+      userId: existingUser.id as string, orgId: existingUser.org_id as string,
+      actorRole: existingUser.role as string, entityId: existingUser.id as string,
+      entityLabel: email,
+      detail: { status: existingUser.status, method: 'sso_cloudflare' },
+    });
+    return c.json({
+      error: 'This account has been deactivated. Contact your organisation admin.',
+      deactivated: true,
+    }, 403);
+  }
 
   let userId: string;
   let orgId: string;
@@ -897,7 +944,8 @@ authRoutes.get('/me', async (c) => {
      FROM sessions s
      JOIN users u ON u.id = s.user_id
      JOIN organisations o ON o.id = s.org_id
-     WHERE s.token = ? AND s.expires_at > datetime('now')`
+     WHERE s.token = ? AND s.expires_at > datetime('now')
+       AND u.status = 'active'`
   ).bind(token).first();
 
   if (!result) return c.json({ error: 'Session expired' }, 401);

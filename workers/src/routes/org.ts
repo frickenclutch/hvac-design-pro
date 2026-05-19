@@ -365,7 +365,7 @@ orgRoutes.get('/team', async (c) => {
 
   const { results: members } = await db.prepare(
     `SELECT id, email, first_name, last_name, role,
-            is_verified, is_permit_authority, last_seen_at, created_at
+            is_verified, is_permit_authority, last_seen_at, created_at, status
      FROM users
      WHERE org_id = ?
      ORDER BY created_at ASC`
@@ -664,10 +664,13 @@ orgRoutes.patch('/users/:id', async (c) => {
   return c.json({ ok: true, role });
 });
 
-// ── DELETE /api/org/users/:id — remove a member from the tenant ─────────────
-// Soft semantics for now: we hard-delete the user row because there are no
-// auditing dependencies yet. When audit_log is wired we'll switch to
-// status = 'removed' instead.
+// ── DELETE /api/org/users/:id — soft-deactivate a member ───────────────────
+// NON-DESTRUCTIVE (changed 2026-05-15). Previously hard-deleted the row,
+// which silently orphaned projects.created_by / cad_drawings.created_by /
+// calculations.computed_by (D1 doesn't enforce FKs). Now: set
+// status='deactivated', purge the user's sessions so any live token dies
+// immediately, and KEEP the row + all attribution intact. The user can
+// be reactivated (PATCH /users/:id/reactivate) — rotation is reversible.
 orgRoutes.delete('/users/:id', async (c) => {
   const user = c.get('user');
   if (user.role !== 'admin') {
@@ -680,24 +683,66 @@ orgRoutes.delete('/users/:id', async (c) => {
   }
 
   const target = await c.env.DB.prepare(
-    `SELECT email, role, first_name, last_name FROM users WHERE id = ? AND org_id = ?`
+    `SELECT email, role, first_name, last_name, status FROM users WHERE id = ? AND org_id = ?`
   ).bind(targetId, user.orgId).first();
+  if (!target) return c.json({ error: 'Member not found' }, 404);
 
   const r = await c.env.DB.prepare(
-    `DELETE FROM users WHERE id = ? AND org_id = ?`
+    `UPDATE users SET status = 'deactivated' WHERE id = ? AND org_id = ? AND status = 'active'`
   ).bind(targetId, user.orgId).run();
+  if (!r.meta.changes) {
+    return c.json({ error: 'Member not found or already deactivated' }, 404);
+  }
 
-  if (!r.meta.changes) return c.json({ error: 'Member not found' }, 404);
+  // Kill live sessions so the deactivation takes effect now, not at the
+  // 30-day token expiry (the JML "logged-in user keeps access" gotcha).
+  await c.env.DB.prepare(`DELETE FROM sessions WHERE user_id = ?`).bind(targetId).run();
 
   setAudit(c, {
-    action: 'user.remove',
+    action: 'user.deactivate',
     entityType: 'user',
     entityId: targetId,
-    entityLabel: target?.email as string,
-    beforeValue: target as Record<string, unknown>,
+    entityLabel: target.email as string,
+    beforeValue: { status: 'active', role: target.role },
+    afterValue: { status: 'deactivated' },
+    detail: { sessionsPurged: true },
   });
 
-  return c.json({ ok: true });
+  return c.json({ ok: true, status: 'deactivated' });
+});
+
+// ── POST /api/org/users/:id/reactivate — reverse a deactivation ────────────
+// Rotation must be reversible without disruption — a misclick deactivation
+// is recoverable from the UI, not just raw SQL.
+orgRoutes.post('/users/:id/reactivate', async (c) => {
+  const user = c.get('user');
+  if (user.role !== 'admin') {
+    return c.json({ error: 'Only admins can reactivate members' }, 403);
+  }
+  const targetId = c.req.param('id');
+
+  const target = await c.env.DB.prepare(
+    `SELECT email, role, status FROM users WHERE id = ? AND org_id = ?`
+  ).bind(targetId, user.orgId).first();
+  if (!target) return c.json({ error: 'Member not found' }, 404);
+
+  const r = await c.env.DB.prepare(
+    `UPDATE users SET status = 'active' WHERE id = ? AND org_id = ? AND status = 'deactivated'`
+  ).bind(targetId, user.orgId).run();
+  if (!r.meta.changes) {
+    return c.json({ error: 'Member not found or already active' }, 404);
+  }
+
+  setAudit(c, {
+    action: 'user.reactivate',
+    entityType: 'user',
+    entityId: targetId,
+    entityLabel: target.email as string,
+    beforeValue: { status: 'deactivated' },
+    afterValue: { status: 'active' },
+  });
+
+  return c.json({ ok: true, status: 'active' });
 });
 
 // ── GET /api/org/profile — get current user's profile ───────────────────────

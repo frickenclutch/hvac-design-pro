@@ -27,12 +27,17 @@ export async function authMiddleware(c: Context, next: Next) {
   const token = authHeader.slice(7);
   const db = c.env.DB as D1Database;
 
+  // status = 'active' gate: a deactivated user's live token must stop
+  // working immediately, not linger until its 30-day expiry. Deactivation
+  // also purges their sessions, but this WHERE is the authoritative
+  // backstop on the hot path for every authed request.
   const session = await db.prepare(
     `SELECT s.user_id, s.org_id, u.email, u.role,
             u.is_platform_admin, u.is_permit_authority
      FROM sessions s
      JOIN users u ON u.id = s.user_id
-     WHERE s.token = ? AND s.expires_at > datetime('now')`
+     WHERE s.token = ? AND s.expires_at > datetime('now')
+       AND u.status = 'active'`
   ).bind(token).first();
 
   if (!session) {

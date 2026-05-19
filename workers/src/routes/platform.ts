@@ -412,10 +412,10 @@ platformRoutes.patch('/orgs/:orgId/users/:userId', async (c) => {
 });
 
 // DELETE /api/platform/orgs/:orgId/users/:userId
-// Hard-removes a user from a tenant. L0-only. Cannot remove yourself.
-// Cannot remove the LAST member of a tenant — orgs need at least one user
-// for their data to be reachable. (Removing the org itself is a separate
-// future endpoint.)
+// L0-only soft-deactivate (non-destructive, changed 2026-05-15 — was a
+// hard DELETE that silently orphaned created_by). Cannot deactivate
+// yourself. Cannot deactivate the last ACTIVE member of a tenant — orgs
+// need at least one reachable user. Reversible via the reactivate route.
 platformRoutes.delete('/orgs/:orgId/users/:userId', async (c) => {
   const caller = c.get('user') as AuthUser;
   const orgId = c.req.param('orgId');
@@ -426,32 +426,72 @@ platformRoutes.delete('/orgs/:orgId/users/:userId', async (c) => {
   }
 
   const target = await c.env.DB.prepare(
-    `SELECT id, email, role, first_name, last_name FROM users WHERE id = ? AND org_id = ?`
+    `SELECT id, email, role, first_name, last_name, status FROM users WHERE id = ? AND org_id = ?`
   ).bind(userId, orgId).first();
   if (!target) return c.json({ error: 'User not found in that organisation' }, 404);
 
-  const orgUserCount = await c.env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM users WHERE org_id = ?`
+  // Count ACTIVE members — a tenant must keep at least one reachable user.
+  const activeCount = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM users WHERE org_id = ? AND status = 'active'`
   ).bind(orgId).first();
-  if (Number(orgUserCount?.n ?? 0) <= 1) {
+  if (Number(activeCount?.n ?? 0) <= 1) {
     return c.json({
-      error: 'Cannot remove the last member of an organisation. Delete the org instead.',
+      error: 'Cannot deactivate the last active member of an organisation.',
     }, 409);
   }
 
-  await c.env.DB.prepare('DELETE FROM users WHERE id = ?').bind(userId).run();
+  const r = await c.env.DB.prepare(
+    `UPDATE users SET status = 'deactivated' WHERE id = ? AND status = 'active'`
+  ).bind(userId).run();
+  if (!r.meta.changes) {
+    return c.json({ error: 'User not found or already deactivated' }, 404);
+  }
+  await c.env.DB.prepare(`DELETE FROM sessions WHERE user_id = ?`).bind(userId).run();
 
   setAudit(c, {
-    action: 'platform.user.remove',
+    action: 'platform.user.deactivate',
     entityType: 'user',
     entityId: userId,
     entityLabel: target.email as string,
     targetOrgId: orgId,
     isPlatformAction: true,
-    beforeValue: target as Record<string, unknown>,
+    beforeValue: { status: 'active', role: target.role },
+    afterValue: { status: 'deactivated' },
+    detail: { sessionsPurged: true },
   });
 
-  return c.json({ ok: true });
+  return c.json({ ok: true, status: 'deactivated' });
+});
+
+// POST /api/platform/orgs/:orgId/users/:userId/reactivate — L0 reverse.
+platformRoutes.post('/orgs/:orgId/users/:userId/reactivate', async (c) => {
+  const orgId = c.req.param('orgId');
+  const userId = c.req.param('userId');
+
+  const target = await c.env.DB.prepare(
+    `SELECT email, role, status FROM users WHERE id = ? AND org_id = ?`
+  ).bind(userId, orgId).first();
+  if (!target) return c.json({ error: 'User not found in that organisation' }, 404);
+
+  const r = await c.env.DB.prepare(
+    `UPDATE users SET status = 'active' WHERE id = ? AND status = 'deactivated'`
+  ).bind(userId).run();
+  if (!r.meta.changes) {
+    return c.json({ error: 'User not found or already active' }, 404);
+  }
+
+  setAudit(c, {
+    action: 'platform.user.reactivate',
+    entityType: 'user',
+    entityId: userId,
+    entityLabel: target.email as string,
+    targetOrgId: orgId,
+    isPlatformAction: true,
+    beforeValue: { status: 'deactivated' },
+    afterValue: { status: 'active' },
+  });
+
+  return c.json({ ok: true, status: 'active' });
 });
 
 // ── L0 cross-tenant access-policy override ─────────────────────────────────
