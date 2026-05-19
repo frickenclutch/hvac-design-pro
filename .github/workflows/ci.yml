@@ -1,0 +1,73 @@
+name: CI — Type + Cert Gate
+
+# WHY THIS EXISTS (separate from deploy.yml):
+#   deploy.yml's `test` job runs Python pytest against calc-service —
+#   but calc-service is NOT what ships. The live, production,
+#   shadow-running engine is the TypeScript `manualJ8-ts-1.1.0`, and
+#   its 43-case vitest cert suite (Smith/Walker/Cobb within 0.5% ACCA
+#   tolerance) plus both tsc checks were gated NOWHERE. A tired session
+#   could ship accuracy drift straight onto permit-binding documents
+#   with nothing red-flagging it.
+#
+#   This workflow gates exactly the artifacts that ship:
+#     - workers/  : tsc --noEmit (Cloudflare Worker — the API)
+#     - frontend/ : tsc -b + vitest run (the app + the cert engine)
+#
+#   It deliberately does NOT deploy. Frontend auto-deploys via
+#   Cloudflare Pages from main; the Worker deploys via manual
+#   `wrangler deploy` after review. Auto-deploy from CI is itself a
+#   drift risk and is intentionally out of scope. This is a GATE,
+#   not a pipeline.
+#
+#   Runs on push to main (Nathan pushes directly to trunk) and on PRs
+#   to main. Any red job fails the check.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref so the latest push is the
+# one that matters.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  worker-typecheck:
+    name: Worker — tsc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: workers/package-lock.json
+      - name: Install (workers)
+        working-directory: workers
+        run: npm ci
+      - name: Type-check worker
+        working-directory: workers
+        run: npx tsc --noEmit -p tsconfig.json
+
+  frontend-gate:
+    name: Frontend — tsc + cert vitest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install (frontend)
+        working-directory: frontend
+        run: npm ci
+      - name: Type-check frontend
+        working-directory: frontend
+        run: npx tsc -b
+      - name: Cert + unit vitest (43/43, ACCA 0.5% tolerance)
+        working-directory: frontend
+        run: npx vitest run

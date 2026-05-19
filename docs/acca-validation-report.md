@@ -23,7 +23,7 @@ Every Form J1 total reproduces ACCA's published reference value within
 **±0.5% cert tolerance**, with the worst drift across all three tests
 being **0.017%** — two orders of magnitude below the tolerance threshold.
 
-**vitest harness:** 43/43 tests pass on every commit (23 Manual J 8 cert cases across Smith/Walker/Cobb + 7 registry sanity + 13 storage/prefs infra cases). Cert tests run in <1 s; full suite ~1.9 s.
+**vitest harness:** 43/43 tests pass on every commit (23 Manual J 8 cert cases across Smith/Walker/Cobb + 7 registry sanity + 13 storage/prefs infra cases). Cert tests run in <1 s; full suite ~1.9 s. **CI-enforced** since 2026-05-15 via `.github/workflows/ci.yml` — every push + PR to `main` blocks on the cert suite plus worker/frontend type-checks, so accuracy drift cannot reach production silently.
 
 This report is organized into:
 

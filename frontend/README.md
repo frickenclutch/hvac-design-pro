@@ -19,6 +19,11 @@ npm run lint         # ESLint flat config
 npx vitest run       # cert + unit tests (43/43, ~1.9 s)
 ```
 
+> **CI gate:** every push + PR to `main` runs `../.github/workflows/ci.yml`
+> — worker `tsc`, frontend `tsc -b`, and the vitest cert suite. Red blocks
+> the check. Keep all three green before pushing; the gate is the
+> automated backstop, not a substitute for running them locally first.
+
 ## Where things live
 
 | Concern | Path |
