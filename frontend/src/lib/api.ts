@@ -590,6 +590,30 @@ class ApiClient {
     );
   }
 
+  // Advisory consequence engine — call before committing a role change
+  // or deactivation. proposedRole=null means deactivation. The commit
+  // endpoints independently re-enforce 'block' items (server is truth),
+  // so a clean preflight just means the UI can pass through frictionlessly.
+  async teamRoleChangePreflight(userId: string, proposedRole: 'admin' | 'engineer' | 'tech' | 'viewer' | null) {
+    return this.request<{
+      targetUserId: string;
+      targetEmail: string | null;
+      currentRole: string | null;
+      currentStatus: string | null;
+      proposedRole: string | null;
+      clear: boolean;
+      blockers: Array<{
+        code: 'sole_admin' | 'sole_permit_authority' | 'owned_projects' | 'open_permit_submissions';
+        severity: 'block' | 'warn';
+        message: string;
+        count?: number;
+      }>;
+    }>(`/api/org/users/${userId}/role-change/preflight`, {
+      method: 'POST',
+      body: JSON.stringify({ role: proposedRole }),
+    });
+  }
+
   // ── Community / forum ───────────────────────────────────────────────────
   async forumShareProject(projectId: string, isPublic: boolean, summary?: string) {
     return this.request<{ id: string; isPublic: boolean; summary: string | null }>(

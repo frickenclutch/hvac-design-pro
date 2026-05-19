@@ -21,6 +21,7 @@ import {
   sanitizeAccessPolicyPatch,
   mergeAccessPolicyIntoSettings,
 } from '../utils/accessPolicy';
+import { computeRoleChangePlan } from '../utils/roleChange';
 
 interface Env {
   DB: D1Database;
@@ -382,6 +383,22 @@ platformRoutes.patch('/orgs/:orgId/users/:userId', async (c) => {
     return c.json({ error: 'No fields to update' }, 400);
   }
 
+  // Tenant-continuity guard also applies to L0 cross-tenant changes —
+  // L0 bypasses capability *policy*, but stranding a tenant by removing
+  // its last admin is never desirable. Only meaningful when a role is
+  // actually changing (authority-flag-only edits don't affect continuity).
+  if (typeof body.role === 'string') {
+    const plan = await computeRoleChangePlan(c.env.DB, {
+      orgId, targetUserId: userId, proposedRole: body.role,
+    });
+    if (plan && !plan.clear) {
+      return c.json({
+        error: 'Resolve the blocking consequences before this role change.',
+        blockers: plan.blockers.filter((b) => b.severity === 'block'),
+      }, 409);
+    }
+  }
+
   values.push(userId);
   await c.env.DB.prepare(
     `UPDATE users SET ${updates.join(', ')} WHERE id = ?`
@@ -437,6 +454,18 @@ platformRoutes.delete('/orgs/:orgId/users/:userId', async (c) => {
   if (Number(activeCount?.n ?? 0) <= 1) {
     return c.json({
       error: 'Cannot deactivate the last active member of an organisation.',
+    }, 409);
+  }
+
+  // Finer-grained continuity guard (sole admin / sole permit authority)
+  // — applies to L0 too; stranding a tenant is never desirable.
+  const plan = await computeRoleChangePlan(c.env.DB, {
+    orgId, targetUserId: userId, proposedRole: null,
+  });
+  if (plan && !plan.clear) {
+    return c.json({
+      error: 'Resolve the blocking consequences before deactivating this member.',
+      blockers: plan.blockers.filter((b) => b.severity === 'block'),
     }, 409);
   }
 

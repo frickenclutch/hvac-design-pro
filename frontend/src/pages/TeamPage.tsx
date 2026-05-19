@@ -62,6 +62,53 @@ export default function TeamPage() {
   // the global /audit-log page instead.
   const [auditTarget, setAuditTarget] = useState<Member | null>(null);
 
+  // Pre-flight resolution gate. Holds the proposed change + its computed
+  // blockers when a role change / deactivation has consequences that must
+  // be acknowledged or resolved before commit. null = no gate open
+  // (the common, frictionless path).
+  type PreflightPlan = Awaited<ReturnType<typeof api.teamRoleChangePreflight>>;
+  const [gate, setGate] = useState<
+    { userId: string; email: string; proposedRole: Role | null; plan: PreflightPlan } | null
+  >(null);
+
+  // Run a role change (proposedRole) or deactivation (proposedRole=null)
+  // through preflight. No blockers → commit transparently (zero added
+  // friction for the 95% case). Blockers → open the resolution gate.
+  const attemptChange = async (userId: string, email: string, proposedRole: Role | null) => {
+    setErr(null);
+    try {
+      const plan = await api.teamRoleChangePreflight(userId, proposedRole);
+      if (plan.blockers.length === 0) {
+        await commitChange(userId, proposedRole);
+        return;
+      }
+      setGate({ userId, email, proposedRole, plan });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      refresh(); // snap the role dropdown back to actual state
+    }
+  };
+
+  const commitChange = async (userId: string, proposedRole: Role | null) => {
+    try {
+      if (proposedRole === null) {
+        await api.teamRemoveMember(userId);
+        setInfo('Member deactivated. Access revoked; data preserved.');
+      } else {
+        await api.teamSetRole(userId, proposedRole);
+        setInfo('Role updated.');
+      }
+      setGate(null);
+      refresh();
+    } catch (e) {
+      // Race: state changed between preflight and commit → surface the
+      // server's authoritative blockers.
+      setErr(e instanceof Error ? e.message : String(e));
+      setGate(null);
+      refresh();
+    }
+  };
+
   const isAdmin = sessionUser?.role === 'admin';
 
   const refresh = async () => {
@@ -189,14 +236,10 @@ export default function TeamPage() {
             isAdmin={isAdmin}
             loading={loading}
             onRefresh={refresh}
-            onSetRole={async (userId, role) => {
-              try {
-                await api.teamSetRole(userId, role);
-                setInfo('Role updated.');
-                refresh();
-              } catch (e) {
-                setErr(e instanceof Error ? e.message : String(e));
-              }
+            onSetRole={(userId, role) => {
+              const m = members.find((x) => x.id === userId);
+              if (!m || m.role === role) return;
+              void attemptChange(userId, m.email, role);
             }}
             onSetAuthority={async (userId, isAuth) => {
               try {
@@ -207,15 +250,24 @@ export default function TeamPage() {
                 setErr(e instanceof Error ? e.message : String(e));
               }
             }}
-            onRemove={async (userId) => {
-              if (!confirm('Deactivate this member? They lose access immediately and their live sessions are revoked. Their projects, calcs and history are preserved, and you can reactivate them later.')) return;
-              try {
-                await api.teamRemoveMember(userId);
-                setInfo('Member deactivated. Access revoked; data preserved.');
-                refresh();
-              } catch (e) {
-                setErr(e instanceof Error ? e.message : String(e));
-              }
+            onRemove={(userId) => {
+              const m = members.find((x) => x.id === userId);
+              if (!m) return;
+              // Preflight first. If clean, it still confirms (deactivation
+              // is consequential); if blockers, the gate modal handles it.
+              void (async () => {
+                try {
+                  const plan = await api.teamRoleChangePreflight(userId, null);
+                  if (plan.blockers.length === 0) {
+                    if (!confirm('Deactivate this member? They lose access immediately and their live sessions are revoked. Their projects, calcs and history are preserved, and you can reactivate them later.')) return;
+                    await commitChange(userId, null);
+                  } else {
+                    setGate({ userId, email: m.email, proposedRole: null, plan });
+                  }
+                } catch (e) {
+                  setErr(e instanceof Error ? e.message : String(e));
+                }
+              })();
             }}
             onReactivate={async (userId) => {
               try {
@@ -241,7 +293,97 @@ export default function TeamPage() {
             }
             context={auditTarget?.email}
           />
+
+          {gate && (
+            <RoleChangeGate
+              email={gate.email}
+              proposedRole={gate.proposedRole}
+              blockers={gate.plan.blockers}
+              onCancel={() => { setGate(null); refresh(); }}
+              onConfirm={() => void commitChange(gate.userId, gate.proposedRole)}
+            />
+          )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Role-change resolution gate ─────────────────────────────────────────────
+// The "fill the gap before proceeding" surface. Only shown when preflight
+// returned blockers (the clean path passes through with zero friction).
+// 'block' items are hard stops with actionable guidance (Confirm stays
+// disabled); 'warn' items each need an explicit acknowledgement.
+function RoleChangeGate({ email, proposedRole, blockers, onCancel, onConfirm }: {
+  email: string;
+  proposedRole: Role | null;
+  blockers: Array<{ code: string; severity: 'block' | 'warn'; message: string; count?: number }>;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const blocks = blockers.filter((b) => b.severity === 'block');
+  const warns = blockers.filter((b) => b.severity === 'warn');
+  const [acked, setAcked] = useState<Record<string, boolean>>({});
+  const allWarnsAcked = warns.every((w) => acked[w.code]);
+  const canConfirm = blocks.length === 0 && allWarnsAcked;
+  const actionLabel = proposedRole === null ? 'Deactivate' : `Change role to ${proposedRole}`;
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center px-4 bg-black/60 backdrop-blur-sm" onClick={onCancel}>
+      <div className="w-full max-w-lg bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <header className="px-5 py-4 border-b border-slate-800 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <h2 className="text-lg font-bold text-white">Resolve before proceeding</h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {actionLabel} · <span className="font-mono">{email}</span>
+            </p>
+          </div>
+        </header>
+
+        <div className="px-5 py-4 space-y-3 max-h-[55vh] overflow-y-auto">
+          {blocks.length > 0 && (
+            <div className="space-y-2">
+              {blocks.map((b) => (
+                <div key={b.code} className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-red-500/10 border border-red-500/30">
+                  <span className="text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded bg-red-500/20 text-red-300 border border-red-500/30 flex-shrink-0 mt-0.5">Blocked</span>
+                  <p className="text-sm text-red-200">{b.message}</p>
+                </div>
+              ))}
+              <p className="text-xs text-slate-500">
+                Blocked items must be fixed first (e.g. promote another admin), then reopen this change.
+              </p>
+            </div>
+          )}
+
+          {warns.map((w) => (
+            <label key={w.code} className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-amber-500/5 border border-amber-500/20 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!acked[w.code]}
+                onChange={(e) => setAcked((s) => ({ ...s, [w.code]: e.target.checked }))}
+                className="mt-0.5 accent-amber-400"
+              />
+              <span className="text-sm text-amber-100">
+                {w.message}
+                <span className="block text-[11px] text-slate-500 mt-0.5">I understand and want to proceed.</span>
+              </span>
+            </label>
+          ))}
+        </div>
+
+        <footer className="px-5 py-3 border-t border-slate-800 bg-slate-900/40 flex justify-end gap-2">
+          <button onClick={onCancel} className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm text-slate-300 min-h-[40px]">
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={!canConfirm}
+            className="px-4 py-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-sm font-bold disabled:opacity-40 disabled:cursor-not-allowed min-h-[40px]"
+          >
+            {actionLabel}
+          </button>
+        </footer>
       </div>
     </div>
   );

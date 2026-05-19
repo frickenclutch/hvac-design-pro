@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { setAudit } from '../middleware/audit';
 import { sendEmail, buildInviteEmail } from '../utils/email';
+import { computeRoleChangePlan } from '../utils/roleChange';
 import {
   resolveAccessPolicy,
   sanitizeAccessPolicyPatch,
@@ -614,6 +615,29 @@ orgRoutes.delete('/invites/:id', async (c) => {
   return c.json({ ok: true });
 });
 
+// ── POST /api/org/users/:id/role-change/preflight ───────────────────────────
+// Advisory: compute the blast radius of a proposed role change /
+// deactivation so the UI can force gap-resolution before commit. Pass
+// { role } for a role change, or { role: null } / omit for deactivation.
+orgRoutes.post('/users/:id/role-change/preflight', async (c) => {
+  const user = c.get('user');
+  if (user.role !== 'admin') {
+    return c.json({ error: 'Only admins can change roles' }, 403);
+  }
+  const targetId = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+  const proposedRole = body.role === undefined ? null
+    : (body.role === null ? null : String(body.role));
+  if (proposedRole !== null && !['admin', 'engineer', 'tech', 'viewer'].includes(proposedRole)) {
+    return c.json({ error: 'Invalid role' }, 400);
+  }
+  const plan = await computeRoleChangePlan(c.env.DB, {
+    orgId: user.orgId, targetUserId: targetId, proposedRole,
+  });
+  if (!plan) return c.json({ error: 'Member not found' }, 404);
+  return c.json(plan);
+});
+
 // ── PATCH /api/org/users/:id — change a member's role ───────────────────────
 orgRoutes.patch('/users/:id', async (c) => {
   const user = c.get('user');
@@ -628,17 +652,20 @@ orgRoutes.patch('/users/:id', async (c) => {
     return c.json({ error: 'Invalid role' }, 400);
   }
 
-  // Don't let the last admin demote themselves — every tenant must keep
-  // at least one admin so the manage-team door stays open.
-  if (targetId === user.id && role !== 'admin') {
-    const { results: admins } = await c.env.DB.prepare(
-      `SELECT id FROM users WHERE org_id = ? AND role = 'admin'`
-    ).bind(user.orgId).all();
-    if (admins.length <= 1) {
-      return c.json({
-        error: 'You are the last admin — promote someone else first.',
-      }, 409);
-    }
+  // Generalized continuity guard (replaces the old self-demote-only
+  // check): the commit endpoint independently re-runs the consequence
+  // engine and 409s on any 'block'-severity item, so a hand-rolled
+  // request can't bypass the UI checklist. Covers sole-admin for ANY
+  // target, not just self.
+  const plan = await computeRoleChangePlan(c.env.DB, {
+    orgId: user.orgId, targetUserId: targetId, proposedRole: role,
+  });
+  if (!plan) return c.json({ error: 'Member not found' }, 404);
+  if (!plan.clear) {
+    return c.json({
+      error: 'Resolve the blocking consequences before this role change.',
+      blockers: plan.blockers.filter((b) => b.severity === 'block'),
+    }, 409);
   }
 
   const target = await c.env.DB.prepare(
@@ -680,6 +707,19 @@ orgRoutes.delete('/users/:id', async (c) => {
 
   if (targetId === user.id) {
     return c.json({ error: 'You cannot remove yourself.' }, 400);
+  }
+
+  // Continuity guard for deactivation (proposedRole=null). 409s on
+  // sole-admin / sole-permit-authority so a tenant can't be stranded.
+  const plan = await computeRoleChangePlan(c.env.DB, {
+    orgId: user.orgId, targetUserId: targetId, proposedRole: null,
+  });
+  if (!plan) return c.json({ error: 'Member not found' }, 404);
+  if (!plan.clear) {
+    return c.json({
+      error: 'Resolve the blocking consequences before deactivating this member.',
+      blockers: plan.blockers.filter((b) => b.severity === 'block'),
+    }, 409);
   }
 
   const target = await c.env.DB.prepare(
