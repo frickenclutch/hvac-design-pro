@@ -55,11 +55,16 @@ const SUBMISSION_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
 ];
 
 export default function SubmitForReviewModal({
-  project, onClose, onSubmitted,
+  project, onClose, onSubmitted, parentSubmissionId,
 }: {
   project: Project;
   onClose: () => void;
   onSubmitted: (submissionId: string) => void;
+  /** When set, the new submission is chained to a prior one for thread-
+   *  of-history. The detail UI renders the chain as a breadcrumb so the
+   *  reviewer never loses context across a denial → resubmit → approval
+   *  arc. */
+  parentSubmissionId?: string;
 }) {
   // Step 1 — search criteria, default-seeded from the project address.
   const [zip, setZip] = useState(project.zip ?? '');
@@ -117,8 +122,13 @@ export default function SubmitForReviewModal({
         authorityOrgId: selected.id,
         submissionType,
         coverLetter: coverLetter.trim(),
+        parentSubmissionId,
       });
-      toast.success(`Submitted to ${selected.name}.`);
+      toast.success(
+        parentSubmissionId
+          ? `Resubmitted to ${selected.name}.`
+          : `Submitted to ${selected.name}.`,
+      );
       onSubmitted(r.id);
     } catch (e) {
       setSubmitErr(e instanceof Error ? e.message : String(e));
@@ -133,7 +143,9 @@ export default function SubmitForReviewModal({
         <div className="sticky top-0 bg-slate-900/95 backdrop-blur-md border-b border-slate-800/60 p-5 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-5 h-5 text-amber-400" />
-            <h3 className="text-lg font-bold text-white">Submit for Review</h3>
+            <h3 className="text-lg font-bold text-white">
+              {parentSubmissionId ? 'Resubmit for Review' : 'Submit for Review'}
+            </h3>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-white p-1 rounded-lg">
             <X className="w-5 h-5" />
@@ -141,6 +153,13 @@ export default function SubmitForReviewModal({
         </div>
 
         <div className="p-5 space-y-5">
+          {parentSubmissionId && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200">
+              <strong className="text-amber-300">Chaining to prior submission.</strong>
+              {' '}This new submission will be linked to <span className="font-mono">{parentSubmissionId.slice(0, 8)}…</span> so the reviewer sees the full history. Pick the same authority unless you intend to route this elsewhere.
+            </div>
+          )}
+
           <p className="text-xs text-slate-400">
             Submitting <span className="font-semibold text-slate-200">{project.name}</span> to a permit authority gives them full visibility into your project (calculations, drawings, address) for the duration of the review. Withdraw at any time.
           </p>

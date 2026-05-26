@@ -740,6 +740,7 @@ class ApiClient {
     authorityOrgId: string;
     submissionType?: string;
     coverLetter?: string;
+    parentSubmissionId?: string;
   }) {
     return this.request<{ id: string; status: string }>('/api/permits/submit', {
       method: 'POST',
@@ -756,6 +757,10 @@ class ApiClient {
         reviewed_at: string | null; permit_number: string | null;
         decision_notes: string | null;
         submitter_org_id: string; authority_org_id: string;
+        expires_at: string | null;
+        suspended_at: string | null;
+        revoked_at: string | null;
+        parent_submission_id: string | null;
         project_name: string | null;
         project_address: string | null; project_city: string | null;
         project_state: string | null; project_zip: string | null;
@@ -780,18 +785,53 @@ class ApiClient {
         author_is_authority: number;
       }>;
       party: 'submitter' | 'authority' | null;
+      parentSubmission: {
+        id: string; status: string;
+        submission_type: string | null;
+        submitted_at: string;
+        reviewed_at: string | null;
+        decision_notes: string | null;
+        permit_number: string | null;
+      } | null;
     }>(`/api/permits/submissions/${id}`);
   }
 
+  /** State-machine action on a permit submission.
+   *  - Pre-decision (authority): claim, approve, deny, request_changes
+   *  - Lifecycle  (authority): suspend, revoke, reinstate, set_expiration
+   *  - Submitter-side: withdraw
+   *  Reason (decisionNotes) is required for deny / request_changes /
+   *  suspend / revoke / reinstate. expiresAt is optional on approve and
+   *  required on set_expiration. */
   async permitAct(id: string, input: {
-    action: 'claim' | 'approve' | 'deny' | 'request_changes' | 'withdraw';
+    action: 'claim' | 'approve' | 'deny' | 'request_changes' | 'withdraw'
+          | 'suspend' | 'revoke' | 'reinstate' | 'set_expiration';
     decisionNotes?: string;
     permitNumber?: string;
+    expiresAt?: string | null;
   }) {
-    return this.request<{ ok: boolean; status: string }>(
+    return this.request<{ ok: boolean; status: string; expiresAt?: string | null }>(
       `/api/permits/submissions/${id}`,
       { method: 'PATCH', body: JSON.stringify(input) },
     );
+  }
+
+  async permitGetTimeline(id: string) {
+    return this.request<{
+      transitions: Array<{
+        id: string;
+        from_status: string | null;
+        to_status: string;
+        reason: string | null;
+        automated: number;
+        created_at: string;
+        actor_user_id: string | null;
+        actor_org_id: string | null;
+        actor_first_name: string | null;
+        actor_last_name: string | null;
+        actor_org_name: string | null;
+      }>;
+    }>(`/api/permits/submissions/${id}/timeline`);
   }
 
   async permitAddComment(id: string, body: string, isInternal = false) {

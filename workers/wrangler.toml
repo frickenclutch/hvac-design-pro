@@ -22,6 +22,12 @@ binding = "DB"
 database_name = "hvac-design-pro"
 database_id = "9ad753c8-542b-4575-b488-ad4718bd7f7d"
 
+# Scheduled tasks. Today only the permit lifecycle auto-expire sweep runs.
+# Every 5 minutes scans permit_submissions for expires_at < now AND status
+# IN ('approved','suspended'), transitions them to 'expired'.
+[triggers]
+crons = ["*/5 * * * *"]
+
 [[r2_buckets]]
 binding = "STORAGE"
 bucket_name = "hvac-assets"

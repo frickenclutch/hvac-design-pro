@@ -61,4 +61,98 @@ app.route('/api/forum', forumRoutes);
 app.route('/api/permits', permitRoutes);
 app.route('/api/audit-log', auditRoutes);
 
-export default app;
+// ── Scheduled handler (Cloudflare Cron Triggers) ───────────────────────────
+// Every cron schedule declared in wrangler.toml's [triggers] block fires
+// this function. Today only the permit auto-expire sweep runs here.
+//
+// The handler must be a SIBLING export from the same module that exports
+// `default app` — Cloudflare's runtime wires both. Hono apps don't carry
+// scheduled() through automatically.
+async function sweepExpiredPermits(env: Env): Promise<{ expired: number }> {
+  // Find every approved/suspended permit whose expires_at is in the past.
+  // Partial index `idx_permit_submissions_expiring` keeps this query cheap
+  // even as the table grows — only rows that can possibly expire are in
+  // the index. LIMIT 200 caps work per tick so a backlog from a long
+  // downtime doesn't run the cron past its execution budget; the next
+  // tick (5 min later) picks up the rest.
+  const { results } = await env.DB.prepare(
+    `SELECT id, status, project_id, submitter_org_id, authority_org_id
+     FROM permit_submissions
+     WHERE expires_at IS NOT NULL
+       AND expires_at < datetime('now')
+       AND status IN ('approved','suspended')
+     LIMIT 200`,
+  ).all();
+
+  if (!results || results.length === 0) return { expired: 0 };
+
+  let count = 0;
+  for (const row of results as Array<Record<string, unknown>>) {
+    const id = row.id as string;
+    const fromStatus = row.status as string;
+
+    // Flip the row to expired. The CHECK constraint allows it; the column
+    // updated_at refreshes so it surfaces in recent-activity feeds.
+    await env.DB.prepare(
+      `UPDATE permit_submissions
+         SET status = 'expired', updated_at = datetime('now')
+       WHERE id = ? AND status IN ('approved','suspended')`,
+    ).bind(id).run();
+
+    // Append a transition row (automated=1, no actor). No setAudit()
+    // because the cron has no Hono context; we write directly to
+    // audit_log so the operator feed still surfaces the event.
+    const txId = crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO permit_status_transitions
+         (id, submission_id, from_status, to_status,
+          actor_user_id, actor_org_id, reason, automated)
+       VALUES (?, ?, ?, 'expired', NULL, NULL, ?, 1)`,
+    ).bind(txId, id, fromStatus, 'Auto-expired by scheduled sweep').run();
+
+    // Direct audit_log write — mirrors what setAudit() would produce so
+    // the existing operator audit UI keeps working.
+    try {
+      const auditId = crypto.randomUUID();
+      await env.DB.prepare(
+        `INSERT INTO audit_log
+           (id, action, entity_type, entity_id, project_id,
+            org_id, target_org_id, before_value, after_value, detail,
+            method, path, status_code, duration_ms)
+         VALUES (?, 'permit.expired_auto', 'permit_submission', ?, ?,
+                 ?, ?, ?, ?, ?,
+                 'CRON', '/scheduled/expire-permits', 200, 0)`,
+      ).bind(
+        auditId, id, row.project_id as string,
+        row.authority_org_id as string,
+        row.submitter_org_id as string,
+        JSON.stringify({ status: fromStatus }),
+        JSON.stringify({ status: 'expired' }),
+        JSON.stringify({ automated: true, source: 'cron.sweep_expired_permits' }),
+      ).run();
+    } catch (e) {
+      console.error('[cron] audit write failed for expired permit', id, e);
+    }
+
+    count++;
+  }
+  return { expired: count };
+}
+
+export default {
+  fetch: app.fetch,
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      (async () => {
+        try {
+          const result = await sweepExpiredPermits(env);
+          if (result.expired > 0) {
+            console.log(`[cron] expired ${result.expired} permit(s)`);
+          }
+        } catch (e) {
+          console.error('[cron] sweepExpiredPermits failed:', e);
+        }
+      })(),
+    );
+  },
+};

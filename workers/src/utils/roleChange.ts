@@ -118,11 +118,16 @@ export async function computeRoleChangePlan(
   }
 
   // ── open_permit_submissions (warn) ────────────────────────────────────
+  // "Open" = the submission can still receive action from either party.
+  // Pre-decision states are obviously open. 'approved' and 'suspended'
+  // are open too (slice B added post-decision lifecycle actions:
+  // suspend / revoke / reinstate / set_expiration). Truly closed states
+  // are denied / withdrawn / revoked / expired — no further mutations.
   {
     const row = await db.prepare(
       `SELECT COUNT(*) AS n FROM permit_submissions
        WHERE (submitter_user_id = ? OR reviewer_user_id = ?)
-         AND status NOT IN ('approved','denied','withdrawn')`
+         AND status IN ('submitted','under_review','changes_requested','approved','suspended')`
     ).bind(targetUserId, targetUserId).first();
     const n = Number(row?.n ?? 0);
     if (n > 0 && (isRemoval || losesAdmin)) {

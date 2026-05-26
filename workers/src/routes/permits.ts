@@ -45,8 +45,50 @@ async function isParty(
 
 function uuid(): string { return crypto.randomUUID(); }
 
+/** Append a row to permit_status_transitions. The migration introduces this
+ *  table as a normalised forensic timeline — every status change writes
+ *  here in addition to the existing setAudit() call so per-submission
+ *  timeline queries don't have to JSON-scan audit_log.detail. */
+async function recordTransition(
+  db: D1Database,
+  args: {
+    submissionId: string;
+    fromStatus: string | null;
+    toStatus: string;
+    actorUserId: string | null;
+    actorOrgId: string | null;
+    reason?: string | null;
+    automated?: boolean;
+  },
+): Promise<void> {
+  await db.prepare(
+    `INSERT INTO permit_status_transitions
+       (id, submission_id, from_status, to_status,
+        actor_user_id, actor_org_id, reason, automated)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    uuid(), args.submissionId, args.fromStatus, args.toStatus,
+    args.actorUserId, args.actorOrgId,
+    args.reason ?? null,
+    args.automated ? 1 : 0,
+  ).run();
+}
+
+/** Status sets used by lifecycle gates. `active` = the permit is currently
+ *  in force (approved/suspended). `terminal` = no further transitions
+ *  possible by either party. `resubmittable` = a submitter can chain a new
+ *  submission off a row in one of these states via parent_submission_id. */
+const ACTIVE_POST_DECISION = new Set(['approved', 'suspended']);
+const TERMINAL_STATUSES = new Set(['denied', 'withdrawn', 'revoked', 'expired']);
+const RESUBMITTABLE_PARENT = new Set([
+  'denied', 'changes_requested', 'withdrawn', 'expired', 'revoked',
+]);
+
 // ── POST /api/permits/submit ───────────────────────────────────────────────
-// Submitter creates a new submission against an authority org.
+// Submitter creates a new submission against an authority org. Optionally
+// links to a `parentSubmissionId` — the previous submission this one
+// supersedes. The chain is rendered in the detail UI so the reviewer has
+// thread-of-history across denial → resubmit → approval arcs.
 permitRoutes.post('/submit', async (c) => {
   const user = c.get('user') as AuthUser;
   const body = await c.req.json();
@@ -54,6 +96,9 @@ permitRoutes.post('/submit', async (c) => {
   const authorityOrgId = (body.authorityOrgId ?? '').toString();
   const submissionType = (body.submissionType ?? '').toString().slice(0, 80);
   const coverLetter = (body.coverLetter ?? '').toString().slice(0, 5000);
+  const parentSubmissionId = body.parentSubmissionId
+    ? body.parentSubmissionId.toString()
+    : null;
 
   if (!projectId || !authorityOrgId) {
     return c.json({ error: 'projectId and authorityOrgId are required' }, 400);
@@ -74,9 +119,35 @@ permitRoutes.post('/submit', async (c) => {
     return c.json({ error: 'Recipient is not configured as a permit authority' }, 400);
   }
 
+  // Resubmission validation — when parentSubmissionId is provided, verify
+  // the caller owns the parent, the parent points at the same project,
+  // and the parent's status allows resubmission (RESUBMITTABLE_PARENT).
+  if (parentSubmissionId) {
+    const parent = await c.env.DB.prepare(
+      `SELECT id, project_id, submitter_org_id, status
+       FROM permit_submissions WHERE id = ?`,
+    ).bind(parentSubmissionId).first();
+    if (!parent) {
+      return c.json({ error: 'parentSubmissionId not found' }, 404);
+    }
+    if (parent.submitter_org_id !== user.orgId) {
+      return c.json({ error: 'You can only resubmit your own prior submissions' }, 403);
+    }
+    if (parent.project_id !== projectId) {
+      return c.json({ error: 'Resubmission must target the same project as the parent' }, 400);
+    }
+    if (!RESUBMITTABLE_PARENT.has(parent.status as string)) {
+      return c.json({
+        error: `Parent submission is currently '${parent.status}' — withdraw or wait for a decision before resubmitting.`,
+      }, 409);
+    }
+  }
+
   // Reject if there's already an open submission for this project to this
   // authority — submitter can withdraw the old one first if they need to
-  // resubmit.
+  // resubmit. NOTE: 'approved' and 'suspended' are deliberately NOT in
+  // this set; a single project may legitimately need multiple sequential
+  // permits (e.g., mechanical + plumbing) from the same authority.
   const dup = await c.env.DB.prepare(
     `SELECT id FROM permit_submissions
      WHERE project_id = ? AND authority_org_id = ?
@@ -93,10 +164,22 @@ permitRoutes.post('/submit', async (c) => {
   await c.env.DB.prepare(
     `INSERT INTO permit_submissions
        (id, project_id, submitter_org_id, submitter_user_id,
-        authority_org_id, submission_type, cover_letter)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        authority_org_id, submission_type, cover_letter,
+        parent_submission_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(id, projectId, user.orgId, user.id, authorityOrgId,
-         submissionType || null, coverLetter || null).run();
+         submissionType || null, coverLetter || null,
+         parentSubmissionId).run();
+
+  // First entry in the transition timeline — null → 'submitted'.
+  await recordTransition(c.env.DB, {
+    submissionId: id,
+    fromStatus: null,
+    toStatus: 'submitted',
+    actorUserId: user.id,
+    actorOrgId: user.orgId,
+    reason: parentSubmissionId ? `Resubmission of ${parentSubmissionId}` : null,
+  });
 
   // Cross-tenant action — surfaces in BOTH the submitter's audit feed AND
   // the authority org's feed via target_org_id.
@@ -111,6 +194,7 @@ permitRoutes.post('/submit', async (c) => {
       submissionType: submissionType || null,
       authorityName: authority.name,
       projectName: project.name,
+      parentSubmissionId,
     },
   });
 
@@ -145,6 +229,7 @@ permitRoutes.get('/submissions', async (c) => {
     SELECT s.id, s.project_id, s.status, s.submission_type, s.submitted_at,
            s.reviewed_at, s.permit_number, s.decision_notes,
            s.submitter_org_id, s.authority_org_id,
+           s.expires_at, s.suspended_at, s.revoked_at, s.parent_submission_id,
            p.name AS project_name, p.address AS project_address,
            p.city AS project_city, p.state AS project_state, p.zip AS project_zip,
            sub_org.name AS submitter_org_name,
@@ -200,6 +285,19 @@ permitRoutes.get('/submissions/:id', async (c) => {
      WHERE s.id = ?`,
   ).bind(id).first();
 
+  // Parent submission basics (for resubmission breadcrumb). NULL when this
+  // is a fresh submission. Pulled inline so the UI doesn't need a second
+  // round-trip just to render "Resubmission of [parent status, date]".
+  const parentId = (submission as Record<string, unknown> | null)?.parent_submission_id as string | null | undefined;
+  let parentSubmission: Record<string, unknown> | null = null;
+  if (parentId) {
+    parentSubmission = (await c.env.DB.prepare(
+      `SELECT id, status, submission_type, submitted_at, reviewed_at,
+              decision_notes, permit_number
+       FROM permit_submissions WHERE id = ?`,
+    ).bind(parentId).first()) as Record<string, unknown> | null;
+  }
+
   // Comments — exclude internal-only comments unless caller is authority side.
   const showInternal = party === 'authority' ? 1 : 0;
   const { results: comments } = await c.env.DB.prepare(
@@ -216,12 +314,27 @@ permitRoutes.get('/submissions/:id', async (c) => {
      ORDER BY c.created_at ASC`,
   ).bind(id, showInternal).all();
 
-  return c.json({ submission, project, calculations: calcs, comments, party });
+  return c.json({
+    submission, project, calculations: calcs, comments, party,
+    parentSubmission,
+  });
 });
 
 // ── PATCH /api/permits/submissions/:id ─────────────────────────────────────
-// Authority decision: claim / approve / deny / request changes. Submitter
-// can also PATCH to withdraw their own submission.
+// State-machine actions. Submitter can withdraw. Authority can:
+//   - claim / approve / deny / request_changes  (pre-decision)
+//   - suspend / revoke / reinstate              (post-decision lifecycle)
+//   - set_expiration                            (no status change)
+//
+// Lifecycle transition rules (authority side):
+//   approved   → suspended  via 'suspend'         (reason required)
+//   approved   → revoked    via 'revoke'          (reason required)
+//   suspended  → approved   via 'reinstate'       (reason required)
+//   suspended  → revoked    via 'revoke'          (reason required)
+//
+// 'expired' is reached only via the scheduled() cron sweep — there's no
+// manual expire action. If an authority wants to force-expire, they revoke
+// with a reason naming the expiration.
 permitRoutes.patch('/submissions/:id', async (c) => {
   const user = c.get('user') as AuthUser;
   const id = c.req.param('id');
@@ -229,17 +342,36 @@ permitRoutes.patch('/submissions/:id', async (c) => {
   const action = (body.action ?? '').toString();
   const decisionNotes = (body.decisionNotes ?? '').toString().slice(0, 5000);
   const permitNumber = (body.permitNumber ?? '').toString().slice(0, 80);
+  const expiresAtRaw = body.expiresAt ? body.expiresAt.toString().slice(0, 32) : null;
+
+  // Validate expiresAt — accept ISO-8601 / SQLite datetime strings. Empty
+  // string clears the field; non-parseable strings are rejected.
+  let expiresAtNormalized: string | null | undefined = undefined;
+  if (body.expiresAt !== undefined) {
+    if (expiresAtRaw === null || expiresAtRaw === '') {
+      expiresAtNormalized = null;
+    } else {
+      const t = Date.parse(expiresAtRaw);
+      if (Number.isNaN(t)) {
+        return c.json({ error: 'expiresAt must be an ISO datetime or empty to clear' }, 400);
+      }
+      expiresAtNormalized = new Date(t).toISOString();
+    }
+  }
 
   const { party, row } = await isParty(c.env.DB, id, user);
   if (!party || !row) return c.json({ error: 'Submission not found' }, 404);
+  const currentStatus = row.status as string;
 
-  // Submitter actions
+  // ── Submitter actions ────────────────────────────────────────────────
   if (party === 'submitter') {
     if (action !== 'withdraw') {
       return c.json({ error: 'Submitters can only withdraw their submission' }, 403);
     }
-    if (['approved', 'denied', 'withdrawn'].includes(row.status as string)) {
-      return c.json({ error: 'Submission already in a terminal state' }, 409);
+    if (TERMINAL_STATUSES.has(currentStatus) || ACTIVE_POST_DECISION.has(currentStatus)) {
+      return c.json({
+        error: `Cannot withdraw a submission in '${currentStatus}' state.`,
+      }, 409);
     }
     await c.env.DB.prepare(
       `UPDATE permit_submissions
@@ -247,39 +379,94 @@ permitRoutes.patch('/submissions/:id', async (c) => {
        WHERE id = ?`,
     ).bind(id).run();
 
+    await recordTransition(c.env.DB, {
+      submissionId: id,
+      fromStatus: currentStatus,
+      toStatus: 'withdrawn',
+      actorUserId: user.id,
+      actorOrgId: user.orgId,
+      reason: decisionNotes.trim() || null,
+    });
+
     setAudit(c, {
       action: 'permit.withdraw',
       entityType: 'permit_submission',
       entityId: id,
       projectId: row.project_id as string,
       targetOrgId: row.authority_org_id as string,
-      beforeValue: { status: row.status },
+      beforeValue: { status: currentStatus },
       afterValue: { status: 'withdrawn' },
     });
 
     return c.json({ ok: true, status: 'withdrawn' });
   }
 
-  // Authority actions
-  if (party === 'authority') {
-    const validActions = ['claim', 'approve', 'deny', 'request_changes'];
-    if (!validActions.includes(action)) {
-      return c.json({ error: `Action must be one of: ${validActions.join(', ')}` }, 400);
+  // ── Authority actions ─────────────────────────────────────────────────
+  if (party !== 'authority') {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const validActions = [
+    'claim', 'approve', 'deny', 'request_changes',
+    'suspend', 'revoke', 'reinstate', 'set_expiration',
+  ];
+  if (!validActions.includes(action)) {
+    return c.json({ error: `Action must be one of: ${validActions.join(', ')}` }, 400);
+  }
+
+  // set_expiration is a no-status-change action — handle separately.
+  if (action === 'set_expiration') {
+    if (!ACTIVE_POST_DECISION.has(currentStatus)) {
+      return c.json({
+        error: `Can only set expiration on approved or suspended permits (current: ${currentStatus}).`,
+      }, 409);
+    }
+    if (expiresAtNormalized === undefined) {
+      return c.json({ error: 'expiresAt is required (ISO datetime or empty to clear)' }, 400);
+    }
+    await c.env.DB.prepare(
+      `UPDATE permit_submissions
+         SET expires_at = ?, updated_at = datetime('now')
+       WHERE id = ?`,
+    ).bind(expiresAtNormalized, id).run();
+
+    setAudit(c, {
+      action: 'permit.set_expiration',
+      entityType: 'permit_submission',
+      entityId: id,
+      projectId: row.project_id as string,
+      targetOrgId: row.submitter_org_id as string,
+      beforeValue: { expires_at: row.expires_at ?? null },
+      afterValue: { expires_at: expiresAtNormalized },
+    });
+
+    return c.json({ ok: true, status: currentStatus, expiresAt: expiresAtNormalized });
+  }
+
+  // Pre-decision actions (claim / approve / deny / request_changes) — only
+  // valid from pre-decision statuses.
+  const preDecisionActions = ['claim', 'approve', 'deny', 'request_changes'];
+  if (preDecisionActions.includes(action)) {
+    const validFrom = new Set(['submitted', 'under_review', 'changes_requested']);
+    if (!validFrom.has(currentStatus)) {
+      return c.json({
+        error: `Cannot '${action}' a submission already in '${currentStatus}' state.`,
+      }, 409);
     }
 
     let newStatus: string;
     let setDecisionFields = false;
-    if (action === 'claim') newStatus = 'under_review';
-    else if (action === 'approve') { newStatus = 'approved'; setDecisionFields = true; }
-    else if (action === 'deny')    { newStatus = 'denied';   setDecisionFields = true; }
-    else                            { newStatus = 'changes_requested'; setDecisionFields = true; }
+    if (action === 'claim')                  newStatus = 'under_review';
+    else if (action === 'approve')          { newStatus = 'approved';          setDecisionFields = true; }
+    else if (action === 'deny')             { newStatus = 'denied';            setDecisionFields = true; }
+    else                                     { newStatus = 'changes_requested'; setDecisionFields = true; }
 
-    // Decision actions require notes (prevents silent denial)
     if (setDecisionFields && action !== 'approve' && !decisionNotes.trim()) {
       return c.json({ error: 'Denial / changes-requested decisions require notes' }, 400);
     }
 
     if (setDecisionFields) {
+      // Approve may also accept an optional expiresAt at decision time.
       await c.env.DB.prepare(
         `UPDATE permit_submissions
            SET status = ?,
@@ -288,10 +475,15 @@ permitRoutes.patch('/submissions/:id', async (c) => {
                reviewed_at = datetime('now'),
                decision_notes = ?,
                permit_number = ?,
+               expires_at = COALESCE(?, expires_at),
                updated_at = datetime('now')
          WHERE id = ?`,
-      ).bind(newStatus, user.id, decisionNotes || null,
-             action === 'approve' ? (permitNumber || null) : null, id).run();
+      ).bind(
+        newStatus, user.id, decisionNotes || null,
+        action === 'approve' ? (permitNumber || null) : null,
+        action === 'approve' ? expiresAtNormalized ?? null : null,
+        id,
+      ).run();
     } else {
       // claim — no decision yet
       await c.env.DB.prepare(
@@ -304,23 +496,111 @@ permitRoutes.patch('/submissions/:id', async (c) => {
       ).bind(newStatus, user.id, id).run();
     }
 
-    // Authority decisions affect the SUBMITTER's tenant — log with
-    // target_org_id = submitter so the submitter's audit feed sees it.
+    await recordTransition(c.env.DB, {
+      submissionId: id,
+      fromStatus: currentStatus,
+      toStatus: newStatus,
+      actorUserId: user.id,
+      actorOrgId: user.orgId,
+      reason: decisionNotes.trim() || null,
+    });
+
     setAudit(c, {
       action: `permit.${action}`,
       entityType: 'permit_submission',
       entityId: id,
       projectId: row.project_id as string,
       targetOrgId: row.submitter_org_id as string,
-      beforeValue: { status: row.status },
-      afterValue: { status: newStatus, decisionNotes: decisionNotes || null,
-                    permitNumber: action === 'approve' ? (permitNumber || null) : null },
+      beforeValue: { status: currentStatus },
+      afterValue: {
+        status: newStatus,
+        decisionNotes: decisionNotes || null,
+        permitNumber: action === 'approve' ? (permitNumber || null) : null,
+        expiresAt: action === 'approve' ? expiresAtNormalized ?? null : undefined,
+      },
     });
 
     return c.json({ ok: true, status: newStatus });
   }
 
-  return c.json({ error: 'Forbidden' }, 403);
+  // Post-decision lifecycle actions: suspend / revoke / reinstate.
+  // Reason (decisionNotes) is required for all three — these are
+  // consequential state changes affecting an active permit.
+  if (!decisionNotes.trim()) {
+    return c.json({
+      error: `'${action}' requires a reason in decisionNotes`,
+    }, 400);
+  }
+
+  let newStatus: string;
+  if (action === 'suspend') {
+    if (currentStatus !== 'approved') {
+      return c.json({
+        error: `Can only suspend an approved permit (current: ${currentStatus}).`,
+      }, 409);
+    }
+    newStatus = 'suspended';
+    await c.env.DB.prepare(
+      `UPDATE permit_submissions
+         SET status = 'suspended',
+             suspended_at = datetime('now'),
+             decision_notes = ?,
+             updated_at = datetime('now')
+       WHERE id = ?`,
+    ).bind(decisionNotes, id).run();
+  } else if (action === 'revoke') {
+    if (!ACTIVE_POST_DECISION.has(currentStatus)) {
+      return c.json({
+        error: `Can only revoke an approved or suspended permit (current: ${currentStatus}).`,
+      }, 409);
+    }
+    newStatus = 'revoked';
+    await c.env.DB.prepare(
+      `UPDATE permit_submissions
+         SET status = 'revoked',
+             revoked_at = datetime('now'),
+             decision_notes = ?,
+             updated_at = datetime('now')
+       WHERE id = ?`,
+    ).bind(decisionNotes, id).run();
+  } else {
+    // reinstate
+    if (currentStatus !== 'suspended') {
+      return c.json({
+        error: `Can only reinstate a suspended permit (current: ${currentStatus}).`,
+      }, 409);
+    }
+    newStatus = 'approved';
+    await c.env.DB.prepare(
+      `UPDATE permit_submissions
+         SET status = 'approved',
+             suspended_at = NULL,
+             decision_notes = ?,
+             updated_at = datetime('now')
+       WHERE id = ?`,
+    ).bind(decisionNotes, id).run();
+  }
+
+  await recordTransition(c.env.DB, {
+    submissionId: id,
+    fromStatus: currentStatus,
+    toStatus: newStatus,
+    actorUserId: user.id,
+    actorOrgId: user.orgId,
+    reason: decisionNotes,
+  });
+
+  setAudit(c, {
+    action: `permit.${action}`,
+    entityType: 'permit_submission',
+    entityId: id,
+    projectId: row.project_id as string,
+    targetOrgId: row.submitter_org_id as string,
+    beforeValue: { status: currentStatus },
+    afterValue: { status: newStatus, reason: decisionNotes },
+  });
+
+  return c.json({ ok: true, status: newStatus });
 });
 
 // ── POST /api/permits/submissions/:id/comments ─────────────────────────────
@@ -371,6 +651,32 @@ permitRoutes.post('/submissions/:id/comments', async (c) => {
   });
 
   return c.json({ id: cid, isInternal, created_at: new Date().toISOString() }, 201);
+});
+
+// ── GET /api/permits/submissions/:id/timeline ──────────────────────────────
+// Append-only forensic timeline of every status transition on this
+// submission. Includes automated transitions (cron expiration) — those
+// rows have actor_user_id NULL and automated=1.
+permitRoutes.get('/submissions/:id/timeline', async (c) => {
+  const user = c.get('user') as AuthUser;
+  const id = c.req.param('id');
+  const { party } = await isParty(c.env.DB, id, user);
+  if (!party) return c.json({ error: 'Submission not found' }, 404);
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT t.id, t.from_status, t.to_status, t.reason, t.automated,
+            t.created_at, t.actor_user_id, t.actor_org_id,
+            u.first_name AS actor_first_name,
+            u.last_name  AS actor_last_name,
+            o.name       AS actor_org_name
+     FROM permit_status_transitions t
+     LEFT JOIN users u         ON u.id = t.actor_user_id
+     LEFT JOIN organisations o ON o.id = t.actor_org_id
+     WHERE t.submission_id = ?
+     ORDER BY t.created_at ASC, t.id ASC`,
+  ).bind(id).all();
+
+  return c.json({ transitions: results });
 });
 
 // ── GET /api/permits/authorities ───────────────────────────────────────────
