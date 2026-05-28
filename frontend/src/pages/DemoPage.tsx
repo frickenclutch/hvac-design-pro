@@ -44,7 +44,7 @@ const STEPS = [
     icon: GitBranch,
     color: 'sky',
     visual: 'calc',
-    features: ['Import from Manual J — proportional CFM distribution', 'Equal friction duct sizing method', 'Velocity warnings for noise control', 'Critical path identification', 'System balance analysis with damper recommendations', 'Sheet metal, flex, spiral, PVC material options'],
+    features: ['Import from Manual J — proportional CFM distribution', 'Equal friction duct sizing method', 'Velocity warnings for noise control', 'Critical path identification', 'System balance analysis with damper recommendations', 'Sheet metal, flex, spiral, PVC, fiberglass board + more'],
   },
   {
     id: '3d',
@@ -84,7 +84,7 @@ const STEPS = [
     icon: Smartphone,
     color: 'rose',
     visual: 'pwa',
-    features: ['Install like a native app', 'Full offline capability', 'Runs on phone, tablet, desktop', 'Cloud sync when connected', 'Sub-second load times'],
+    features: ['Install like a native app', 'Draft & calculate offline', 'Runs on phone, tablet, desktop', 'Cloud sync when connected', 'Sub-second load times'],
   },
   {
     id: 'start',
@@ -240,7 +240,7 @@ export default function DemoPage() {
 }
 
 // ── Demo Visual Illustrations ─────────────────────────────────────────────────
-function DemoVisual({ type, color: _color }: { type: string; color: string }) {
+function DemoVisual({ type }: { type: string; color: string }) {
   if (type === 'hero' || type === 'cta') {
     return (
       <div className="glass-panel rounded-2xl border border-slate-700/40 p-8 flex flex-col items-center justify-center min-h-[300px] text-center">
@@ -432,7 +432,7 @@ function DemoVisual({ type, color: _color }: { type: string; color: string }) {
           <Zap className="w-3.5 h-3.5 text-rose-400" />
           <span className="text-xs text-rose-300 font-bold">Works Offline</span>
         </div>
-        <p className="text-slate-500 text-xs text-center max-w-xs">Install on any device. Full functionality without internet. Your data stays on your device until you choose to sync.</p>
+        <p className="text-slate-500 text-xs text-center max-w-xs">Install on any device. Draft and run load calcs without internet. Your data stays on your device and syncs to the cloud when you're back online.</p>
       </div>
     );
   }

@@ -160,8 +160,8 @@ export default function LandingPage() {
           />
           <FeatureCard
             icon={<Wifi className="w-5 h-5" />}
-            title="Real-Time Sync"
-            description="Collaborative editing with team members. Changes sync instantly."
+            title="Cloud Sync"
+            description="Projects, calculations, and drawings sync to the cloud and follow you across devices."
             color="rose"
           />
         </div>
@@ -179,7 +179,7 @@ export default function LandingPage() {
           <RoleCard
             icon={<Globe className="w-5 h-5" />}
             title="Municipalities"
-            description="Standardized digital submittals, automated code checks, permit tracking."
+            description="Standardized digital submittals, permit submission tracking, and review workflows."
             color="amber"
           />
           <RoleCard

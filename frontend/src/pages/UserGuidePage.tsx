@@ -32,7 +32,7 @@ const sections: GuideSection[] = [
           <FeatureCard icon={<Thermometer className="w-5 h-5" />} title="Calculate" desc="Run Manual J load calculations room by room" />
           <FeatureCard icon={<Printer className="w-5 h-5" />} title="Export" desc="Generate professional PDF blueprints" />
         </div>
-        <p className="text-slate-500 text-xs">No installs needed — it runs entirely in your browser and saves to your device.</p>
+        <p className="text-slate-500 text-xs">No installs needed — it runs in your browser, saves to your device, and syncs to the cloud when you're signed in.</p>
       </div>
     ),
     advancedContent: (
@@ -40,7 +40,7 @@ const sections: GuideSection[] = [
         <p>HVAC DesignPro is a full-stack PWA built for HVAC engineers, contractors, and plan reviewers. It combines a Fabric.js-powered 2D CAD workspace, Three.js 3D visualization, and a Manual J (ACCA) load calculator in a single browser-based tool.</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <TechCard title="Stack" items={['React 19 + TypeScript', 'Fabric.js 7 (2D)', 'Three.js 0.183 (3D)', 'Zustand state management', 'Cloudflare Pages hosting']} />
-          <TechCard title="Data" items={['All data in localStorage', 'Per-project isolation', 'Auto-save every 3s', 'PDF export via jsPDF', 'No server required']} />
+          <TechCard title="Data" items={['Local-first, syncs to D1', 'Per-project isolation', 'Auto-save every 3s', 'PDF export via jsPDF', 'Cloudflare Workers API']} />
         </div>
         <p className="text-slate-500 text-xs">The app is structured around three main stores: <code className="text-emerald-400/70">useCadStore</code> (floor plans), <code className="text-emerald-400/70">useProjectStore</code> (active project identity), and <code className="text-emerald-400/70">usePreferencesStore</code> (settings). Bidirectional sync between CAD geometry and Manual J inputs is handled by <code className="text-emerald-400/70">cadToManualJ.ts</code>.</p>
       </div>
@@ -150,10 +150,16 @@ const sections: GuideSection[] = [
         ]} />
         <p><strong>Drawing pipes:</strong></p>
         <StepList steps={[
-          'Select the Pipe tool from the toolbar',
+          'Select the Pipe Builder tool from the toolbar',
           'Click to start, click again to place segments',
           'Select a placed pipe to change material (Copper Liquid, Copper Suction, PVC Condensate, Gas Black Iron) and diameter',
           'The Property Inspector shows thermal info including estimated heat loss',
+        ]} />
+        <p><strong>Ducts &amp; fittings:</strong></p>
+        <StepList steps={[
+          'Use Draw Duct (X) to lay supply and return runs — they live on the Ducts (Supply) and Ducts (Return) layers',
+          'Use Place Fitting (J) to drop elbows, tees, takeoffs, and boots along a run',
+          'Duct sizes computed in Manual D can be pushed back here with "Apply to CAD"',
         ]} />
       </div>
     ),
@@ -201,7 +207,10 @@ const sections: GuideSection[] = [
           <LayerRow color="text-emerald-400" name="Walls" desc="Structural walls" />
           <LayerRow color="text-sky-400" name="Openings" desc="Windows & doors" />
           <LayerRow color="text-violet-400" name="HVAC" desc="Equipment & registers" />
-          <LayerRow color="text-rose-400" name="Piping" desc="Refrigerant, condensate, gas lines" />
+          <LayerRow color="text-pink-400" name="Piping" desc="Refrigerant, condensate, gas lines" />
+          <LayerRow color="text-blue-400" name="Ducts (Supply)" desc="Supply duct runs" />
+          <LayerRow color="text-red-400" name="Ducts (Return)" desc="Return duct runs" />
+          <LayerRow color="text-orange-400" name="Radiant Systems" desc="Radiant loops & panels" />
           <LayerRow color="text-amber-400" name="Annotations" desc="Labels, dimensions, notes" />
           <LayerRow color="text-slate-400" name="Underlay" desc="Imported floor plan images" />
         </div>
@@ -230,6 +239,7 @@ const sections: GuideSection[] = [
           'Hover objects to see property tooltips',
           'Use floor toggles to show/hide individual stories',
           'Toggle wireframe or shadows with the icons in the corner',
+          'Export the model to STL or OBJ, or import STL / OBJ / glTF / FBX models (up to 50 MB) to drop into the scene',
           'Press Escape or click X to return to 2D',
         ]} />
       </div>
@@ -263,6 +273,7 @@ const sections: GuideSection[] = [
           'The calculator shows per-room and whole-building heating/cooling loads in BTU/h',
         ]} />
         <Tip>After making changes in Manual J, click "Sync to CAD" to push your edits (like updated R-values) back to the floor plan.</Tip>
+        <Tip>Click <strong>Find Retailer &amp; Estimate</strong> after calculating for an instant install-cost estimate — it compares Heat Pump, A/C + Furnace, Mini-Split, and Packaged systems with equipment, ductwork, labor, and permit line items (low/mid/high ranges), plus nearby retailers.</Tip>
       </div>
     ),
     advancedContent: (
@@ -321,6 +332,8 @@ const sections: GuideSection[] = [
           <SettingCard title="Accessibility" desc="High contrast, screen reader support, font scaling" />
           <SettingCard title="PDF & Print" desc="Page size, orientation, watermark, included sections" />
           <SettingCard title="Stamps" desc="Upload PE seal and notary stamp images" />
+          <SettingCard title="Authority Profile" desc="Permit-authority display title, jurisdiction, intake notes (admin)" />
+          <SettingCard title="Manual J Engine" desc="Legacy vs cert-grade engine + shadow-run toggle (platform admin)" />
         </div>
         <Tip>Click "Reset All Preferences" at the bottom to restore defaults.</Tip>
       </div>
@@ -338,20 +351,20 @@ const sections: GuideSection[] = [
     icon: <MessageSquarePlus className="w-5 h-5 text-emerald-400" />,
     easyContent: (
       <div className="space-y-3">
-        <p><strong>Mason</strong> is your built-in HVAC engineering assistant. Look for the green chat icon in the bottom-left corner of the CAD workspace.</p>
+        <p><strong>Mason</strong> is your built-in HVAC engineering assistant. Look for the amber lightning-bolt button — bottom-left in the CAD workspace, bottom-right on the calculators. Mason is available in CAD, Manual J, Manual D, and AED.</p>
         <StepList steps={[
-          'Click the chat icon to open Mason',
-          'Type any HVAC question — R-values, duct sizing, Manual J concepts, etc.',
-          'Mason knows your project context and gives relevant answers',
-          'Use the feedback button (speech bubble icon) to report bugs or suggest features',
-          'Attach a screenshot to your feedback for extra clarity',
+          'Click the button (or press Alt+M) to open Mason',
+          'Type any HVAC question — R-values, duct sizing, Manual J/D, AED, and more',
+          'Mason knows your active page + project context, runs quick calculators, and accepts slash commands like /status, /calculate, and /navigate',
+          'Use the feedback button (speech-bubble icon) in the header to report bugs or suggest features',
+          'Attach up to 5 files (screenshots, video, PDFs, docs — 10 MB each) by clicking, dragging, or pasting',
         ]} />
       </div>
     ),
     advancedContent: (
       <div className="space-y-3">
-        <p>Mason uses a keyword-matched knowledge base (<code className="text-emerald-400/70">KNOWLEDGE_BASE</code> array in Mason.tsx) with context-aware scoring. Queries are tokenized and matched against <code className="text-emerald-400/70">keywords</code> arrays, with a boost for entries whose <code className="text-emerald-400/70">contexts</code> array includes the current page context (<code className="text-emerald-400/70">'cad'</code> or <code className="text-emerald-400/70">'manualj'</code>).</p>
-        <p>The feedback system stores submissions to <code className="text-emerald-400/70">localStorage</code> under <code className="text-emerald-400/70">hvac_feedback</code> with type (bug/suggestion/question), text, optional screenshot (base64 dataURL, max 5MB), and timestamp.</p>
+        <p>Mason uses a keyword-matched knowledge base (<code className="text-emerald-400/70">KNOWLEDGE_BASE</code> array in Mason.tsx) with context-aware scoring. Queries are tokenized and matched against <code className="text-emerald-400/70">keywords</code> arrays, with a boost for entries whose <code className="text-emerald-400/70">contexts</code> array includes the current page context (<code className="text-emerald-400/70">'cad' | 'manualj' | 'manual-d' | 'aed'</code>).</p>
+        <p>The feedback form posts to the Workers API via <code className="text-emerald-400/70">api.submitFeedback()</code> — multipart with type (bug/suggestion/question), text, page context, and up to 5 attachments (images/video/PDF/docs, 10 MB each). If the API is unreachable it falls back to a <code className="text-emerald-400/70">localStorage</code> queue under <code className="text-emerald-400/70">hvac_feedback</code>.</p>
       </div>
     ),
   },
@@ -364,13 +377,26 @@ const sections: GuideSection[] = [
         <ShortcutRow keys="V" desc="Select tool" />
         <ShortcutRow keys="H" desc="Pan tool" />
         <ShortcutRow keys="W" desc="Draw Wall" />
+        <ShortcutRow keys="I" desc="Add Window" />
+        <ShortcutRow keys="O" desc="Add Door" />
+        <ShortcutRow keys="U" desc="Place HVAC unit" />
+        <ShortcutRow keys="X" desc="Draw Duct" />
+        <ShortcutRow keys="J" desc="Place Fitting" />
         <ShortcutRow keys="D" desc="Dimension tool" />
         <ShortcutRow keys="L" desc="Label tool" />
         <ShortcutRow keys="R" desc="Detect Rooms" />
+        <ShortcutRow keys="G" desc="Toggle grid snap" />
+        <ShortcutRow keys="T" desc="Toggle toolbox panel" />
+        <ShortcutRow keys="P" desc="Toggle properties panel" />
+        <ShortcutRow keys="F" desc="Toggle floors panel" />
+        <ShortcutRow keys="N" desc="Toggle top nav bar" />
+        <ShortcutRow keys="`" desc="Focus mode (collapse all panels)" />
         <ShortcutRow keys="Delete" desc="Remove selected object" />
         <ShortcutRow keys="Ctrl+Z" desc="Undo" />
         <ShortcutRow keys="Ctrl+Y" desc="Redo" />
-        <ShortcutRow keys="Ctrl+K" desc="Spotlight search" />
+        <ShortcutRow keys="Ctrl+S" desc="Save project" />
+        <ShortcutRow keys="Ctrl+E" desc="Export PDF" />
+        <ShortcutRow keys="Ctrl+K" desc="Asset / spotlight search" />
         <ShortcutRow keys="Escape" desc="Cancel / exit / close" />
         <ShortcutRow keys="Right-click" desc="End wall chain" />
         <ShortcutRow keys="Double-click" desc="Place final wall and finish" />
@@ -382,15 +408,19 @@ const sections: GuideSection[] = [
       <div className="space-y-3">
         <p>Keyboard shortcuts are handled in the <code className="text-emerald-400/70">useEffect</code> keydown listener in <code className="text-emerald-400/70">CadCanvas.tsx</code>. Tool switching sets <code className="text-emerald-400/70">activeTool</code> in the CAD store. Undo/redo use a per-floor history stack.</p>
         <div className="space-y-1.5">
-          <ShortcutRow keys="V" desc="Select tool — sets activeTool: 'select'" />
-          <ShortcutRow keys="H" desc="Pan tool — sets activeTool: 'pan'" />
-          <ShortcutRow keys="W" desc="Wall tool — sets activeTool: 'draw_wall'" />
-          <ShortcutRow keys="D" desc="Dimension — sets activeTool: 'dimension'" />
-          <ShortcutRow keys="L" desc="Label — sets activeTool: 'label'" />
-          <ShortcutRow keys="R" desc="Room detection — triggers detectRooms()" />
+          <ShortcutRow keys="V / H" desc="select / pan" />
+          <ShortcutRow keys="W" desc="draw_wall" />
+          <ShortcutRow keys="I / O / U" desc="place_window / place_door / place_hvac" />
+          <ShortcutRow keys="X / J" desc="draw_duct / place_fitting" />
+          <ShortcutRow keys="D / L" desc="add_dimension / add_label" />
+          <ShortcutRow keys="R" desc="room_detect" />
+          <ShortcutRow keys="G" desc="setGridSnapEnabled(toggle)" />
+          <ShortcutRow keys="T / P / F / N" desc="togglePanel(toolbox / properties / floors / navbar)" />
+          <ShortcutRow keys="`" desc="collapse/expand all panels (focus mode)" />
           <ShortcutRow keys="Delete/Backspace" desc="Dispatches remove* based on selection type" />
           <ShortcutRow keys="Ctrl+Z / Ctrl+Y" desc="Undo/redo via history stack" />
-          <ShortcutRow keys="Ctrl+K" desc="Opens SpotlightSearch overlay" />
+          <ShortcutRow keys="Ctrl+S / Ctrl+E" desc="Save project / Export PDF" />
+          <ShortcutRow keys="Ctrl+K" desc="Asset finder (CAD, TopNavigationBar) / SpotlightSearch elsewhere" />
           <ShortcutRow keys="Escape" desc="Cancels active tool, exits 3D, closes modals" />
         </div>
       </div>
@@ -494,8 +524,8 @@ const sections: GuideSection[] = [
     advancedContent: (
       <div className="space-y-3 text-sm text-slate-400">
         <p>Data is scoped to project IDs in localStorage: <code>hvac_manualj_inputs_&#123;projectId&#125;</code>, <code>hvac_manuald_inputs_&#123;projectId&#125;</code>, <code>hvac_cad_&#123;projectId&#125;</code>.</p>
-        <p>Draft mode uses the key suffix <code>_draft</code>. One-time migration copies old global keys to draft scope on first load.</p>
-        <p>CAD workspace state (panel visibility, zoom, ghosting) persists via the drawing serialization. The subscribe handler auto-saves on state changes with 500ms debounce.</p>
+        <p>Draft mode uses the key suffix <code>_draft</code>. One-time migration copies old global keys to draft scope on first load. When signed in, projects, calculation results, and CAD drawings also sync to the Cloudflare D1 backend (skipped for draft + local-only projects).</p>
+        <p>CAD workspace state (panel visibility, zoom, ghosting) persists via the drawing serialization. The auto-save hook debounces on state changes with a 3-second timer, writing to localStorage immediately and to D1 when configured.</p>
       </div>
     ),
   },
@@ -626,7 +656,7 @@ const sections: GuideSection[] = [
     ),
     advancedContent: (
       <div className="space-y-3">
-        <p>Engine: <code className="text-emerald-400/70">frontend/src/engines/manualJ8/</code>, version stamp <code>manualJ8-ts-1.1.0</code>. Validated against ACCA reference test cases (Smith / Walker / Cobb) at 184/184 line items within 0.5% tolerance — 30/30 vitest pass.</p>
+        <p>Engine: <code className="text-emerald-400/70">frontend/src/engines/manualJ8/</code>, version stamp <code>manualJ8-ts-1.1.0</code>. Validated against ACCA reference test cases (Smith / Walker / Cobb) at 184/184 line items within 0.5% tolerance — part of the 43/43 vitest suite (30 manualJ8 cert/registry + 13 storage/preferences infra).</p>
         <p>Adapter shim: <code className="text-emerald-400/70">manualJ8/adapters/legacy.ts → roomInputsToFormJ1Input()</code> aggregates per-room legacy <code>RoomInput[]</code> data into the whole-house <code>FormJ1Input</code>.</p>
         <p>Pipeline: <code className="text-emerald-400/70">runCalculation()</code> in <code>pages/ManualJCalculator.tsx</code> calls legacy first (display), then if <code>shadowRunManualJ8 === true</code> also calls the cert engine and console-logs <code>[engine drift]</code> with heat / sens / latent percentages.</p>
         <p>Phase 2 trigger criteria documented in <code>docs/option-e-ui-migration-plan.md</code>: ≥10 production projects driven through the calculator + drift on those projects ≤ 5% on every total + ACCA cert review approved.</p>
@@ -704,7 +734,7 @@ const sections: GuideSection[] = [
       <div className="space-y-3">
         <p>Hard-gated route — <code className="text-emerald-400/70">isPlatformAdmin</code> flag on the user record (separate from <code>role</code>) controls visibility. Server enforces 403 on every <code>/api/platform/*</code> call via <code>requirePlatformAdmin</code> middleware in <code>workers/src/middleware/auth.ts</code>.</p>
         <p>Q/A benchmarks endpoint at <code>/api/platform/qa-benchmarks</code> joins live D1 telemetry (engine version distribution, calc volume + status mix, p50/p95/p99 via window-function CTE, audit activity) with static cert facts about the active engine version.</p>
-        <p>Future: impersonation tokens, plan/seat overrides, <code>billing_status</code> flips — all queued behind ACCA cert completion. Audit log writes (SOC 2 CC7.2) still TODO.</p>
+        <p>Future: impersonation tokens, plan/seat overrides, <code>billing_status</code> flips — all queued behind ACCA cert completion. Audit logging (SOC 2 CC7.2) is shipped — auto-logging middleware records every mutation, surfaced via <code>/audit-log</code> and the L0 cross-org audit feed.</p>
       </div>
     ),
   },

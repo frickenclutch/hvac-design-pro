@@ -268,6 +268,21 @@ After running the calculation:
 
 **Velocity limits:** 600-900 FPM for residential trunks, 400-600 FPM for branches.`,
   },
+  {
+    keywords: ['cost', 'price', 'estimate', 'how much', 'budget', 'retailer', 'where to buy', 'equipment cost', 'install cost', 'find retailer'],
+    contexts: ['manualj', 'manual-d', 'cad'],
+    answer: `**Cost Estimate & Retailers**
+
+After running Manual J, click **Find Retailer & Estimate** for an instant installed-cost estimate.
+
+**What you get:**
+- **4 system types compared** — Heat Pump, A/C + Furnace, Mini-Split, Packaged
+- **Line items** — equipment (by tonnage), air handler, ductwork + fittings, line set, thermostat, condensate drain, filter
+- **Labor** scaled by duct location, plus permits and tax
+- **Low / mid / high** range for each option
+
+It also surfaces nearby retailers so you can source equipment. Treat it as a planning aid — confirm pricing with your distributor.`,
+  },
   // ── CAD — Getting Started & Navigation ─────────────────────────────────────
   {
     keywords: ['getting started', 'how to start', 'begin', 'new to', 'tutorial', 'walkthrough', 'guide'],
@@ -316,11 +331,19 @@ Here's how to build a floor plan from scratch:
 | **V** | Select tool |
 | **H** | Pan tool |
 | **W** | Draw Wall tool |
+| **I** | Add Window |
+| **O** | Add Door |
+| **U** | Place HVAC unit |
+| **X** | Draw Duct |
+| **J** | Place Fitting |
 | **D** | Dimension tool |
 | **L** | Label tool |
 | **R** | Detect Rooms |
-| **Ctrl+Z** | Undo |
-| **Ctrl+Y** | Redo |
+| **G** | Toggle grid snap |
+| **T / P / F / N** | Toggle toolbox / properties / floors / nav bar |
+| **\`** | Focus mode (collapse all panels) |
+| **Ctrl+Z / Ctrl+Y** | Undo / Redo |
+| **Ctrl+S / Ctrl+E** | Save project / Export PDF |
 | **Ctrl+K** | Search all assets |
 | **Delete** | Remove selected object |
 | **ESC** | Cancel tool / exit 3D / close dialogs |
@@ -447,10 +470,14 @@ Use detected room areas directly in the Manual J Calculator for accurate load ca
     contexts: ['cad'],
     answer: `**Layer Controls**
 
-5 layers control what's visible:
+9 layers control what's visible:
 - **Walls** (green) — structural walls
 - **Openings** (blue) — windows and doors
 - **HVAC** (purple) — registers, grilles, equipment
+- **Piping** (pink) — refrigerant, condensate, gas lines
+- **Ducts (Supply)** (blue) — supply duct runs
+- **Ducts (Return)** (red) — return duct runs
+- **Radiant Systems** (orange) — radiant loops & panels
 - **Annotations** (amber) — dimensions and labels
 - **Underlay** (gray) — reference images
 
@@ -496,6 +523,10 @@ Click the **3D View** button in the top toolbar to launch a full 3D render of yo
 
 **Floor selector (top-left):**
 - View all floors stacked or isolate individual floors
+
+**Export & import:**
+- Export the model to **STL** or **OBJ**
+- Import **STL / OBJ / glTF / FBX** models (up to 50 MB) to drop reference geometry into the scene
 
 All your walls, openings, and HVAC units render automatically from the 2D drawing data.`,
   },
