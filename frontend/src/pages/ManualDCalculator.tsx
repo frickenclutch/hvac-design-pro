@@ -284,9 +284,133 @@ export default function ManualDCalculator() {
     localStorage.removeItem(getStorageKey(activeProjectId));
   }, [activeProjectId]);
 
-  const exportPdf = useCallback(() => {
-    alert('PDF export coming soon. Results are available on-screen for now.');
-  }, []);
+  const exportPdf = useCallback(async () => {
+    if (!result) { alert('Run a calculation first.'); return; }
+    const { default: JsPDF } = await import('jspdf');
+    const doc = new JsPDF({ orientation: 'landscape', format: 'letter' });
+    const pw = doc.internal.pageSize.getWidth();
+    const ph = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    const velLimit = application === 'residential' ? 900 : 1500;
+    let y = 50;
+
+    // Title + subtitle
+    doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.setTextColor(0);
+    doc.text('Manual D — Duct Design & Sizing', pw / 2, y, { align: 'center' }); y += 20;
+    doc.setFontSize(10); doc.setFont('helvetica', 'normal'); doc.setTextColor(90);
+    doc.text(`${activeProjectName || 'Untitled Project'}  ·  ${application === 'residential' ? 'Residential' : 'Commercial'}  ·  Equal Friction Method`, pw / 2, y, { align: 'center' });
+    y += 24;
+
+    // ── System configuration summary (two columns) ──────────────────────
+    const materialLabel = MATERIAL_OPTIONS.find(m => m[0] === ductMaterial)?.[1] ?? ductMaterial;
+    const leftPairs: [string, string][] = [
+      ['Equipment CFM', `${equipmentCfm.toLocaleString()}`],
+      ['Blower ESP', `${blowerEsp} inwg`],
+      ['Filter Drop', `${filterDrop} inwg`],
+      ['Coil Drop', `${coilDrop} inwg`],
+    ];
+    const rightPairs: [string, string][] = [
+      ['Available SP', `${result.availableSpInwg} inwg`],
+      ['Design Friction Rate', `${result.designFrictionRate.toFixed(4)} inwg/100ft`],
+      ['Duct Material', materialLabel],
+      ['System Balance', result.isBalanced ? 'Balanced' : 'Needs Balancing'],
+    ];
+    doc.setTextColor(0); doc.setFontSize(9);
+    const blockTop = y;
+    leftPairs.forEach(([label, val], i) => {
+      const ly = blockTop + i * 15;
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(110); doc.text(label, margin, ly);
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(0); doc.text(val, margin + 130, ly);
+    });
+    rightPairs.forEach(([label, val], i) => {
+      const ry = blockTop + i * 15;
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(110); doc.text(label, margin + 360, ry);
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(0); doc.text(val, margin + 490, ry);
+    });
+    y = blockTop + 4 * 15 + 6;
+    doc.setTextColor(110); doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+    doc.text(`Critical path: ${result.criticalPathLength} ft TEL  ·  ${result.criticalPathPressureDrop.toFixed(4)} inwg drop`, margin, y);
+    y += 18;
+
+    // ── Duct schedule table ──────────────────────────────────────────────
+    const cols = { room: margin, cfm: 330, len: 400, tel: 475, size: 500, vel: 645, pd: pw - margin };
+    const drawHeader = () => {
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(0);
+      doc.text('Room', cols.room, y);
+      doc.text('CFM', cols.cfm, y, { align: 'right' });
+      doc.text('Len (ft)', cols.len, y, { align: 'right' });
+      doc.text('TEL (ft)', cols.tel, y, { align: 'right' });
+      doc.text('Duct Size', cols.size, y);
+      doc.text('Velocity', cols.vel, y, { align: 'right' });
+      doc.text('Drop (inwg)', cols.pd, y, { align: 'right' });
+      y += 4;
+      doc.setDrawColor(180); doc.line(margin, y, pw - margin, y); y += 12;
+    };
+    drawHeader();
+    doc.setFontSize(9);
+
+    for (const room of rooms) {
+      const run = result.runs.find(r => r.roomId === room.roomId);
+      if (!run) continue;
+
+      if (y > ph - 50) { doc.addPage(); y = 50; drawHeader(); }
+
+      const isCp = run.isCriticalPath;
+      const overVel = run.velocityFpm > velLimit;
+      doc.setFont('helvetica', isCp ? 'bold' : 'normal');
+      doc.setTextColor(isCp ? 180 : 0, isCp ? 110 : 0, isCp ? 20 : 0);
+
+      const name = (room.roomName || 'Room').slice(0, 40) + (isCp ? '  (CP)' : '');
+      const sizeStr = run.diameterIn != null
+        ? `${run.diameterIn}" rd`
+        : (run.widthIn != null && run.heightIn != null)
+          ? `${run.widthIn}x${run.heightIn}"`
+          : `${run.equivalentDiameterIn}" eq`;
+
+      doc.text(name, cols.room, y);
+      doc.text(`${room.requiredCfm}`, cols.cfm, y, { align: 'right' });
+      doc.text(`${room.actualLengthFt}`, cols.len, y, { align: 'right' });
+      doc.text(`${run.totalEquivLengthFt}`, cols.tel, y, { align: 'right' });
+      doc.text(sizeStr, cols.size, y);
+      doc.text(`${run.velocityFpm} fpm${overVel ? ' !' : ''}`, cols.vel, y, { align: 'right' });
+      doc.text(run.pressureDropInwg.toFixed(4), cols.pd, y, { align: 'right' });
+      y += 14;
+    }
+
+    doc.setTextColor(0);
+
+    // ── Balancing notes ──────────────────────────────────────────────────
+    if (result.balancingNotes.length > 0) {
+      if (y > ph - 80) { doc.addPage(); y = 50; }
+      y += 8;
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+      doc.text('Balancing Notes', margin, y); y += 14;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(60);
+      for (const note of result.balancingNotes) {
+        if (y > ph - 40) { doc.addPage(); y = 50; }
+        const lines = doc.splitTextToSize(`•  ${note}`, pw - margin * 2) as string[];
+        doc.text(lines, margin, y); y += lines.length * 11;
+      }
+      doc.setTextColor(0);
+    }
+
+    // ── Velocity-limit footnote (only if any run exceeds) ────────────────
+    if (result.runs.some(r => r.velocityFpm > velLimit)) {
+      if (y > ph - 40) { doc.addPage(); y = 50; }
+      y += 6;
+      doc.setFont('helvetica', 'italic'); doc.setFontSize(7); doc.setTextColor(180, 110, 20);
+      doc.text(`!  Velocity exceeds the ${velLimit} fpm ${application} limit — consider upsizing the run.`, margin, y);
+      doc.setTextColor(0);
+    }
+
+    // ── Footer engine stamp (matches AED / Manual J audit-trail style) ───
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(6); doc.setTextColor(150);
+    doc.text('Engine manualD-1.0  —  ACCA Manual D (Equal Friction Method)', margin, ph - 20);
+    doc.text(new Date().toISOString().slice(0, 10), pw - margin, ph - 20, { align: 'right' });
+
+    const safeName = (activeProjectName || 'Manual_D').replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '');
+    doc.save(`ManualD_DuctDesign_${safeName}_${new Date().toISOString().slice(0, 10)}.pdf`);
+  }, [result, rooms, application, equipmentCfm, blowerEsp, filterDrop, coilDrop, ductMaterial, activeProjectName]);
 
   const applyToCad = useCallback(() => {
     if (!result) { alert('Run a calculation first.'); return; }

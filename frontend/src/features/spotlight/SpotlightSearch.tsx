@@ -393,6 +393,10 @@ export default function SpotlightSearch() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        // The CAD workspace binds Ctrl+K to its own asset finder
+        // (TopNavigationBar). Yield to it there so a single keypress doesn't
+        // toggle both palettes at once.
+        if (window.location.pathname.includes('/cad')) return;
         e.preventDefault();
         setOpen(prev => !prev);
       }
@@ -462,9 +466,6 @@ export default function SpotlightSearch() {
     room: 'text-orange-400',
   };
 
-  // Group results by category for display
-  let lastCategory: ResultCategory | null = null;
-
   return (
     <div className="fixed inset-0 z-[200] flex items-start justify-center pt-[12vh] sm:pt-[15vh]">
       {/* Backdrop */}
@@ -501,8 +502,7 @@ export default function SpotlightSearch() {
           )}
 
           {results.map((result, i) => {
-            const showHeader = result.category !== lastCategory;
-            lastCategory = result.category;
+            const showHeader = i === 0 || results[i - 1].category !== result.category;
 
             return (
               <div key={result.id}>
