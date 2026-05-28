@@ -59,7 +59,7 @@ export function useAutoSave() {
       // Always save to localStorage as fallback
       try {
         localStorage.setItem(scopedKey(`hvac_cad_${projectId || 'draft'}`), JSON.stringify(data));
-      } catch {}
+      } catch { /* localStorage best-effort */ }
 
       // Save to D1 if we have a project backed by the database.
       // Locally-created projects (proj-*) only exist in localStorage — skip D1
@@ -133,7 +133,7 @@ export async function loadDrawing(projectId: string): Promise<any | null> {
   try {
     const local = localStorage.getItem(scopedKey(`hvac_cad_${projectId}`));
     if (local) return { canvasJson: JSON.parse(local), id: null };
-  } catch {}
+  } catch { /* fall through to null */ }
 
   return null;
 }

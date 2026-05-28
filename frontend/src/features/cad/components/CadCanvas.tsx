@@ -334,7 +334,7 @@ export default function CadCanvas() {
         angle,
         selectable: true,
         evented: true,
-        // @ts-ignore
+        // @ts-expect-error fabric.js objects don't type the custom 'name' prop
         name: `${PREFIX.opening}${o.id}`,
         hasControls: false,
         subTargetCheck: false,
@@ -375,7 +375,7 @@ export default function CadCanvas() {
       const group = new fabric.Group([rect, ...lines], {
         selectable: true,
         evented: true,
-        // @ts-ignore
+        // @ts-expect-error fabric.js objects don't type the custom 'name' prop
         name: `${PREFIX.hvac}${unit.id}`,
         hasControls: false,
         angle: unit.rotation,
@@ -397,7 +397,7 @@ export default function CadCanvas() {
       return new fabric.Group([circle, fan1, fan2], {
         selectable: true,
         evented: true,
-        // @ts-ignore
+        // @ts-expect-error fabric.js objects don't type the custom 'name' prop
         name: `${PREFIX.hvac}${unit.id}`,
         hasControls: false,
         angle: unit.rotation,
@@ -422,7 +422,7 @@ export default function CadCanvas() {
       return new fabric.Group([outer, inner], {
         selectable: true,
         evented: true,
-        // @ts-ignore
+        // @ts-expect-error fabric.js objects don't type the custom 'name' prop
         name: `${PREFIX.hvac}${unit.id}`,
         hasControls: false,
       });
@@ -443,7 +443,7 @@ export default function CadCanvas() {
     return new fabric.Group([rect], {
       selectable: true,
       evented: true,
-      // @ts-ignore
+      // @ts-expect-error fabric.js objects don't type the custom 'name' prop
       name: `${PREFIX.hvac}${unit.id}`,
       hasControls: false,
     });
@@ -522,7 +522,7 @@ export default function CadCanvas() {
         originY: 'center',
         selectable: true,
         evented: true,
-        // @ts-ignore
+        // @ts-expect-error fabric.js objects don't type the custom 'name' prop
         name: `${PREFIX.fitting}${f.id}`,
         hasControls: false,
       });
@@ -541,7 +541,7 @@ export default function CadCanvas() {
         angle: f.rotation,
         selectable: true,
         evented: true,
-        // @ts-ignore
+        // @ts-expect-error fabric.js objects don't type the custom 'name' prop
         name: `${PREFIX.fitting}${f.id}`,
         hasControls: false,
       });
@@ -575,7 +575,7 @@ export default function CadCanvas() {
       originY: 'center',
       selectable: true,
       evented: true,
-      // @ts-ignore
+      // @ts-expect-error fabric.js objects don't type the custom 'name' prop
       name: `${PREFIX.fitting}${f.id}`,
       hasControls: false,
     });

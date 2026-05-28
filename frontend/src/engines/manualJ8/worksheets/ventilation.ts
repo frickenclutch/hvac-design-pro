@@ -44,7 +44,7 @@ export function calculateVentilation(
   c: DesignConditions,
 ): VentilationResult {
   let latLoss: number, latGain: number, vGrains: number;
-  let heat: number, sens: number, lat: number;
+  let heat: number, sens: number;
 
   if (v.hasHeatRecovery) {
     const serH = v.serHeating ?? 0;
@@ -63,7 +63,7 @@ export function calculateVentilation(
     sens = 1.1 * c.ACF * v.vcfm * c.CTD;
   }
 
-  lat = 0.68 * c.ACF * v.vcfm * vGrains;
+  const lat = 0.68 * c.ACF * v.vcfm * vGrains;
 
   return {
     latLoss,

@@ -690,7 +690,6 @@ function DuctSegmentPanel({ duct, onUpdate }: { duct: DuctSegment; onUpdate: (pa
   const dy = duct.y2 - duct.y1;
   const lengthFt = (Math.sqrt(dx * dx + dy * dy) / pxPerFt).toFixed(2);
 
-  const [_localDiameter, _setLocalDiameter] = useState((duct.diameterIn ?? 12).toString());
   const [localWidth, setLocalWidth] = useState((duct.widthIn ?? 12).toString());
   const [localHeight, setLocalHeight] = useState((duct.heightIn ?? 8).toString());
   const [localCfm, setLocalCfm] = useState((duct.cfm ?? 0).toString());

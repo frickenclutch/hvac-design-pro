@@ -66,7 +66,7 @@ function InviteAcceptance({ token }: { token: string }) {
         } else {
           setPreview(body as InvitePreview);
         }
-      } catch (e) {
+      } catch {
         if (cancelled) return;
         setPreviewError('Unable to reach the server. Please check your connection.');
       } finally {
