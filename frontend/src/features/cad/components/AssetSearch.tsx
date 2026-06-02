@@ -215,14 +215,14 @@ export default function AssetSearch({ isOpen, onClose }: { isOpen: boolean; onCl
         const c = useCadStore.getState().canvas;
         if (!c) return;
         const objects = c.getObjects();
-        const target = objects.find((obj: any) => {
-          const n = obj.name as string | undefined;
+        const target = objects.find((obj) => {
+          const n = obj.name;
           if (!n) return false;
           return n === result.fabricId || n.endsWith(result.id);
         });
         if (target) {
           c.setActiveObject(target);
-          useCadStore.getState().setSelectedObject(target as any);
+          useCadStore.getState().setSelectedObject(target);
 
           // Flash/pulse highlight
           const origOpacity = target.opacity ?? 1;

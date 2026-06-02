@@ -244,8 +244,8 @@ export interface Layer {
 export interface HistoryEntry {
   type: string;
   floorId: string;
-  before: any;
-  after: any;
+  before: Partial<Floor>;
+  after: Partial<Floor>;
   timestamp: number;
 }
 
@@ -259,6 +259,30 @@ export interface DrawingInfo {
   lengthFt: number;
   screenX: number;
   screenY: number;
+}
+
+// ── Serialized drawing ────────────────────────────────────────────────────────────
+// The canvas payload that serializeDrawing() emits and loadDrawing() reads —
+// persisted to localStorage and synced to D1 as the drawing's canvas_json.
+// loadDrawing() takes incoming data as `unknown` and defends every field, so
+// older/newer snapshots still hydrate.
+export interface SerializedDrawing {
+  floors: Floor[];
+  activeFloorId: string;
+  layers: Layer[];
+  projectScale: ProjectScale;
+  gridSnapEnabled: boolean;
+  zoom: number;
+  panOffset: { x: number; y: number };
+  canvasBgColor: string;
+  wallColor: string;
+  openingColor: string;
+  hvacAccentColor: string;
+  panelToolbox: boolean;
+  panelProperties: boolean;
+  panelFloors: boolean;
+  panelNavBar: boolean;
+  ghostingEnabled: boolean;
 }
 
 // ── Defaults ────────────────────────────────────────────────────────────────────
@@ -480,8 +504,8 @@ interface CadState {
   setPreviewMode: (on: boolean) => void;
 
   // ── Serialize / Deserialize ─────────────────────────────────────────────────
-  serializeDrawing: () => object;
-  loadDrawing: (data: any) => void;
+  serializeDrawing: () => SerializedDrawing;
+  loadDrawing: (data: unknown) => void;
 }
 
 // ── Store ───────────────────────────────────────────────────────────────────────
@@ -539,8 +563,8 @@ export const useCadStore = create<CadState>((set, get) => {
     setPanelFloors: (show) => set({ panelFloors: show }),
     setPanelNavBar: (show) => set({ panelNavBar: show }),
     togglePanel: (panel) => set((s) => {
-      const key = `panel${panel.charAt(0).toUpperCase() + panel.slice(1)}` as keyof typeof s;
-      return { [key]: !s[key] } as any;
+      const key = `panel${panel.charAt(0).toUpperCase() + panel.slice(1)}` as 'panelToolbox' | 'panelProperties' | 'panelFloors' | 'panelNavBar';
+      return { [key]: !s[key] } as Partial<CadState>;
     }),
     collapseAllPanels: () => set({ panelToolbox: false, panelProperties: false, panelFloors: false, panelNavBar: false }),
     expandAllPanels: () => set({ panelToolbox: true, panelProperties: true, panelFloors: true, panelNavBar: true }),
@@ -1050,10 +1074,14 @@ export const useCadStore = create<CadState>((set, get) => {
       };
     },
 
-    loadDrawing: (data: any) => {
-      if (!data) return;
+    loadDrawing: (data: unknown) => {
+      if (!data || typeof data !== 'object') return;
+      // Trust boundary: `data` is deserialized JSON (localStorage or the D1
+      // canvas payload). We've confirmed it's an object; read it through the
+      // serialized shape and defend every field for backwards/forwards compat.
+      const d = data as Partial<SerializedDrawing>;
       // Ensure all floors have required arrays (backwards compat)
-      const floors = (data.floors ?? [createDefaultFloor()]).map((f: any) => ({
+      const floors: Floor[] = (d.floors ?? [createDefaultFloor()]).map((f) => ({
         ...f,
         underlays: f.underlays ?? [],
         ductSegments: f.ductSegments ?? [],
@@ -1074,22 +1102,22 @@ export const useCadStore = create<CadState>((set, get) => {
 
       set({
         floors,
-        activeFloorId: data.activeFloorId ?? data.floors?.[0]?.id ?? 'floor-1',
-        layers: data.layers ?? [...DEFAULT_LAYERS],
-        projectScale: data.projectScale ?? { pxPerFt: 40 },
-        gridSnapEnabled: data.gridSnapEnabled ?? true,
-        zoom: data.zoom ?? 1,
-        panOffset: data.panOffset ?? { x: 0, y: 0 },
-        canvasBgColor: data.canvasBgColor ?? '#0f172a',
-        wallColor: data.wallColor ?? '#34d399',
-        openingColor: data.openingColor ?? '#38bdf8',
-        hvacAccentColor: data.hvacAccentColor ?? '#22d3ee',
+        activeFloorId: d.activeFloorId ?? d.floors?.[0]?.id ?? 'floor-1',
+        layers: d.layers ?? [...DEFAULT_LAYERS],
+        projectScale: d.projectScale ?? { pxPerFt: 40 },
+        gridSnapEnabled: d.gridSnapEnabled ?? true,
+        zoom: d.zoom ?? 1,
+        panOffset: d.panOffset ?? { x: 0, y: 0 },
+        canvasBgColor: d.canvasBgColor ?? '#0f172a',
+        wallColor: d.wallColor ?? '#34d399',
+        openingColor: d.openingColor ?? '#38bdf8',
+        hvacAccentColor: d.hvacAccentColor ?? '#22d3ee',
         // Restore workspace UI state
-        panelToolbox: data.panelToolbox ?? true,
-        panelProperties: data.panelProperties ?? true,
-        panelFloors: data.panelFloors ?? true,
-        panelNavBar: data.panelNavBar ?? true,
-        ghostingEnabled: data.ghostingEnabled ?? true,
+        panelToolbox: d.panelToolbox ?? true,
+        panelProperties: d.panelProperties ?? true,
+        panelFloors: d.panelFloors ?? true,
+        panelNavBar: d.panelNavBar ?? true,
+        ghostingEnabled: d.ghostingEnabled ?? true,
         isDirty: false,
         undoStack: [],
         redoStack: [],
@@ -1105,9 +1133,9 @@ const CAD_STORAGE_KEY_BASE = 'hvac_cad_drawing';
 try {
   const saved = localStorage.getItem(scopedKey(CAD_STORAGE_KEY_BASE));
   if (saved) {
-    const data = JSON.parse(saved);
+    const data = JSON.parse(saved) as Partial<SerializedDrawing>;
     const hasGeometry = data.floors?.some(
-      (f: any) => f.walls?.length > 0 || f.rooms?.length > 0 || f.openings?.length > 0
+      (f) => f.walls?.length > 0 || f.rooms?.length > 0 || f.openings?.length > 0
     );
     // Restore geometry if present, or at least restore workspace UI state
     const hasWorkspaceState = data.panelToolbox !== undefined || data.zoom !== undefined;

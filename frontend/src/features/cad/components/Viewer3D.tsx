@@ -46,17 +46,27 @@ const WALL_COLORS: Record<string, number> = {
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-function wallLength(w: WallSegment, pxPerFt: number): number {
+// These only need a segment's two endpoints. Typing the param as the minimal
+// `Seg2D` (which WallSegment, PipeSegment, DuctSegment and bare clipped
+// segments all satisfy) lets walls, pipes and ducts share them without casts.
+interface Seg2D {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+function wallLength(w: Seg2D, pxPerFt: number): number {
   const dx = (w.x2 - w.x1) / pxPerFt;
   const dy = (w.y2 - w.y1) / pxPerFt;
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-function wallAngle(w: WallSegment): number {
+function wallAngle(w: Seg2D): number {
   return Math.atan2(w.y2 - w.y1, w.x2 - w.x1);
 }
 
-function wallCenter(w: WallSegment, pxPerFt: number): [number, number] {
+function wallCenter(w: Seg2D, pxPerFt: number): [number, number] {
   return [
     ((w.x1 + w.x2) / 2) / pxPerFt,
     ((w.y1 + w.y2) / 2) / pxPerFt,
@@ -466,10 +476,10 @@ export default function Viewer3D({ isOpen, onClose }: Viewer3DProps) {
               : { x1: pipe.x1, y1: pipe.y1, x2: pipe.x2, y2: pipe.y2 };
             if (!clipped) return; // pipe lies entirely outside the floor envelope
             const drawSeg = { x1: clipped.x1, y1: clipped.y1, x2: clipped.x2, y2: clipped.y2 };
-            const len = wallLength(drawSeg as any, pxPerFt);
+            const len = wallLength(drawSeg, pxPerFt);
             if (len < 0.01) return;
-            const angle = wallAngle(drawSeg as any);
-            const [cx, cz] = wallCenter(drawSeg as any, pxPerFt);
+            const angle = wallAngle(drawSeg);
+            const [cx, cz] = wallCenter(drawSeg, pxPerFt);
             
             // Mounting height: default to floor level for now, or HVAC unit height
             const y = floorOffset + 0.1; // slightly above floor to avoid z-fighting
@@ -515,10 +525,10 @@ export default function Viewer3D({ isOpen, onClose }: Viewer3DProps) {
               : { x1: duct.x1, y1: duct.y1, x2: duct.x2, y2: duct.y2 };
             if (!ductClipped) return;
             const ductSeg = { x1: ductClipped.x1, y1: ductClipped.y1, x2: ductClipped.x2, y2: ductClipped.y2 };
-            const len = wallLength(ductSeg as any, pxPerFt);
+            const len = wallLength(ductSeg, pxPerFt);
             if (len < 0.01) return;
-            const angle = wallAngle(ductSeg as any);
-            const [cx, cz] = wallCenter(ductSeg as any, pxPerFt);
+            const angle = wallAngle(ductSeg);
+            const [cx, cz] = wallCenter(ductSeg, pxPerFt);
 
             // Ducts are hung near ceiling
             const y = floorOffset + floor.heightFt - 1.5;

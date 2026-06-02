@@ -11,6 +11,9 @@ name: CI — Type + Cert Gate
 #
 #   This workflow gates exactly the artifacts that ship:
 #     - workers/  : tsc --noEmit (Cloudflare Worker — the API)
+#                 + tenant-scoping guard (D1 has no RLS — this is the
+#                   machine check that every org-owned query is org_id-scoped;
+#                   see workers/scripts/check-tenant-scoping.mjs)
 #     - frontend/ : tsc -b + vitest run (the app + the cert engine)
 #
 #   It deliberately does NOT deploy. Frontend auto-deploys via
@@ -51,6 +54,21 @@ jobs:
       - name: Type-check worker
         working-directory: workers
         run: npx tsc --noEmit -p tsconfig.json
+
+  tenant-scoping:
+    name: Worker — tenant-scoping guard
+    runs-on: ubuntu-latest
+    # D1 has no row-level security. This is the app-layer backstop: every
+    # D1 query touching an org-owned table must be scoped by org_id (or
+    # carry a documented inline waiver). Zero deps — no npm install needed.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Tenant-scoping guard
+        working-directory: workers
+        run: node scripts/check-tenant-scoping.mjs
 
   frontend-gate:
     name: Frontend — tsc + cert vitest

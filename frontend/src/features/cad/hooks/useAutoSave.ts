@@ -98,8 +98,9 @@ export function useAutoSave() {
           });
           markSaved(result.id);
         }
-      } catch (err: any) {
-        console.warn('Auto-save D1 sync failed (localStorage backup is safe):', err.message);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn('Auto-save D1 sync failed (localStorage backup is safe):', message);
         toast.warning('Cloud sync failed. Your work is saved locally.');
         // D1 save failed but localStorage already has the data — mark as saved
         // so we don't show an error or retry in an infinite loop.
@@ -113,7 +114,7 @@ export function useAutoSave() {
   }, [isDirty, isSaving, drawingId, projectId, markSaved, serializeDrawing, setSaveError, setSaving]);
 }
 
-export async function loadDrawing(projectId: string): Promise<any | null> {
+export async function loadDrawing(projectId: string): Promise<{ canvasJson: unknown; id: string | null } | null> {
   // Only attempt D1 API when a real backend URL is configured.
   // Without it, api.ts falls back to a hardcoded Workers URL that may
   // return 401 and trigger a hard redirect to /login — breaking navigation.

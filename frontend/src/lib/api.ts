@@ -1,4 +1,5 @@
 import { toast } from '../stores/useToastStore';
+import type { User, Organisation } from '../features/auth/store/useAuthStore';
 
 // API base URL — set VITE_API_BASE_URL in environment (Cloudflare Pages / .env.local)
 // When unset, API calls go to same origin (Pages functions or local dev proxy)
@@ -49,19 +50,126 @@ export interface AuditLogQuery {
   cursor?: string;
 }
 
+// ── Server response row shapes ───────────────────────────────────────────
+// These mirror the columns each Worker route SELECTs — snake_case, straight
+// from D1 — NOT the camelCase frontend domain models (those live in the
+// stores). Opaque JSON payloads (canvas state, calc inputs/outputs) are
+// typed `unknown`: callers that need the inner shape narrow at the point of
+// use rather than the client pretending to know it.
+
+export interface ApiProjectRow {
+  id: string;
+  org_id: string;
+  name: string;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  country: string | null;
+  climate_zone: string | null;
+  standard: string | null;
+  project_type: string;
+  status: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Present on the list query (LEFT JOIN users); absent on single-row reads. */
+  creator_name?: string | null;
+  /** Migration 0004 community-sharing fields; absent on older backend builds. */
+  is_public?: number | boolean;
+  share_summary?: string | null;
+}
+
+export interface ApiCalculationRow {
+  id: string;
+  project_id: string;
+  org_id: string;
+  calc_type: string;
+  version: number;
+  inputs: string;            // JSON string exactly as stored in D1
+  outputs: string | null;    // JSON string exactly as stored in D1
+  status: string;
+  engine_version: string;
+  computed_by: string | null;
+  computed_at: string | null;
+  duration_ms: number | null;
+  created_at: string;
+}
+
+/** getCalculation parses inputs/outputs before returning them. */
+export interface ApiCalculationDetail extends Omit<ApiCalculationRow, 'inputs' | 'outputs'> {
+  inputs: unknown;
+  outputs: unknown;
+}
+
+export interface ApiFileRow {
+  id: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  purpose: string;
+  created_at: string;
+}
+
+export interface ApiDrawingSummary {
+  id: string;
+  name: string;
+  floor_index: number;
+  thumbnail_key: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** getDrawing returns the full cad_drawings row plus the parsed canvas. */
+export interface ApiDrawingDetail {
+  id: string;
+  project_id: string;
+  org_id: string;
+  name: string;
+  floor_index: number;
+  canvas_json: string;
+  thumbnail_key: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  canvasJson: unknown;
+}
+
+export interface UpdateProjectInput {
+  name?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  climateZone?: string;
+  standard?: string;
+  projectType?: string;
+  status?: string;
+}
+
 const MAX_RETRIES = 2;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 class ApiClient {
   private token: string | null = null;
+  private refreshInFlight: Promise<boolean> | null = null;
 
   setToken(token: string | null) {
     this.token = token;
     if (token) {
       localStorage.setItem('hvac_session_token', token);
     } else {
+      // Clearing the access token tears down the whole credential set.
       localStorage.removeItem('hvac_session_token');
+      localStorage.removeItem('hvac_refresh_token');
     }
+  }
+
+  /** Persist a freshly-issued access + refresh pair (login or rotation). */
+  setTokens(accessToken: string, refreshToken: string) {
+    this.token = accessToken;
+    localStorage.setItem('hvac_session_token', accessToken);
+    localStorage.setItem('hvac_refresh_token', refreshToken);
   }
 
   getToken(): string | null {
@@ -71,32 +179,77 @@ class ApiClient {
     return this.token;
   }
 
+  getRefreshToken(): string | null {
+    return localStorage.getItem('hvac_refresh_token');
+  }
+
+  /**
+   * Exchange the stored refresh token for a fresh access + refresh pair.
+   * Concurrent callers share one in-flight request, so a burst of 401s
+   * triggers a single rotation (not a stampede that would trip the server's
+   * reuse-detection). Returns false when there's no refresh token or the
+   * server rejects it — the caller then clears the session.
+   */
+  async refreshSession(): Promise<boolean> {
+    if (this.refreshInFlight) return this.refreshInFlight;
+    this.refreshInFlight = (async () => {
+      const refreshToken = this.getRefreshToken();
+      if (!refreshToken) return false;
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken }),
+        });
+        if (!res.ok) return false;
+        const data = await res.json() as { token?: string; refreshToken?: string };
+        if (!data.token || !data.refreshToken) return false;
+        this.setTokens(data.token, data.refreshToken);
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    try {
+      return await this.refreshInFlight;
+    } finally {
+      this.refreshInFlight = null;
+    }
+  }
+
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
-    const token = this.getToken();
-    const headers: Record<string, string> = {
-      ...(options.headers as Record<string, string> || {}),
-    };
-
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    // Don't set Content-Type for FormData (browser sets it with boundary)
-    if (!(options.body instanceof FormData)) {
-      headers['Content-Type'] = 'application/json';
-    }
-
     let lastError: Error | null = null;
+    let triedRefresh = false;
+    const isAuthPath = path.startsWith('/api/auth/');
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      // Build headers fresh each iteration so a silent refresh's rotated
+      // access token is picked up on the retry.
+      const token = this.getToken();
+      const headers: Record<string, string> = {
+        ...(options.headers as Record<string, string> || {}),
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      // Don't set Content-Type for FormData (browser sets it with boundary)
+      if (!(options.body instanceof FormData)) {
+        headers['Content-Type'] = 'application/json';
+      }
+
       try {
         const res = await fetch(`${API_BASE}${path}`, {
           ...options,
           headers,
         });
 
-        // 401 — no retry, clear session immediately
+        // 401 — try one silent token refresh + retry, then clear the session.
         if (res.status === 401) {
+          if (!triedRefresh && !isAuthPath) {
+            triedRefresh = true;
+            const refreshed = await this.refreshSession();
+            if (refreshed) continue; // retry with the rotated access token
+          }
           this.setToken(null);
           if (!window.location.pathname.includes('/login') && window.location.pathname !== '/') {
             toast.error('Session expired. Please sign in again.');
@@ -125,14 +278,17 @@ class ApiClient {
         }
 
         return await res.json() as T;
-      } catch (err: any) {
-        // If it's our own thrown error (401, 4xx, or final 5xx), re-throw
-        if (err === lastError || err.message === 'Session expired' || (err instanceof Error && err.message !== 'Failed to fetch')) {
-          throw err;
+      } catch (err: unknown) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        // If it's our own thrown error (401, 4xx, or final 5xx), re-throw.
+        // Only a genuine network failure ('Failed to fetch') falls through
+        // to the retry path below.
+        if (error === lastError || error.message === 'Session expired' || error.message !== 'Failed to fetch') {
+          throw error;
         }
 
         // Network error — retry if attempts remain
-        lastError = err;
+        lastError = error;
         if (attempt < MAX_RETRIES) {
           if (attempt === 0) toast.warning('Connection issue, retrying...');
           await sleep(1000 * Math.pow(2, attempt));
@@ -150,14 +306,14 @@ class ApiClient {
 
   // Auth
   async register(data: { email: string; password: string; firstName: string; lastName: string; orgName?: string; orgType?: string; regionCode?: string }) {
-    return this.request<{ token: string; user: any; organisation: any }>('/api/auth/register', {
+    return this.request<{ token: string; user: User; organisation: Organisation }>('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
   async login(email: string, password: string) {
-    return this.request<{ token: string; user: any; organisation: any }>('/api/auth/login', {
+    return this.request<{ token: string; user: User; organisation: Organisation }>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
@@ -172,27 +328,27 @@ class ApiClient {
   }
 
   async getMe() {
-    return this.request<{ user: any; organisation: any }>('/api/auth/me');
+    return this.request<{ user: User; organisation: Organisation }>('/api/auth/me');
   }
 
   // Projects
   async listProjects() {
-    return this.request<{ projects: any[] }>('/api/projects');
+    return this.request<{ projects: ApiProjectRow[] }>('/api/projects');
   }
 
   async getProject(id: string) {
-    return this.request<{ project: any }>(`/api/projects/${id}`);
+    return this.request<{ project: ApiProjectRow }>(`/api/projects/${id}`);
   }
 
   async createProject(data: { name: string; address?: string; city?: string; state?: string; zip?: string; climateZone?: string; standard?: string }) {
-    return this.request<{ project: any }>('/api/projects', {
+    return this.request<{ project: ApiProjectRow }>('/api/projects', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
-  async updateProject(id: string, data: any) {
-    return this.request<{ project: any }>(`/api/projects/${id}`, {
+  async updateProject(id: string, data: UpdateProjectInput) {
+    return this.request<{ project: ApiProjectRow }>(`/api/projects/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
@@ -204,10 +360,10 @@ class ApiClient {
 
   // Calculations
   async listCalculations(projectId: string) {
-    return this.request<{ calculations: any[] }>(`/api/calculations/project/${projectId}`);
+    return this.request<{ calculations: ApiCalculationRow[] }>(`/api/calculations/project/${projectId}`);
   }
 
-  async saveCalculation(data: { projectId: string; calcType: string; inputs: any; outputs: any; engineVersion?: string; durationMs?: number }) {
+  async saveCalculation(data: { projectId: string; calcType: string; inputs: unknown; outputs: unknown; engineVersion?: string; durationMs?: number }) {
     return this.request<{ id: string; version: number }>('/api/calculations', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -215,7 +371,7 @@ class ApiClient {
   }
 
   async getCalculation(id: string) {
-    return this.request<any>(`/api/calculations/${id}`);
+    return this.request<ApiCalculationDetail>(`/api/calculations/${id}`);
   }
 
   // File uploads (R2)
@@ -237,7 +393,7 @@ class ApiClient {
   }
 
   async listProjectFiles(projectId: string) {
-    return this.request<{ files: any[] }>(`/api/uploads/project/${projectId}`);
+    return this.request<{ files: ApiFileRow[] }>(`/api/uploads/project/${projectId}`);
   }
 
   async deleteFile(id: string) {
@@ -246,21 +402,21 @@ class ApiClient {
 
   // CAD drawings
   async listDrawings(projectId: string) {
-    return this.request<{ drawings: any[] }>(`/api/cad/project/${projectId}`);
+    return this.request<{ drawings: ApiDrawingSummary[] }>(`/api/cad/project/${projectId}`);
   }
 
   async getDrawing(id: string) {
-    return this.request<any>(`/api/cad/${id}`);
+    return this.request<ApiDrawingDetail>(`/api/cad/${id}`);
   }
 
-  async saveDrawing(data: { projectId: string; name?: string; floorIndex?: number; canvasJson: any; thumbnailDataUrl?: string }) {
+  async saveDrawing(data: { projectId: string; name?: string; floorIndex?: number; canvasJson: unknown; thumbnailDataUrl?: string }) {
     return this.request<{ id: string; versionNumber?: number }>('/api/cad', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
-  async updateDrawing(id: string, data: { canvasJson: any; name?: string; thumbnailDataUrl?: string }) {
+  async updateDrawing(id: string, data: { canvasJson: unknown; name?: string; thumbnailDataUrl?: string }) {
     return this.request<{ ok: boolean; versionNumber?: number; audited?: boolean }>(`/api/cad/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),

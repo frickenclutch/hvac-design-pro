@@ -14,7 +14,7 @@ import VersionHistoryModal from '../features/cad/components/VersionHistoryModal'
 import VersionPreviewBanner from '../features/cad/components/VersionPreviewBanner';
 import { api } from '../lib/api';
 import { useAutoSave, loadDrawing } from '../features/cad/hooks/useAutoSave';
-import { useCadStore } from '../features/cad/store/useCadStore';
+import { useCadStore, type SerializedDrawing } from '../features/cad/store/useCadStore';
 import { useAccessPolicyStore } from '../stores/useAccessPolicyStore';
 import Mason from '../components/Mason';
 import ErrorBoundary from '../components/ErrorBoundary';
@@ -161,9 +161,9 @@ export default function CadWorkspace() {
         try {
           const saved = localStorage.getItem(scopedKey('hvac_cad_drawing'));
           if (saved) {
-            const data = JSON.parse(saved);
+            const data = JSON.parse(saved) as Partial<SerializedDrawing>;
             const savedHasGeometry = data.floors?.some(
-              (f: any) => (f.walls?.length || 0) > 0 || (f.rooms?.length || 0) > 0
+              (f) => (f.walls?.length || 0) > 0 || (f.rooms?.length || 0) > 0
             );
             if (savedHasGeometry) {
               store.loadDrawing(data);

@@ -144,13 +144,13 @@ export default function BuildingScience({
   const selectOnCanvas = useCallback((fabricPrefix: string, entityId: string) => {
     const canvas = useCadStore.getState().canvas;
     if (!canvas) return;
-    const target = canvas.getObjects().find((obj: any) => {
-      const n = obj.name as string | undefined;
+    const target = canvas.getObjects().find((obj) => {
+      const n = obj.name;
       return n === `${fabricPrefix}${entityId}` || n?.endsWith(entityId);
     });
     if (target) {
       canvas.setActiveObject(target);
-      useCadStore.getState().setSelectedObject(target as any);
+      useCadStore.getState().setSelectedObject(target);
       canvas.requestRenderAll();
     }
   }, []);

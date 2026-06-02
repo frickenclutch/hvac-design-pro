@@ -77,7 +77,7 @@ projectRoutes.post('/', async (c) => {
     },
   });
 
-  const project = await c.env.DB.prepare('SELECT * FROM projects WHERE id = ?').bind(id).first();
+  const project = await c.env.DB.prepare('SELECT * FROM projects WHERE id = ? AND org_id = ?').bind(id, user.orgId).first();
   return c.json({ project }, 201);
 });
 

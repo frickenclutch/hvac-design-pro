@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { registerAuthGetter } from '../../../utils/storage';
+import { api } from '../../../lib/api';
 
 export type UserRole = 'admin' | 'engineer' | 'tech' | 'viewer';
 export type OrgType = 'individual' | 'company' | 'municipality';
@@ -50,19 +51,24 @@ export interface Organisation {
 
 // ── Persistence ────────────────────────────────────────────────────────────────
 const TOKEN_KEY = 'hvac_session_token';
+const REFRESH_KEY = 'hvac_refresh_token';
 const USER_KEY = 'hvac_session_user';
 const ORG_KEY = 'hvac_session_org';
 
-function persistSession(token: string, user: User, org: Organisation) {
+function persistSession(token: string, user: User, org: Organisation, refreshToken?: string) {
   try {
     localStorage.setItem(TOKEN_KEY, token);
     localStorage.setItem(USER_KEY, JSON.stringify(user));
     localStorage.setItem(ORG_KEY, JSON.stringify(org));
+    // Only overwrite the refresh token when a new one is issued (login /
+    // rotation). Re-validation via /me supplies none — preserve the existing.
+    if (refreshToken) localStorage.setItem(REFRESH_KEY, refreshToken);
   } catch { /* storage full */ }
 }
 
 function clearPersistedSession() {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_KEY);
   localStorage.removeItem(USER_KEY);
   localStorage.removeItem(ORG_KEY);
 }
@@ -158,7 +164,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   login: async (email, password) => {
     set({ authLoading: true, authError: null });
 
-    const { data, error, status } = await apiFetch<{ token?: string; user?: User; organisation?: Organisation; pendingVerification?: boolean; email?: string }>('/api/auth/login', {
+    const { data, error, status } = await apiFetch<{ token?: string; refreshToken?: string; user?: User; organisation?: Organisation; pendingVerification?: boolean; email?: string }>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
@@ -179,7 +185,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return;
     }
 
-    persistSession(data.token, data.user!, data.organisation!);
+    persistSession(data.token, data.user!, data.organisation!, data.refreshToken);
     set({
       user: data.user!,
       organisation: data.organisation!,
@@ -195,7 +201,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   register: async (data) => {
     set({ authLoading: true, authError: null });
 
-    const { data: resp, error } = await apiFetch<{ token?: string; user?: User; organisation?: Organisation; pendingVerification?: boolean; email?: string }>('/api/auth/register', {
+    const { data: resp, error } = await apiFetch<{ token?: string; refreshToken?: string; user?: User; organisation?: Organisation; pendingVerification?: boolean; email?: string }>('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -218,7 +224,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     // Fallback: if server returns a full session (shouldn't happen but be safe)
     if (resp?.token && resp.user && resp.organisation) {
-      persistSession(resp.token, resp.user, resp.organisation);
+      persistSession(resp.token, resp.user, resp.organisation, resp.refreshToken);
       set({
         user: resp.user,
         organisation: resp.organisation,
@@ -233,7 +239,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   verifyEmail: async (email, code) => {
     set({ authLoading: true, authError: null });
 
-    const { data, error } = await apiFetch<{ token: string; user: User; organisation: Organisation }>('/api/auth/verify-email', {
+    const { data, error } = await apiFetch<{ token: string; refreshToken?: string; user: User; organisation: Organisation }>('/api/auth/verify-email', {
       method: 'POST',
       body: JSON.stringify({ email, code }),
     });
@@ -243,7 +249,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return;
     }
 
-    persistSession(data.token, data.user, data.organisation);
+    persistSession(data.token, data.user, data.organisation, data.refreshToken);
     set({
       user: data.user,
       organisation: data.organisation,
@@ -351,7 +357,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       ? '/api/auth/sso/cloudflare/callback'
       : '/api/auth/sso/microsoft/callback';
 
-    const { data, error } = await apiFetch<{ token: string; user: User; organisation: Organisation }>(callbackUrl, {
+    const { data, error } = await apiFetch<{ token: string; refreshToken?: string; user: User; organisation: Organisation }>(callbackUrl, {
       method: 'POST',
       body: JSON.stringify({ code }),
     });
@@ -361,7 +367,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return;
     }
 
-    persistSession(data.token, data.user, data.organisation);
+    persistSession(data.token, data.user, data.organisation, data.refreshToken);
     set({
       user: data.user,
       organisation: data.organisation,
@@ -377,7 +383,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   redeemInvite: async (token, data) => {
     set({ authLoading: true, authError: null });
 
-    const { data: resp, error } = await apiFetch<{ token: string; user: User; organisation: Organisation }>(
+    const { data: resp, error } = await apiFetch<{ token: string; refreshToken?: string; user: User; organisation: Organisation }>(
       `/api/auth/invite/${encodeURIComponent(token)}/redeem`,
       { method: 'POST', body: JSON.stringify(data) },
     );
@@ -417,11 +423,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const saved = loadPersistedSession();
     if (!saved) return;
 
-    // Validate token with backend
-    const { data, error } = await apiFetch<{ user: User; organisation: Organisation }>('/api/auth/me');
+    // Validate the access token. With short-lived access tokens it may have
+    // expired since the last visit — a 401 triggers one silent refresh (using
+    // the stored refresh token) before we give up on the session.
+    let { data, error, status } = await apiFetch<{ user: User; organisation: Organisation }>('/api/auth/me');
+    if (status === 401) {
+      const refreshed = await api.refreshSession();
+      if (refreshed) {
+        ({ data, error, status } = await apiFetch<{ user: User; organisation: Organisation }>('/api/auth/me'));
+      }
+    }
     if (error || !data) {
-      // Token expired or server error → clear session and require re-login
-      // Network errors: keep session alive (offline-capable PWA)
+      // Real auth failure (a 401 that refresh couldn't rescue) → clear.
+      // Network errors keep the session alive (offline-capable PWA).
       if (error && !error.includes('Unable to reach server')) {
         clearPersistedSession();
         set({ user: null, organisation: null, token: null, isAuthenticated: false });
@@ -429,8 +443,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return;
     }
 
-    persistSession(saved.token, data.user, data.organisation);
-    set({ user: data.user, organisation: data.organisation, isAuthenticated: true });
+    // Use the current (possibly just-refreshed) access token, not the stale
+    // one loaded at the top of this function.
+    const currentToken = localStorage.getItem(TOKEN_KEY) ?? saved.token;
+    persistSession(currentToken, data.user, data.organisation);
+    set({ user: data.user, organisation: data.organisation, token: currentToken, isAuthenticated: true });
   },
 
   clearError: () => set({ authError: null }),

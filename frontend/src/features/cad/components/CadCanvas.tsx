@@ -4,6 +4,18 @@ import { useCadStore } from '../store/useCadStore';
 import type { WallMaterial, WallSegment, Opening, HvacUnit, PipeMaterial, PipeSegment, Annotation, UnderlayImage, DuctSegment, DuctFitting, DuctShape, DuctMaterial, DuctSide, DuctRole, FittingType } from '../store/useCadStore';
 import { showSnapPulse, showPlacementConfirm, triggerHapticVibration } from '../utils/haptics';
 
+// Fabric objects in this app carry a custom `name` tag — the PREFIX-encoded id
+// that maps a canvas object back to its store geometry (wall-, opening-, etc.).
+// Fabric v6+ dropped `name` from its base type, so we re-declare it here. Module
+// augmentation is global: every FabricObject / fabric.Object across the app
+// (including the store's `selectedObject`) gains the typed, optional field —
+// which removes a pile of `(obj as any).name` casts.
+declare module 'fabric' {
+  interface FabricObject {
+    name?: string;
+  }
+}
+
 // ── Drawing state machine ──────────────────────────────────────────────────────
 interface DrawingState {
   active: boolean;
@@ -633,7 +645,7 @@ export default function CadCanvas() {
 
     // Remove all existing CAD objects (keep grid and the active drawing-preview ghost)
     const toRemove = canvas.getObjects().filter(obj => {
-      const n = (obj as any).name as string | undefined;
+      const n = obj.name;
       if (!n) return false;
       return n.startsWith(PREFIX.wall) || n.startsWith(PREFIX.opening) ||
              n.startsWith(PREFIX.hvac) || n.startsWith(PREFIX.pipe) ||
@@ -809,9 +821,9 @@ export default function CadCanvas() {
     // Restore previous selection if the selected object was recreated
     const prevSelected = state.selectedObject;
     if (prevSelected) {
-      const prevName = (prevSelected as any).name as string | undefined;
+      const prevName = prevSelected.name;
       if (prevName) {
-        const restored = canvas.getObjects().find(o => (o as any).name === prevName);
+        const restored = canvas.getObjects().find(o => o.name === prevName);
         if (restored) {
           canvas.setActiveObject(restored);
           useCadStore.getState().setSelectedObject(restored);
@@ -1453,7 +1465,7 @@ export default function CadCanvas() {
           drawing.startX = snapped.x;
           drawing.startY = snapped.y;
           drawing.ghostLine = createGhostLine(snapped.x, snapped.y);
-          (drawing.ghostLine as any).set({ stroke: '#f59e0b', strokeDashArray: [4, 3] });
+          drawing.ghostLine.set({ stroke: '#f59e0b', strokeDashArray: [4, 3] });
         } else {
           if (drawing.ghostLine) canvas.remove(drawing.ghostLine);
           drawing.ghostLine = null;
@@ -1509,7 +1521,7 @@ export default function CadCanvas() {
 
       // ─ Select mode ─────────────────────────────────────────────────
       if (tool === 'select') {
-        const target = opt.target as any;
+        const target = opt.target;
         if (target && target.name?.startsWith('wall-')) {
           state.setSelectedWallId(target.name);
         } else if (!target) {
@@ -1703,12 +1715,12 @@ export default function CadCanvas() {
 
     // ── Selection syncing ────────────────────────────────────────────────
     canvas.on('selection:created', (e) => {
-      const obj = (e.selected?.[0] as any) ?? null;
+      const obj = e.selected?.[0] ?? null;
       setSelectedObject(obj);
       if (obj?.name?.startsWith('wall-')) useCadStore.getState().setSelectedWallId(obj.name);
     });
     canvas.on('selection:updated', (e) => {
-      const obj = (e.selected?.[0] as any) ?? null;
+      const obj = e.selected?.[0] ?? null;
       setSelectedObject(obj);
       if (obj?.name?.startsWith('wall-')) useCadStore.getState().setSelectedWallId(obj.name);
     });
@@ -1719,7 +1731,7 @@ export default function CadCanvas() {
 
     // ── Underlay object:modified — sync back to store ────────────────────
     canvas.on('object:modified', (e) => {
-      const obj = e.target as any;
+      const obj = e.target;
       if (!obj?.name?.startsWith(PREFIX.underlay)) return;
       const id = (obj.name as string).replace(PREFIX.underlay, '');
       const state = useCadStore.getState();
@@ -1782,7 +1794,7 @@ export default function CadCanvas() {
         }
         // Check fabric selectedObject for other types
         const obj = state.selectedObject;
-        const name = (obj as any)?.name as string | undefined;
+        const name = obj?.name;
         if (name) {
           if (name.startsWith(PREFIX.opening)) {
             const id = name.slice(PREFIX.opening.length);

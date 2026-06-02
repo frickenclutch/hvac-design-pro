@@ -96,3 +96,19 @@ function timingSafeEqual(a: string, b: string): boolean {
 export function isLegacyHash(storedHash: string): boolean {
   return !storedHash.includes(':');
 }
+
+/**
+ * Hash a session bearer token for at-rest storage.
+ *
+ * The raw token is the client's credential; we persist only its SHA-256
+ * fingerprint, so a database read (backup, dump, or SQL injection) yields no
+ * usable live sessions. Unlike a password, a session token is already a
+ * high-entropy random value (two concatenated 128-bit IDs) — there's nothing
+ * to brute-force, so a plain one-way hash is the right tool: no salt/KDF
+ * (which would also defeat the O(1) `WHERE token = ?` lookup by making the
+ * stored value non-deterministic).
+ */
+export async function hashToken(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+  return bytesToHex(new Uint8Array(digest));
+}

@@ -59,8 +59,8 @@ calcRoutes.post('/', async (c) => {
   // version ordinal under concurrency is benign (it's a label, not a key).
   // Get next version number
   const latest = await c.env.DB.prepare(
-    `SELECT MAX(version) as maxVer FROM calculations WHERE project_id = ? AND calc_type = ?`
-  ).bind(body.projectId, body.calcType).first();
+    `SELECT MAX(version) as maxVer FROM calculations WHERE project_id = ? AND calc_type = ? AND org_id = ?`
+  ).bind(body.projectId, body.calcType, user.orgId).first();
   const version = ((latest?.maxVer as number) || 0) + 1;
 
   await c.env.DB.prepare(

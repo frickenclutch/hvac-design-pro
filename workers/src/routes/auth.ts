@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { generateId } from '../utils/id';
-import { hashPassword, verifyPassword, isLegacyHash } from '../utils/crypto';
+import { hashPassword, verifyPassword, isLegacyHash, hashToken } from '../utils/crypto';
+import { mintTokenPair } from '../utils/session';
 import { sendEmail, buildWelcomeEmail, buildVerificationEmail, buildPasswordResetEmail } from '../utils/email';
 import { createVerificationCode, validateVerificationCode } from '../utils/verificationCodes';
 import { checkRateLimit, recordRateLimitEvent, cleanupRateLimitEvents } from '../utils/rateLimit';
@@ -184,13 +185,7 @@ authRoutes.post('/login', async (c) => {
   }
 
   // Create session
-  const token = generateId() + '-' + generateId();
-  const sessionId = generateId();
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-
-  await db.prepare(
-    'INSERT INTO sessions (id, user_id, org_id, token, expires_at) VALUES (?, ?, ?, ?, ?)'
-  ).bind(sessionId, user.id, user.org_id, token, expiresAt).run();
+  const { accessToken: token, refreshToken } = await mintTokenPair(db, user.id as string, user.org_id as string);
 
   await writeAuthAudit(c, {
     action: 'auth.login', status: 200,
@@ -202,6 +197,7 @@ authRoutes.post('/login', async (c) => {
 
   return c.json({
     token,
+    refreshToken,
     user: {
       id: user.id, email: user.email, firstName: user.first_name,
       lastName: user.last_name, role: user.role, isVerified: true,
@@ -237,18 +233,7 @@ authRoutes.post('/verify-email', async (c) => {
   }
 
   // Mark user as verified and create session in a batch
-  const token = generateId() + '-' + generateId();
-  const sessionId = generateId();
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-
-  const batchOps = [
-    db.prepare('UPDATE users SET is_verified = 1 WHERE id = ?').bind(result.userId),
-    db.prepare(
-      'INSERT INTO sessions (id, user_id, org_id, token, expires_at) VALUES (?, ?, (SELECT org_id FROM users WHERE id = ?), ?, ?)'
-    ).bind(sessionId, result.userId, result.userId, token, expiresAt),
-  ];
-
-  await db.batch(batchOps);
+  await db.prepare('UPDATE users SET is_verified = 1 WHERE id = ?').bind(result.userId).run();
 
   // Fetch full user + org data for the response
   const userData = await db.prepare(
@@ -259,6 +244,8 @@ authRoutes.post('/verify-email', async (c) => {
   ).bind(result.userId).first();
 
   if (!userData) return c.json({ error: 'User not found' }, 500);
+
+  const { accessToken: token, refreshToken } = await mintTokenPair(db, userData.id as string, userData.org_id as string);
 
   await writeAuthAudit(c, {
     action: 'auth.email_verified', status: 200,
@@ -274,6 +261,7 @@ authRoutes.post('/verify-email', async (c) => {
 
   return c.json({
     token,
+    refreshToken,
     user: {
       id: userData.id, email: userData.email, firstName: userData.first_name,
       lastName: userData.last_name, role: userData.role, isVerified: true,
@@ -382,6 +370,10 @@ authRoutes.post('/reset-password', async (c) => {
   await db.batch([
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').bind(passwordHash, result.userId),
     db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(result.userId),
+    // A password reset means "kill all my credentials" — and the user stays
+    // active, so the /refresh status gate won't catch a stolen refresh token.
+    // Revoke them here explicitly.
+    db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').bind(result.userId),
   ]);
 
   await writeAuthAudit(c, {
@@ -531,13 +523,7 @@ authRoutes.post('/sso/microsoft/callback', async (c) => {
   }
 
   // Create session
-  const token = generateId() + '-' + generateId();
-  const sessionId = generateId();
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-
-  await db.prepare(
-    'INSERT INTO sessions (id, user_id, org_id, token, expires_at) VALUES (?, ?, ?, ?, ?)'
-  ).bind(sessionId, userId, orgId, token, expiresAt).run();
+  const { accessToken: token, refreshToken } = await mintTokenPair(db, userId, orgId);
 
   await writeAuthAudit(c, {
     action: 'auth.login', status: 200,
@@ -548,6 +534,7 @@ authRoutes.post('/sso/microsoft/callback', async (c) => {
 
   return c.json({
     token,
+    refreshToken,
     user: {
       id: userId, email, firstName: userFirstName,
       lastName: userLastName, role: userRole, isVerified: true,
@@ -694,13 +681,7 @@ authRoutes.post('/sso/cloudflare/callback', async (c) => {
   }
 
   // Create session
-  const token = generateId() + '-' + generateId();
-  const sessionId = generateId();
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-
-  await db.prepare(
-    'INSERT INTO sessions (id, user_id, org_id, token, expires_at) VALUES (?, ?, ?, ?, ?)'
-  ).bind(sessionId, userId, orgId, token, expiresAt).run();
+  const { accessToken: token, refreshToken } = await mintTokenPair(db, userId, orgId);
 
   await writeAuthAudit(c, {
     action: 'auth.login', status: 200,
@@ -711,6 +692,7 @@ authRoutes.post('/sso/cloudflare/callback', async (c) => {
 
   return c.json({
     token,
+    refreshToken,
     user: {
       id: userId, email, firstName: userFirstName,
       lastName: userLastName, role: userRole, isVerified: true,
@@ -866,12 +848,7 @@ authRoutes.post('/invite/:token/redeem', async (c) => {
   }
 
   // Mint a session.
-  const sessionToken = generateId() + '-' + generateId();
-  const sessionId = generateId();
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  await db.prepare(
-    'INSERT INTO sessions (id, user_id, org_id, token, expires_at) VALUES (?, ?, ?, ?, ?)'
-  ).bind(sessionId, userId, invite.org_id, sessionToken, expiresAt).run();
+  const { accessToken: sessionToken, refreshToken } = await mintTokenPair(db, userId, invite.org_id as string);
 
   // Pull org/user shape for the response.
   const userData = await db.prepare(
@@ -891,6 +868,7 @@ authRoutes.post('/invite/:token/redeem', async (c) => {
 
   return c.json({
     token: sessionToken,
+    refreshToken,
     user: {
       id: userData!.id, email: userData!.email, firstName: userData!.first_name,
       lastName: userData!.last_name, role: userData!.role, isVerified: true,
@@ -909,6 +887,7 @@ authRoutes.post('/logout', async (c) => {
   const authHeader = c.req.header('Authorization');
   if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.slice(7);
+    const tokenHash = await hashToken(token);
     // Resolve the session owner BEFORE deleting so the audit row has
     // identity. Best-effort — a stale/invalid token just logs an
     // anonymous logout.
@@ -916,8 +895,15 @@ authRoutes.post('/logout', async (c) => {
       `SELECT s.user_id, s.org_id, u.email, u.role
        FROM sessions s LEFT JOIN users u ON u.id = s.user_id
        WHERE s.token = ?`
-    ).bind(token).first();
-    await c.env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run();
+    ).bind(tokenHash).first();
+    await c.env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(tokenHash).run();
+    // End the session fully, not just the current access token: revoke the
+    // user's refresh tokens too. Best-effort — needs a resolvable owner.
+    if (sess?.user_id) {
+      await c.env.DB.prepare(
+        `UPDATE refresh_tokens SET revoked_at = datetime('now') WHERE user_id = ? AND revoked_at IS NULL`
+      ).bind(sess.user_id).run();
+    }
     await writeAuthAudit(c, {
       action: 'auth.logout', status: 200,
       userId: (sess?.user_id as string) ?? null,
@@ -928,6 +914,76 @@ authRoutes.post('/logout', async (c) => {
     });
   }
   return c.json({ ok: true });
+});
+
+// ── Refresh ───────────────────────────────────────────────────────────────────
+// Exchange a valid refresh token for a fresh access + refresh pair (rotation).
+// The refresh token is the long-lived credential and is presented ONLY here,
+// never on ordinary requests. Rotation is single-use: each refresh consumes
+// the presented token and issues a new one.
+//
+// Reuse detection: presenting an already-consumed (revoked) refresh token
+// signals theft — a stolen copy replayed after the legitimate client rotated.
+// The response revokes EVERY active refresh token for the user, killing both
+// chains and forcing a clean re-login. Deactivated users are stopped by the
+// status gate below — the same authoritative backstop the access path uses,
+// so deactivation paths don't separately purge refresh tokens.
+authRoutes.post('/refresh', async (c) => {
+  const db = c.env.DB;
+
+  let presented: string | undefined;
+  try {
+    const body = (await c.req.json()) as { refreshToken?: string };
+    presented = body.refreshToken;
+  } catch {
+    return c.json({ error: 'Invalid request body' }, 400);
+  }
+  if (!presented || typeof presented !== 'string') {
+    return c.json({ error: 'refreshToken is required' }, 400);
+  }
+
+  const presentedHash = await hashToken(presented);
+  const row = await db.prepare(
+    `SELECT r.id, r.user_id, r.org_id, r.expires_at, r.revoked_at, u.status
+     FROM refresh_tokens r JOIN users u ON u.id = r.user_id
+     WHERE r.token_hash = ?`
+  ).bind(presentedHash).first();
+
+  if (!row) return c.json({ error: 'Invalid refresh token' }, 401);
+
+  // Reuse of a consumed token → theft response: revoke the user's whole set.
+  if (row.revoked_at) {
+    await db.prepare(
+      `UPDATE refresh_tokens SET revoked_at = datetime('now')
+       WHERE user_id = ? AND revoked_at IS NULL`
+    ).bind(row.user_id).run();
+    await writeAuthAudit(c, {
+      action: 'auth.refresh_reuse', status: 401,
+      userId: row.user_id as string, orgId: row.org_id as string,
+      actorRole: null, entityId: row.user_id as string, entityLabel: null,
+      detail: { revokedAllRefreshTokens: true },
+    });
+    return c.json({ error: 'Session security check failed. Please sign in again.' }, 401);
+  }
+
+  if (new Date(row.expires_at as string).getTime() < Date.now()) {
+    return c.json({ error: 'Refresh token expired' }, 401);
+  }
+  if (row.status !== 'active') {
+    return c.json({ error: 'Account is not active' }, 401);
+  }
+
+  const userId = row.user_id as string;
+  const orgId = row.org_id as string;
+
+  // Mint the new pair FIRST, then consume the presented token. Order matters:
+  // if minting fails, the presented token stays valid (fail-safe — the client
+  // can retry) rather than leaving the user with no working credential.
+  const { accessToken, refreshToken } = await mintTokenPair(db, userId, orgId);
+  await db.prepare(`UPDATE refresh_tokens SET revoked_at = datetime('now') WHERE id = ?`)
+    .bind(row.id).run();
+
+  return c.json({ token: accessToken, refreshToken });
 });
 
 // ── Get current session user ─────────────────────────────────────────────────
@@ -946,7 +1002,7 @@ authRoutes.get('/me', async (c) => {
      JOIN organisations o ON o.id = s.org_id
      WHERE s.token = ? AND s.expires_at > datetime('now')
        AND u.status = 'active'`
-  ).bind(token).first();
+  ).bind(await hashToken(token)).first();
 
   if (!result) return c.json({ error: 'Session expired' }, 401);
 

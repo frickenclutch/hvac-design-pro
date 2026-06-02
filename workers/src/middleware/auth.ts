@@ -1,4 +1,5 @@
 import { Context, Next } from 'hono';
+import { hashToken } from '../utils/crypto';
 
 export interface AuthUser {
   id: string;
@@ -38,7 +39,7 @@ export async function authMiddleware(c: Context, next: Next) {
      JOIN users u ON u.id = s.user_id
      WHERE s.token = ? AND s.expires_at > datetime('now')
        AND u.status = 'active'`
-  ).bind(token).first();
+  ).bind(await hashToken(token)).first();
 
   if (!session) {
     return c.json({ error: 'Invalid or expired session' }, 401);
