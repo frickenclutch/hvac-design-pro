@@ -25,10 +25,10 @@ async function orgPolicy(db: D1Database, orgId: string) {
  *  real defense — this read is just to pick the next ordinal; if two PUTs
  *  race, one INSERT fails the unique constraint and the audit row still
  *  fires correctly. */
-async function nextVersionNumber(db: D1Database, drawingId: string): Promise<number> {
+async function nextVersionNumber(db: D1Database, drawingId: string, orgId: string): Promise<number> {
   const row = await db.prepare(
-    'SELECT COALESCE(MAX(version_number), 0) AS n FROM cad_drawing_versions WHERE drawing_id = ?'
-  ).bind(drawingId).first();
+    'SELECT COALESCE(MAX(version_number), 0) AS n FROM cad_drawing_versions WHERE drawing_id = ? AND org_id = ?'
+  ).bind(drawingId, orgId).first();
   return Number(row?.n ?? 0) + 1;
 }
 
@@ -52,7 +52,7 @@ async function writeVersion(
     thumbnailDataUrl?: string | null;
   },
 ): Promise<{ versionId: string; versionNumber: number }> {
-  const versionNumber = await nextVersionNumber(db, args.drawingId);
+  const versionNumber = await nextVersionNumber(db, args.drawingId, args.orgId);
   const versionId = generateId();
   // Cap thumbnail size at 200 KB to prevent a runaway frontend (or an
   // attacker injecting a massive payload) from bloating D1. Most real
@@ -321,10 +321,10 @@ cadRoutes.get('/:id/versions', async (c) => {
             u.email      AS author_email
      FROM cad_drawing_versions v
      LEFT JOIN users u ON u.id = v.author_user_id
-     WHERE v.drawing_id = ?
+     WHERE v.drawing_id = ? AND v.org_id = ?
      ORDER BY v.version_number DESC
      LIMIT ?`
-  ).bind(id, limit).all();
+  ).bind(id, user.orgId, limit).all();
 
   return c.json({ versions: results, drawingId: id, limit });
 });
@@ -397,7 +397,7 @@ cadRoutes.post('/versions/:versionId/restore', async (c) => {
 
   // Append a new version pointing at the restored content. The new
   // version's metadata records that it was a restoration of versionId.
-  const newVersionNumber = await nextVersionNumber(c.env.DB, source.drawing_id as string);
+  const newVersionNumber = await nextVersionNumber(c.env.DB, source.drawing_id as string, user.orgId);
   const newVersionId = generateId();
   await c.env.DB.prepare(
     `INSERT INTO cad_drawing_versions
@@ -416,8 +416,8 @@ cadRoutes.post('/versions/:versionId/restore', async (c) => {
   ).run();
 
   const drawing = await c.env.DB.prepare(
-    'SELECT name FROM cad_drawings WHERE id = ?'
-  ).bind(source.drawing_id).first();
+    'SELECT name FROM cad_drawings WHERE id = ? AND org_id = ?'
+  ).bind(source.drawing_id, user.orgId).first();
 
   setAudit(c, {
     action: 'cad_drawing.restore',
