@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
-import { Home, Compass, Settings, Users, LogOut, Thermometer, PenTool, Menu, X, Search, BookOpen, GitBranch, Sun, Globe, ShieldCheck, Activity } from 'lucide-react';
+import { Home, Compass, Settings, Users, LogOut, Thermometer, PenTool, Menu, X, Search, BookOpen, GitBranch, Sun, Globe, ShieldCheck, Activity, PackageCheck } from 'lucide-react';
 import LandingPage from './pages/LandingPage';
 import OnboardingPage from './pages/OnboardingPage';
 import AuthPage from './pages/AuthPage';
@@ -19,6 +19,7 @@ const CadWorkspace = lazy(() => import('./pages/CadWorkspace'));
 const ManualJCalculator = lazy(() => import('./pages/ManualJCalculator'));
 const ManualDCalculator = lazy(() => import('./pages/ManualDCalculator'));
 const AedAnalysis = lazy(() => import('./pages/AedAnalysis'));
+const ManualSCalculator = lazy(() => import('./pages/ManualSCalculator'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const UserGuidePage = lazy(() => import('./pages/UserGuidePage'));
 const AdminPage = lazy(() => import('./pages/AdminPage'));
@@ -171,6 +172,7 @@ function AppLayout() {
             <MobileNavLink to="/calculator" icon={<Thermometer className="w-5 h-5" />} label="Manual J" onClick={() => setMobileNavOpen(false)} />
             <MobileNavLink to="/manual-d" icon={<GitBranch className="w-5 h-5" />} label="Manual D" onClick={() => setMobileNavOpen(false)} />
             <MobileNavLink to="/aed" icon={<Sun className="w-5 h-5" />} label="AED" onClick={() => setMobileNavOpen(false)} />
+            <MobileNavLink to="/manual-s" icon={<PackageCheck className="w-5 h-5" />} label="Manual S" onClick={() => setMobileNavOpen(false)} />
             <MobileNavLink to="/cad" icon={<PenTool className="w-5 h-5" />} label="CAD" onClick={() => setMobileNavOpen(false)} />
             <div className="h-px bg-slate-800/60 my-2" />
             <MobileNavLink to="/team" icon={<Users className="w-5 h-5" />} label="Team" onClick={() => setMobileNavOpen(false)} />
@@ -210,6 +212,7 @@ function AppLayout() {
               <NavigationLink to="/calculator" icon={<Thermometer className="w-5 h-5" />} label="Manual J" collapsed={sidebarCollapsed} />
               <NavigationLink to="/manual-d" icon={<GitBranch className="w-5 h-5" />} label="Manual D" collapsed={sidebarCollapsed} />
               <NavigationLink to="/aed" icon={<Sun className="w-5 h-5" />} label="AED" collapsed={sidebarCollapsed} />
+              <NavigationLink to="/manual-s" icon={<PackageCheck className="w-5 h-5" />} label="Manual S" collapsed={sidebarCollapsed} />
               <NavigationLink to="/cad" icon={<PenTool className="w-5 h-5" />} label="CAD" collapsed={sidebarCollapsed} />
 
               <div className="h-px bg-slate-800/60 my-2" />
@@ -277,6 +280,7 @@ function AppLayout() {
           <Route path="/calculator" element={isAuthenticated ? <ManualJCalculator /> : <Navigate to="/" />} />
           <Route path="/manual-d" element={isAuthenticated ? <ManualDCalculator /> : <Navigate to="/" />} />
           <Route path="/aed" element={isAuthenticated ? <AedAnalysis /> : <Navigate to="/" />} />
+          <Route path="/manual-s" element={isAuthenticated ? <ManualSCalculator /> : <Navigate to="/" />} />
           <Route path="/settings" element={isAuthenticated ? <SettingsPage /> : <Navigate to="/" />} />
           <Route path="/guide" element={isAuthenticated ? <UserGuidePage /> : <Navigate to="/" />} />
           <Route path="/team" element={isAuthenticated ? <TeamPage /> : <Navigate to="/" />} />

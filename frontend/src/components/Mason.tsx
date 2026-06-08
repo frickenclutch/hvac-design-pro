@@ -11,7 +11,7 @@ import { scopedKey } from '../utils/storage';
 // Unified across CAD workspace and Manual J Calculator.
 
 // ── Context mode determines which knowledge is prioritized ─────────────────────
-export type MasonContext = 'cad' | 'manualj' | 'manual-d' | 'aed';
+export type MasonContext = 'cad' | 'manualj' | 'manual-d' | 'manual-s' | 'aed';
 
 // ── Knowledge base ─────────────────────────────────────────────────────────────
 interface KBEntry {
@@ -1083,6 +1083,83 @@ CAD Workspace → Manual J → AED → Manual D
 - Testing "what if" scenarios (add exterior shade? change SHGC?)
 - Generating an AED-only PDF for plans examiner questions`,
   },
+  {
+    keywords: ['what is manual s', 'manual s', 'equipment selection', 'select equipment', 'sizing equipment'],
+    contexts: ['manual-s', 'manualj'],
+    answer: `**Manual S** is the ACCA standard for residential equipment selection. After Manual J gives you the design loads, Manual S confirms the equipment you've chosen is correctly sized for them.
+
+It checks a candidate system against the loads:
+- **Cooling** — total capacity within the sizing band, with enough **sensible** and **latent** capacity at design conditions
+- **Heating** — furnace output (or heat-pump capacity + supplemental heat) covers the heating load
+
+**Why it matters:** sizing from unapproved methods produces legally invalid outputs for permits. Manual S is the bridge between "what the house needs" (Manual J) and "what to install."
+
+**Quick start:** Click **Import from Manual J** to pull the loads, then enter the candidate equipment's expanded-performance numbers and run the check.`,
+  },
+  {
+    keywords: ['115', '115%', 'oversize cap', 'sizing limit', 'sizing band', 'how big'],
+    contexts: ['manual-s'],
+    answer: `**The 115% rule** is the Manual S cooling oversize cap: an air conditioner's total cooling capacity must not exceed **115%** of the calculated cooling load.
+
+- **Air conditioner:** 90–115% of the total cooling load
+- **Heat pump:** up to 125% is allowed *only* when the extra size is needed to offset the heating load — anything over 115% is flagged so it's a deliberate choice
+
+Going over the cap causes **short cycling**: the equipment satisfies the thermostat too quickly, never runs long enough to wring moisture out of the air, and you get a cold-but-clammy house plus more wear on the compressor.`,
+  },
+  {
+    keywords: ['sensible', 'latent', 'shr', 'sensible heat ratio', 'humidity capacity', 'adequacy'],
+    contexts: ['manual-s'],
+    answer: `**Sensible vs latent capacity** is the heart of Manual S — total capacity alone isn't enough.
+
+- **Sensible capacity** removes *temperature*. It must meet the design **sensible** load or the equipment can't hold setpoint on the hottest day.
+- **Latent capacity** removes *moisture* (= total − sensible at design conditions). It must meet the design **latent** load or indoor humidity climbs.
+
+**SHR** (Sensible Heat Ratio = sensible ÷ total) is how you match equipment to the climate. A dry climate needs a high-SHR unit; a humid one needs a lower SHR. Manual S compares the **equipment SHR** to the **load SHR** — if they're more than ~0.10 apart, reconsider the selection.
+
+Capacities must come from the manufacturer's **expanded-performance data at your design conditions**, not the nameplate AHRI rating (which is measured at 95°F / 80°F db / 67°F wb).`,
+  },
+  {
+    keywords: ['why not oversize', 'oversizing', 'short cycle', 'short cycling', 'too big'],
+    contexts: ['manual-s'],
+    answer: `**Why not just oversize?** It feels safe but it's the most common sizing mistake.
+
+An oversized cooling system:
+- **Short cycles** — reaches setpoint fast, shuts off, never runs long enough to dehumidify
+- Leaves the house **cold and clammy** (high indoor humidity)
+- **Wears out** the compressor with frequent starts
+- Costs more up front and runs less efficiently
+
+That's why Manual S caps cooling at 115% of the load (125% for a heating-driven heat pump). Bigger is not better — *right-sized* is.`,
+  },
+  {
+    keywords: ['balance point', 'supplemental', 'auxiliary', 'aux heat', 'backup heat', 'heat pump heating', 'strip heat'],
+    contexts: ['manual-s'],
+    answer: `**Heat-pump balance point & supplemental heat**
+
+A heat pump's heating capacity *drops* as it gets colder, while the building's load *rises*. The **balance point** is the outdoor temperature where the two lines cross — above it the heat pump carries the whole load, below it you need help.
+
+That help is **supplemental (auxiliary) heat** — usually electric resistance strips or a backup furnace. Manual S sizes the heat pump for the **cooling** load first (respecting the 115% cap), then quantifies the heating shortfall at the design temperature and specifies aux heat to cover it.
+
+Enter the **47°F and 17°F AHRI ratings** on the Manual S page and I'll estimate the balance point. The result shows the supplemental BTU/h and the equivalent kW of strip heat.`,
+  },
+  {
+    keywords: ['altitude', 'elevation', 'derate', 'air density', 'high altitude'],
+    contexts: ['manual-s'],
+    answer: `**Altitude derate** matters because air gets thinner with elevation. The same blower CFM moves *less mass*, so **sensible capacity drops** with air density (latent shifts up a bit; total stays roughly the same).
+
+On the Manual S page, the **Altitude derate** toggle applies a standard-atmosphere density factor to the entered sensible capacity — at ~5,000 ft that's roughly a 14% sensible reduction, which can flip an otherwise-adequate unit into *sensible-short*.
+
+It's **off by default** (ACCA prohibits defaulting to worst-case). The best practice is to enter capacities straight from the manufacturer's **expanded-performance data at your elevation**; use the toggle as a quick check when you only have sea-level ratings.`,
+  },
+  {
+    keywords: ['import from manual j', 'import loads', 'pull loads', 'manual s import', 'load from manual j'],
+    contexts: ['manual-s'],
+    answer: `**Importing from Manual J** auto-populates the Manual S design loads — total cooling, sensible, latent, and heating — plus the design temperatures and elevation.
+
+Click **Import from Manual J** at the top of the Design Loads section (or type \`/import\`). It reads your last Manual J calculation for the active project and also seeds a neutral starting equipment size (~105% of load) so the first check is meaningful.
+
+Then replace the seeded numbers with your actual candidate equipment's expanded-performance data and run the check. Results feed a compact summary back into the Manual J record for the combined report.`,
+  },
 ];
 
 function findAnswer(query: string, context: MasonContext): string {
@@ -1111,6 +1188,8 @@ function findAnswer(query: string, context: MasonContext): string {
     ? `I'll walk you through Adequate Exposure Diversity. Ask me about:\n\n- **What is AED** and why it matters\n- **Pass/fail criteria** — the 130% threshold\n- **Excursion penalty** — how it affects cooling load\n- **What to do when AED fails** — zoning, VAV, shading\n- **How to fill out** the AED inputs (SHGC, IAC, orientation)\n- **Import from Manual J** — auto-populate fenestration\n- **When AED peaks** — east vs west vs south\n- **Latitude effects** on solar irradiance\n- **ACCA certification** requirements`
     : context === 'manual-d'
     ? `I can help you size ducts per Manual D. Try asking about:\n\n- **Duct sizing basics** — the friction rate method\n- **Equal friction** design approach\n- **Fitting equivalent lengths** — elbows, wyes, boots\n- **Supply vs return** sizing rules\n- **Trunk & branch** layout\n- **Velocity limits** — 900 fpm residential max\n- **Static pressure budget** — how to calculate ASP\n- **Import from Manual J** to auto-load room CFMs`
+    : context === 'manual-s'
+    ? `I can help you select equipment per Manual S. Try asking about:\n\n- **What is Manual S** and why outputs from unapproved sizing are invalid\n- **The 115% rule** — the cooling oversize cap\n- **Sensible vs latent** capacity adequacy\n- **Why not oversize** — short cycling and humidity\n- **Heat pump balance point** and supplemental heat\n- **Altitude derate** of sensible capacity\n- **Import from Manual J** to auto-load the design loads`
     : `I'm your complete guide to HVAC DesignPro. Try asking about:\n\n- **Getting started** — first steps, canvas navigation\n- **Drawing walls**, placing windows & doors\n- **HVAC placement** — registers, grilles, equipment\n- **3D View** — orbit, pan, zoom, inspect\n- **Keyboard shortcuts** — every hotkey\n- **Search** (Ctrl+K) — find any asset instantly\n- **Labels & text** — fonts, colors, styling\n- **Import images** — underlays for tracing\n- **Export PDF** — multi-page engineering docs\n- **Room detection**, multi-floor, layers\n- **Appearance** — customize colors and theme\n- **R-values**, insulation, CFM, equipment sizing`;
 
   return contextHelp;
@@ -1192,6 +1271,10 @@ function processCommands(query: string, context: MasonContext): string | null {
       'aed':         ['/aed', 'AED Analysis'],
       'exposure':    ['/aed', 'AED Analysis'],
       'diversity':   ['/aed', 'AED Analysis'],
+      'manual-s':    ['/manual-s', 'Manual S Calculator'],
+      'manuals':     ['/manual-s', 'Manual S Calculator'],
+      'equipment':   ['/manual-s', 'Manual S Calculator'],
+      'selection':   ['/manual-s', 'Manual S Calculator'],
       'cad':         ['/cad', 'CAD Workspace'],
       'workspace':   ['/cad', 'CAD Workspace'],
       'drawing':     ['/cad', 'CAD Workspace'],
@@ -1260,7 +1343,14 @@ function processCommands(query: string, context: MasonContext): string | null {
       }, 300);
       return `Running **AED check**... Check the hourly distribution below.`;
     }
-    return `The /calculate command works on Manual J, Manual D, and AED pages. Navigate there first with \`/navigate manual-j\`.`;
+    if (context === 'manual-s') {
+      setTimeout(() => {
+        const btn = Array.from(document.querySelectorAll('button')).find(b => b.textContent?.includes('Check Equipment Selection'));
+        if (btn) (btn as HTMLButtonElement).click();
+      }, 300);
+      return `Running **Manual S equipment check**... Check the verdict below.`;
+    }
+    return `The /calculate command works on Manual J, Manual D, AED, and Manual S pages. Navigate there first with \`/navigate manual-j\`.`;
   }
 
   // ── /export — trigger exports ──────────────────────────────────────
@@ -1279,18 +1369,20 @@ function processCommands(query: string, context: MasonContext): string | null {
     return `Opening **Export to CAD** dialog...`;
   }
 
-  // ── /import — trigger Manual J import in Manual D or AED ───────────
+  // ── /import — trigger Manual J import in Manual D, Manual S, or AED ───────────
   if (q === '/import' || q === '/import manual-j' || q === '/import mj') {
-    if (context === 'manual-d' || context === 'aed') {
+    if (context === 'manual-d' || context === 'aed' || context === 'manual-s') {
       setTimeout(() => {
         const btn = Array.from(document.querySelectorAll('button, span')).find(b => b.textContent?.includes('Import from Manual J'));
         if (btn) (btn as HTMLElement).click();
       }, 300);
       return context === 'aed'
         ? `Importing **fenestration groups** from Manual J window data...`
+        : context === 'manual-s'
+        ? `Importing **design loads** from Manual J results...`
         : `Importing **rooms** from Manual J results...`;
     }
-    return `The /import command works on Manual D and AED pages. Navigate there with \`/navigate manual-d\` or \`/navigate aed\`.`;
+    return `The /import command works on Manual D, Manual S, and AED pages. Navigate there with \`/navigate manual-d\`, \`/navigate manual-s\`, or \`/navigate aed\`.`;
   }
 
   // ── Smart queries about current results ────────────────────────────
@@ -1478,6 +1570,16 @@ const QUICK_TOPICS: Record<MasonContext, string[]> = {
     'AED & ACCA certification',
     'AED workflow & interop',
   ],
+  'manual-s': [
+    'What is Manual S?',
+    'The 115% sizing rule',
+    'Sensible vs latent capacity',
+    'Why not oversize?',
+    'Heat pump balance point',
+    'Supplemental heat',
+    'Altitude derate',
+    'Import from Manual J',
+  ],
 };
 
 // ── Props ───────────────────────────────────────────────────────────────────
@@ -1646,6 +1748,7 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
             <p className="text-[10px] text-slate-500 font-medium">
               {context === 'manualj' ? 'Manual J Assistant'
                 : context === 'manual-d' ? 'Manual D Assistant'
+                : context === 'manual-s' ? 'Manual S Assistant'
                 : context === 'aed' ? 'AED Analysis Assistant'
                 : 'CAD & HVAC Assistant'}
             </p>
@@ -1695,6 +1798,8 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
                   <>Hey, I'm <strong className="text-amber-400">Mason</strong>. I'll walk you through Adequate Exposure Diversity — what it means, why ACCA requires it, and what to do when it fails. I can also auto-import your Manual J windows. Tap a topic or ask.</>
                 ) : context === 'manual-d' ? (
                   <>Hey, I'm <strong className="text-amber-400">Mason</strong>. I'll help you size ducts per Manual D — friction rates, critical paths, fitting lengths, velocity limits. Import your Manual J loads with <code className="text-amber-400">/import</code>. Tap a topic or ask.</>
+                ) : context === 'manual-s' ? (
+                  <>Hey, I'm <strong className="text-amber-400">Mason</strong>. I'll help you select equipment per Manual S — the 115% cooling cap, sensible &amp; latent adequacy, heat-pump balance points and supplemental heat. Import your Manual J loads with <code className="text-amber-400">/import</code>. Tap a topic or ask.</>
                 ) : (
                   <>Hey, I'm <strong className="text-amber-400">Mason</strong> — your HVAC engineering assistant. I know every tool, shortcut, and feature in this platform inside and out. Ask me anything — drawing walls, 3D view, keyboard shortcuts, load calcs, duct sizing, you name it. Tap a topic below or just ask.</>
                 )}
@@ -2002,6 +2107,7 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
                   context === 'manualj' ? "Ask Mason or type /status..."
                   : context === 'aed' ? "Ask about AED, or type /import..."
                   : context === 'manual-d' ? "Ask about duct sizing, or type /import..."
+                  : context === 'manual-s' ? "Ask about equipment selection, or type /import..."
                   : "Ask Mason about HVAC, or type /status..."
                 }
                 className="w-full bg-slate-950/80 border border-slate-700 text-slate-200 rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-amber-500/50 transition-colors placeholder:text-slate-600"
