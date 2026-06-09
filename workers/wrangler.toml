@@ -49,3 +49,34 @@ database_id = "placeholder-dev"
 [[env.dev.r2_buckets]]
 binding = "STORAGE"
 bucket_name = "hvac-assets-dev"
+
+# ── Test environment ───────────────────────────────────────────────────────
+# Used ONLY by the vitest integration-test harness (vitest.config.ts →
+# @cloudflare/vitest-pool-workers). The pool runs the worker inside workerd
+# with a Miniflare-simulated D1 + R2, so these bindings resolve to local,
+# in-memory, per-run stores — the database_id is a placeholder and never hits
+# the real Cloudflare D1. Migrations 0001-0011 are applied to this DB in
+# test/helpers/harness.ts. Never deployed.
+[env.test]
+name = "hvac-api-test"
+
+[env.test.vars]
+ENVIRONMENT = "test"
+# Mirror the top-level vars (wrangler does NOT inherit [vars] into named
+# environments). Values are inert in the test runtime — no email is sent, no
+# SSO runs — but declaring them keeps the config-load warning-free.
+AZURE_CLIENT_ID = "test"
+CF_ACCESS_CLIENT_ID = "test"
+CF_ACCESS_ISSUER = "https://test.invalid"
+FEEDBACK_BUG_EMAILS = "test@test.invalid"
+FEEDBACK_SUPPORT_EMAIL = "test@test.invalid"
+FEEDBACK_FROM_ADDRESS = "Test <noreply@test.invalid>"
+
+[[env.test.d1_databases]]
+binding = "DB"
+database_name = "hvac-design-pro-test"
+database_id = "placeholder-test"
+
+[[env.test.r2_buckets]]
+binding = "STORAGE"
+bucket_name = "hvac-assets-test"
