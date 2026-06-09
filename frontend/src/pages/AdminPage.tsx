@@ -145,6 +145,11 @@ function QaBenchmarksSection() {
             drift={state.data.shadowRunDrift}
             reliability={state.data.shadowRunReliability}
           />
+          <CutoverReadinessPanel
+            drift={state.data.shadowRunDrift}
+            reliability={state.data.shadowRunReliability}
+            failureCauses={state.data.shadowRunFailureCauses}
+          />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
             <BreakdownTable
               title="Calc-type mix (all-time)"
@@ -245,6 +250,178 @@ function ShadowRunDriftCard({
       <p className="text-[11px] text-slate-500">
         Drift = (cert-grade − legacy) / legacy, taken on every Manual J calc that ran the shadow engine successfully. Failures (engine throws on unmapped construction) accrue separately under reliability — high failure rate indicates the registry needs more variants.
       </p>
+    </div>
+  );
+}
+
+// Cutover Readiness — the single "are we ready to flip the cert engine from
+// shadow-run to the displayed result?" verdict. Phase-2 cutover unblocks
+// revenue-eligible permit sales, so this rolls the three independent gates
+// into one glance:
+//   1. n_projects ≥ 10 distinct projects (NOT rows — see backend query)
+//   2. max |drift| ≤ 5% across heat / sens / latent
+//   3. shadow reliability ≥ 95% (engine doesn't throw on real production runs)
+// Plus the throwing-cause breakdown so a NOT-READY verdict names the concrete
+// blocker (e.g. the known ceiling-CTD bin) instead of a bare failure count.
+const READINESS_MIN_PROJECTS = 10;
+const READINESS_MAX_DRIFT_PCT = 5.0;
+const READINESS_MIN_RELIABILITY_PCT = 95;
+
+function CutoverReadinessPanel({
+  drift, reliability, failureCauses,
+}: {
+  drift: {
+    sample_size: number | null;
+    n_projects: number | null;
+    max_abs_heat_pct: number | null;
+    max_abs_sens_pct: number | null;
+    max_abs_latent_pct: number | null;
+  } | null;
+  reliability: { shadow_success: number | null; shadow_failure: number | null } | null;
+  failureCauses: Array<{ cause: string; count: number; n_projects: number }> | null;
+}) {
+  const nProjects = drift?.n_projects ?? 0;
+
+  // Worst (largest) abs drift across the three load components. Nulls mean
+  // "no successful shadow data yet" — treat as not-yet-evaluable, not 0%.
+  const driftValues = [
+    drift?.max_abs_heat_pct,
+    drift?.max_abs_sens_pct,
+    drift?.max_abs_latent_pct,
+  ].filter((v): v is number => v != null);
+  const maxDrift = driftValues.length > 0 ? Math.max(...driftValues.map(Math.abs)) : null;
+
+  const succ = reliability?.shadow_success ?? 0;
+  const fail = reliability?.shadow_failure ?? 0;
+  const totalRuns = succ + fail;
+  const reliabilityPct = totalRuns > 0 ? (succ / totalRuns) * 100 : null;
+
+  // Each gate: pass only when we have data AND it clears the bar. No data ⇒
+  // not passing (you can't certify readiness on zero evidence).
+  const projectsPass = nProjects >= READINESS_MIN_PROJECTS;
+  const driftPass = maxDrift != null && maxDrift <= READINESS_MAX_DRIFT_PCT;
+  const reliabilityPass =
+    reliabilityPct != null && reliabilityPct >= READINESS_MIN_RELIABILITY_PCT;
+  const ready = projectsPass && driftPass && reliabilityPass;
+
+  const fmtPct = (v: number | null) => (v == null ? '—' : `${v.toFixed(2)}%`);
+  const causes = failureCauses ?? [];
+
+  return (
+    <div
+      className={`rounded-xl border p-4 mt-3 ${
+        ready
+          ? 'border-emerald-500/40 bg-emerald-500/[0.04]'
+          : 'border-amber-500/40 bg-amber-500/[0.04]'
+      }`}
+    >
+      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          {ready ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          ) : (
+            <AlertTriangle className="w-4 h-4 text-amber-400" />
+          )}
+          <h3 className="font-bold text-white text-sm">Cutover readiness</h3>
+        </div>
+        <span
+          className={`text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border ${
+            ready
+              ? 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10'
+              : 'text-amber-400 border-amber-500/40 bg-amber-500/10'
+          }`}
+        >
+          {ready ? 'READY TO FLIP' : 'NOT READY'}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3">
+        <ReadinessGate
+          label="Distinct projects"
+          value={String(nProjects)}
+          target={`≥ ${READINESS_MIN_PROJECTS}`}
+          pass={projectsPass}
+          evaluable={true}
+        />
+        <ReadinessGate
+          label="Max |drift|"
+          value={fmtPct(maxDrift)}
+          target={`≤ ${READINESS_MAX_DRIFT_PCT}%`}
+          pass={driftPass}
+          evaluable={maxDrift != null}
+        />
+        <ReadinessGate
+          label="Shadow reliability"
+          value={reliabilityPct == null ? '—' : `${reliabilityPct.toFixed(1)}%`}
+          target={`≥ ${READINESS_MIN_RELIABILITY_PCT}%`}
+          pass={reliabilityPass}
+          evaluable={reliabilityPct != null}
+        />
+      </div>
+
+      <div className="rounded-lg bg-slate-950/50 border border-slate-800/50 p-3">
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">
+            Throwing-cause breakdown (last 30 d)
+          </div>
+          <span className="text-[10px] text-slate-500 font-mono">{fail} fail total</span>
+        </div>
+        {causes.length === 0 ? (
+          <span className="text-xs text-emerald-400/80 italic">
+            No shadow-run failures — engine threw on nothing.
+          </span>
+        ) : (
+          <div className="space-y-1.5">
+            {causes.map((c, i) => (
+              <div key={i} className="flex items-start justify-between gap-3 text-xs">
+                <span className="text-slate-300 font-mono leading-snug break-words">
+                  {c.cause}
+                </span>
+                <span className="text-amber-400 font-mono whitespace-nowrap shrink-0">
+                  {c.count}× · {c.n_projects} proj
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <p className="text-[11px] text-slate-500 mt-3">
+        Phase-2 cutover flips the cert-grade manualJ8 engine from shadow-run to the displayed result, unblocking revenue-eligible permit sales. All three gates must be green on real production data before flipping.
+      </p>
+    </div>
+  );
+}
+
+function ReadinessGate({
+  label, value, target, pass, evaluable,
+}: {
+  label: string;
+  value: string;
+  target: string;
+  pass: boolean;
+  evaluable: boolean;
+}) {
+  return (
+    <div className="rounded-lg bg-slate-950/50 border border-slate-800/50 p-2.5">
+      <div className="flex items-center justify-between">
+        <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">{label}</div>
+        {evaluable ? (
+          pass ? (
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+          ) : (
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+          )
+        ) : null}
+      </div>
+      <div
+        className={`font-bold tabular-nums text-base mt-0.5 ${
+          !evaluable ? 'text-slate-500' : pass ? 'text-emerald-400' : 'text-amber-400'
+        }`}
+      >
+        {value}
+      </div>
+      <div className="text-[10px] text-slate-500 mt-0.5 font-mono">target {target}</div>
     </div>
   );
 }
