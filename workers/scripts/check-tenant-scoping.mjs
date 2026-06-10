@@ -73,6 +73,8 @@ const STRICT_TABLES = [
   'payment_methods',
   'usage_events',
   'invoices',
+  // ── Product/inventory catalog (migration 0013, routes/catalog.ts) ─────────
+  'catalog_products',
 ];
 
 /**

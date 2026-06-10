@@ -296,6 +296,63 @@ export async function seedOrgOwnedRows(
   };
 }
 
+export interface SeededCatalogRows {
+  /** A fully-populated heat_pump (cooling + heating perf) — exercises the
+   *  Manual S mapping path. */
+  hvacId: string;
+  waterHeaterId: string;
+  pipeId: string;
+}
+
+/** Seed one catalog_products row of each relevant category for an org,
+ *  written directly to D1. The hvac_equipment row is a heat pump carrying full
+ *  cooling + heating performance so the Manual S row→engine mapping is covered.
+ *  Every row carries org_id = orgId. SKUs: HP-3TON, WH-50G, CU-34-ELL. */
+export async function seedCatalogProducts(
+  db: D1Database,
+  orgId: string,
+): Promise<SeededCatalogRows> {
+  const hvacId = generateId();
+  const waterHeaterId = generateId();
+  const pipeId = generateId();
+
+  await db
+    .prepare(
+      `INSERT INTO catalog_products
+         (id, org_id, category, sku, name, model, price_minor, currency, stock_qty, unit, active,
+          equipment_type, total_cooling_btu, sensible_cooling_btu, ahri_ref,
+          heating_btu, heating_cap_47, heating_cap_17, afue, created_at, updated_at)
+       VALUES (?, ?, 'hvac_equipment', 'HP-3TON', '3-Ton Heat Pump', 'XR16-036',
+               450000, 'USD', 7, 'each', 1,
+               'heat_pump', 36000, 27000, 'AHRI-1234567',
+               34000, 34000, 22000, NULL, datetime('now'), datetime('now'))`,
+    )
+    .bind(hvacId, orgId)
+    .run();
+
+  await db
+    .prepare(
+      `INSERT INTO catalog_products
+         (id, org_id, category, sku, name, price_minor, currency, stock_qty, unit, active, created_at, updated_at)
+       VALUES (?, ?, 'water_heater', 'WH-50G', '50gal Water Heater',
+               89900, 'USD', 12, 'each', 1, datetime('now'), datetime('now'))`,
+    )
+    .bind(waterHeaterId, orgId)
+    .run();
+
+  await db
+    .prepare(
+      `INSERT INTO catalog_products
+         (id, org_id, category, sku, name, price_minor, currency, stock_qty, unit, active, created_at, updated_at)
+       VALUES (?, ?, 'pipe_fitting', 'CU-34-ELL', '3/4" Copper Elbow',
+               129, 'USD', 5000, 'each', 1, datetime('now'), datetime('now'))`,
+    )
+    .bind(pipeId, orgId)
+    .run();
+
+  return { hvacId, waterHeaterId, pipeId };
+}
+
 /** Dispatch an actual Request through the REAL Hono app + REAL authMiddleware.
  *  `token` is the RAW bearer (omit for an unauthenticated request). */
 export async function call(

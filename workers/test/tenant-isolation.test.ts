@@ -18,6 +18,7 @@ import {
   applyMigrations,
   seedTenant,
   seedOrgOwnedRows,
+  seedCatalogProducts,
   callJson,
   type SeededTenant,
   type SeededOrgRows,
@@ -27,6 +28,7 @@ const db = () => (env as unknown as { DB: D1Database }).DB;
 
 let orgA: SeededTenant;
 let orgB: SeededTenant;
+let techUser: SeededTenant;
 let rows: SeededOrgRows;
 
 beforeAll(async () => {
@@ -50,7 +52,17 @@ beforeAll(async () => {
     role: 'admin',
   });
 
+  // A non-admin (tech) user in org-A — proves the catalog ingestion endpoint is
+  // admin-gated (a tech in the SAME org still gets 403).
+  techUser = await seedTenant(db(), {
+    slug: 'org-a-tech',
+    name: 'Organization A Tech',
+    email: 'tech@org-a.test',
+    role: 'tech',
+  });
+
   rows = await seedOrgOwnedRows(db(), orgA.orgId, orgA.userId);
+  await seedCatalogProducts(db(), orgA.orgId);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -319,6 +331,106 @@ describe('(b) Org-B is walled off from org-A strict-table rows', () => {
     });
     expect(read.status).toBe(200);
     expect(read.json.project?.id).toBe(rows.projectId);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// (b.catalog) Org-owned CATALOG isolation. Org-A seeded 3 catalog rows; org-B
+//     seeded none. The hard test is the UPSERT-INJECTION case: org-B pushing a
+//     SKU org-A already owns must create a SEPARATE org-B row and leave org-A's
+//     row byte-for-byte intact — proving (org_id, sku) uniqueness is per-org.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('(b.catalog) Org-owned catalog isolation', () => {
+  it('GET /api/catalog (org-A) returns its own 3 items', async () => {
+    const { status, json } = await callJson('GET', '/api/catalog', { token: orgA.token });
+    expect(status).toBe(200);
+    expect((json.items ?? []).map((i: any) => i.sku).sort())
+      .toEqual(['CU-34-ELL', 'HP-3TON', 'WH-50G']);
+  });
+
+  it('GET /api/catalog (org-B) excludes org-A items — no SKU/price leak', async () => {
+    const { status, json } = await callJson('GET', '/api/catalog', { token: orgB.token });
+    expect(status).toBe(200);
+    const skus = (json.items ?? []).map((i: any) => i.sku);
+    expect(skus).not.toContain('HP-3TON');
+    expect(skus).not.toContain('WH-50G');
+    expect(skus).not.toContain('CU-34-ELL');
+    expect(json.items).toHaveLength(0); // org-B seeded no catalog
+  });
+
+  it('GET /api/catalog?category=hvac_equipment (org-B) → empty, no org-A equipment', async () => {
+    const { status, json } = await callJson(
+      'GET',
+      '/api/catalog?category=hvac_equipment',
+      { token: orgB.token },
+    );
+    expect(status).toBe(200);
+    expect(json.items).toHaveLength(0);
+  });
+
+  it('GET /api/catalog?category=hvac_equipment (org-A) → the heat pump, perf fields intact', async () => {
+    const { status, json } = await callJson(
+      'GET',
+      '/api/catalog?category=hvac_equipment&activeOnly=1',
+      { token: orgA.token },
+    );
+    expect(status).toBe(200);
+    expect(json.items).toHaveLength(1);
+    const hp = json.items[0];
+    expect(hp.sku).toBe('HP-3TON');
+    expect(hp.equipment_type).toBe('heat_pump');
+    expect(hp.total_cooling_btu).toBe(36000);
+    expect(hp.sensible_cooling_btu).toBe(27000);
+    expect(hp.ahri_ref).toBe('AHRI-1234567');
+    expect(hp.heating_btu).toBe(34000);
+    expect(hp.heating_cap_47).toBe(34000);
+    expect(hp.heating_cap_17).toBe(22000);
+  });
+
+  it('POST /api/catalog/items (org-B) upserts ONLY into org-B, never org-A', async () => {
+    const { status, json } = await callJson('POST', '/api/catalog/items', {
+      token: orgB.token,
+      body: { items: [{ sku: 'HP-3TON', name: 'Impostor', category: 'hvac_equipment' }] },
+    });
+    expect(status).toBe(200);
+    expect(json.upsertedCount).toBe(1);
+    expect(json.createdCount).toBe(1); // a NEW org-B row, not an update of org-A's
+
+    // org-B now has its own HP-3TON row...
+    const bRow = await db()
+      .prepare('SELECT name FROM catalog_products WHERE org_id = ? AND sku = ?')
+      .bind(orgB.orgId, 'HP-3TON')
+      .first<{ name: string }>();
+    expect(bRow?.name).toBe('Impostor');
+
+    // ...and org-A's HP-3TON is UNTOUCHED (no cross-tenant overwrite).
+    const aRow = await db()
+      .prepare('SELECT name FROM catalog_products WHERE org_id = ? AND sku = ?')
+      .bind(orgA.orgId, 'HP-3TON')
+      .first<{ name: string }>();
+    expect(aRow?.name).toBe('3-Ton Heat Pump');
+
+    // DB-level: exactly two HP-3TON rows now exist platform-wide — one per org.
+    const count = await db()
+      .prepare('SELECT COUNT(*) AS n FROM catalog_products WHERE sku = ?')
+      .bind('HP-3TON')
+      .first<{ n: number }>();
+    expect(Number(count?.n ?? 0)).toBe(2);
+  });
+
+  it('POST /api/catalog/items requires admin (tech in same org → 403, no write)', async () => {
+    const { status } = await callJson('POST', '/api/catalog/items', {
+      token: techUser.token,
+      body: { items: [{ sku: 'TECH-X', name: 'Should Not Persist' }] },
+    });
+    expect(status).toBe(403);
+
+    // Belt-and-suspenders: the rejected push left no row anywhere.
+    const count = await db()
+      .prepare('SELECT COUNT(*) AS n FROM catalog_products WHERE sku = ?')
+      .bind('TECH-X')
+      .first<{ n: number }>();
+    expect(Number(count?.n ?? 0)).toBe(0);
   });
 });
 
