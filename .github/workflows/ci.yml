@@ -70,6 +70,33 @@ jobs:
         working-directory: workers
         run: node scripts/check-tenant-scoping.mjs
 
+  worker-tests:
+    name: Worker — tenant-isolation integration tests
+    runs-on: ubuntu-latest
+    # The tenant-scoping guard above proves every org-owned query HAS an
+    # org_id clause. It cannot prove the clause is CORRECT (bound from the
+    # session-derived org, not a client value or a leaky join). This job is
+    # the other half: it boots the REAL Hono worker inside workerd (via
+    # @cloudflare/vitest-pool-workers + a Miniflare D1), applies migrations
+    # 0001-0011, mints REAL sessions, and asserts org-B gets 404 — not 403,
+    # not data — on every org-A strict-table row, with a negative control
+    # proving the 404 is tenancy (org-A reads the same ids). It also checks
+    # the cross-tenant-by-design routes (platform/forum/permits/audit) still
+    # behave as designed. See workers/test/.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: workers/package-lock.json
+      - name: Install (workers)
+        working-directory: workers
+        run: npm ci
+      - name: Run worker integration tests
+        working-directory: workers
+        run: npm test
+
   frontend-gate:
     name: Frontend — tsc + cert vitest
     runs-on: ubuntu-latest

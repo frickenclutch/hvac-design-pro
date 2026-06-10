@@ -6,6 +6,8 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "scope:check": "node scripts/check-tenant-scoping.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "db:migrate": "wrangler d1 execute hvac-design-pro --file=./migrations/0001_init.sql",
     "db:migrate:dev": "wrangler d1 execute hvac-design-pro-dev --file=./migrations/0001_init.sql --local"
   },
@@ -14,8 +16,10 @@
     "itty-router": "^5.0.0"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.16.14",
     "@cloudflare/workers-types": "^4.20241230.0",
     "typescript": "^5.7.0",
+    "vitest": "^4.1.8",
     "wrangler": "^4.80.0"
   }
 }
