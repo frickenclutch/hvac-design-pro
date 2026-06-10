@@ -66,6 +66,13 @@ const STRICT_TABLES = [
   'cad_drawing_versions',
   'file_uploads',
   'feedback',
+  // ── Billing foundation (migration 0012) ──────────────────────────────────
+  // All four are org-owned (org_id NOT NULL + indexed). Every billing.ts query
+  // carries `AND org_id = ?` bound to c.get('user').orgId.
+  'subscriptions',
+  'payment_methods',
+  'usage_events',
+  'invoices',
 ];
 
 /**
@@ -74,6 +81,20 @@ const STRICT_TABLES = [
  * IS org-scoped (see feedback.ts GET /:id — the parent is fetched
  * `WHERE id = ? AND org_id = ?` before the attachments are listed). Documented
  * here so its absence is a decision, not an oversight.
+ */
+
+/**
+ * `plan_entitlements` (migration 0012) is intentionally NOT a strict table.
+ * Unlike the four billing tables above, its `org_id` column carries a SENTINEL
+ * value `'*'` for plan-wide rules (`scope_kind='plan'`) that apply to every org
+ * on a given plan — a blanket `org_id = ?` rule doesn't fit that dual model.
+ * Its ONLY reader is `checkEntitlement` in billing/usage.ts, whose query
+ * resolves an org override (`e.org_id = ?`, bound to the session org) OR a
+ * plan-wide rule joined from the org's own plan — never a client-supplied org
+ * filter, and the sentinel `'*'` is never bound from request input (real org
+ * ids are UUIDs). That one query carries an inline `tenant-scope-ok:` waiver
+ * with this reasoning. Documented here so the absence is a decision, not an
+ * oversight.
  */
 
 /**

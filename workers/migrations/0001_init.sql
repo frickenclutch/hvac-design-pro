@@ -21,6 +21,17 @@ CREATE TABLE IF NOT EXISTS organisations (
     country TEXT DEFAULT 'US',
     phone TEXT,
     stripe_cust_id TEXT,
+    -- Billing lifecycle state. Read by routes/platform.ts (GET /orgs,
+    -- /orgs/:id, /metrics) on the L0 dashboard. Historically added to
+    -- production out-of-band and absent from every migration — a fresh
+    -- rebuild would 500 the platform endpoints. Codified here 2026-06-10
+    -- (schema reconciliation, same class as is_platform_admin + the base
+    -- audit_log table; see 0008 and 0012). Because this whole file is
+    -- CREATE TABLE IF NOT EXISTS, re-applying to production is a verified
+    -- no-op — the existing table (which already has the column from the
+    -- out-of-band ALTER) is left untouched. A fresh rebuild now gets the
+    -- column from 0001.
+    billing_status TEXT NOT NULL DEFAULT 'free_beta',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
