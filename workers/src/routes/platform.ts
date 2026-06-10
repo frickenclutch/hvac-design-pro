@@ -250,9 +250,13 @@ platformRoutes.get('/qa-benchmarks', async (c) => {
   // counted separately so we can report shadow-run reliability.
   //
   // SQLite's json_extract works on TEXT columns; outputs is TEXT JSON.
+  // `n_projects` = COUNT(DISTINCT project_id) over the same drift rows. This
+  // is the actual Phase-2 readiness gate (≥ 10 *distinct projects*, not ≥ 10
+  // rows) — a single project re-run 50 times must NOT clear the bar.
   const driftAgg = await db.prepare(
     `SELECT
        COUNT(*) AS sample_size,
+       COUNT(DISTINCT project_id) AS n_projects,
        AVG(ABS(CAST(json_extract(outputs, '$.__driftVsLegacy.heat')   AS REAL))) AS avg_abs_heat_pct,
        AVG(ABS(CAST(json_extract(outputs, '$.__driftVsLegacy.sens')   AS REAL))) AS avg_abs_sens_pct,
        AVG(ABS(CAST(json_extract(outputs, '$.__driftVsLegacy.latent') AS REAL))) AS avg_abs_latent_pct,
@@ -279,6 +283,28 @@ platformRoutes.get('/qa-benchmarks', async (c) => {
      WHERE calc_type = 'MANUAL_J'
        AND created_at > datetime('now', '-30 days')`
   ).first();
+
+  // ── Throwing-cause breakdown ───────────────────────────────────────────
+  // Enumerate WHICH constructions / climate (CTD) bins the cert-grade engine
+  // throws on, so the founder sees the known ceiling-CTD defect concretely
+  // rather than a bare failure count. The throw message text lives in
+  // outputs.__error and encodes the cause — e.g. "Manual J Table 4B: no
+  // populated cell for CTD≥35, DR=H. ..." — so grouping by that text buckets
+  // failures by their distinct root cause. Top-N capped to keep the payload
+  // bounded; a long tail of one-off messages won't bloat the response.
+  const { results: shadowFailureCauses } = await db.prepare(
+    `SELECT
+       COALESCE(json_extract(outputs, '$.__error'), '(no message)') AS cause,
+       COUNT(*) AS count,
+       COUNT(DISTINCT project_id) AS n_projects
+     FROM calculations
+     WHERE calc_type = 'MANUAL_J'
+       AND engine_version LIKE '%-fail'
+       AND created_at > datetime('now', '-30 days')
+     GROUP BY cause
+     ORDER BY count DESC, cause ASC
+     LIMIT 15`
+  ).all();
 
   // ── Static cert facts (travel with the build) ──────────────────────────
   // These are the published ACCA reference test results for the engine
@@ -313,6 +339,7 @@ platformRoutes.get('/qa-benchmarks', async (c) => {
     auditVolume,
     shadowRunDrift: driftAgg,
     shadowRunReliability: shadowReliability,
+    shadowRunFailureCauses: shadowFailureCauses,
     generatedAt: new Date().toISOString(),
   });
 });

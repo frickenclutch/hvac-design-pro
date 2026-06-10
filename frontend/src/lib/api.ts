@@ -665,6 +665,7 @@ class ApiClient {
       auditVolume: { total: number; d24h: number; d7: number; d30: number };
       shadowRunDrift: {
         sample_size: number | null;
+        n_projects: number | null;
         avg_abs_heat_pct: number | null;
         avg_abs_sens_pct: number | null;
         avg_abs_latent_pct: number | null;
@@ -676,6 +677,11 @@ class ApiClient {
         shadow_success: number | null;
         shadow_failure: number | null;
       } | null;
+      shadowRunFailureCauses: Array<{
+        cause: string;
+        count: number;
+        n_projects: number;
+      }> | null;
       generatedAt: string;
     }>('/api/platform/qa-benchmarks');
   }
