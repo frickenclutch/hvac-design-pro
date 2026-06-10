@@ -374,3 +374,89 @@ describe('(c) Negative control — org-A reads the very ids org-B is 404\'d on',
     expect(status).toBe(404);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// (d) BILLING / USAGE tables (migration 0012) are tenant-isolated. Same
+//     contract as (b)+(c): org-B is 404'd / sees no org-A billing data; org-A
+//     reads its own rows (negative control). Plus a proof that the per-usage
+//     gate DEFAULT-ALLOWS when no entitlement is configured (non-breaking).
+// ─────────────────────────────────────────────────────────────────────────────
+describe('(d) Billing/usage tables are tenant-isolated', () => {
+  // Org-B is walled off from org-A's billing rows.
+  it('GET /api/billing/usage/:id (org-A event) → 404, no data leaked', async () => {
+    const { status, json } = await callJson(
+      'GET',
+      `/api/billing/usage/${rows.usageEventId}`,
+      { token: orgB.token },
+    );
+    expect(status).toBe(404);
+    expect(json.event).toBeUndefined();
+  });
+
+  it('GET /api/billing/subscription → org-B never sees org-A subscription', async () => {
+    const { status, json } = await callJson('GET', '/api/billing/subscription', {
+      token: orgB.token,
+    });
+    expect(status).toBe(200);
+    expect(json.subscription).toBeNull(); // org-B has none; org-A's is invisible
+  });
+
+  it('GET /api/billing/invoices → org-B list excludes org-A invoice', async () => {
+    const { status, json } = await callJson('GET', '/api/billing/invoices', {
+      token: orgB.token,
+    });
+    expect(status).toBe(200);
+    const ids = (json.invoices ?? []).map((i: any) => i.id);
+    expect(ids).not.toContain(rows.invoiceId);
+    expect(json.invoices).toHaveLength(0);
+  });
+
+  it('GET /api/billing/payment-methods → org-B excludes org-A method', async () => {
+    const { status, json } = await callJson('GET', '/api/billing/payment-methods', {
+      token: orgB.token,
+    });
+    expect(status).toBe(200);
+    const ids = (json.paymentMethods ?? []).map((m: any) => m.id);
+    expect(ids).not.toContain(rows.paymentMethodId);
+    expect(json.paymentMethods).toHaveLength(0);
+  });
+
+  // Negative control: org-A reads its OWN rows (proves the 404 is tenancy, not
+  // a broken route).
+  it('org-A reads its own usage event', async () => {
+    const { status, json } = await callJson(
+      'GET',
+      `/api/billing/usage/${rows.usageEventId}`,
+      { token: orgA.token },
+    );
+    expect(status).toBe(200);
+    expect(json.event?.id).toBe(rows.usageEventId);
+    expect(json.event?.org_id).toBe(orgA.orgId);
+  });
+
+  it('org-A sees its own subscription + invoice + payment method', async () => {
+    const sub = await callJson('GET', '/api/billing/subscription', { token: orgA.token });
+    expect(sub.status).toBe(200);
+    expect(sub.json.subscription?.id).toBe(rows.subscriptionId);
+
+    const inv = await callJson('GET', '/api/billing/invoices', { token: orgA.token });
+    expect(inv.json.invoices.map((i: any) => i.id)).toContain(rows.invoiceId);
+
+    const pm = await callJson('GET', '/api/billing/payment-methods', { token: orgA.token });
+    expect(pm.json.paymentMethods.map((m: any) => m.id)).toContain(rows.paymentMethodId);
+  });
+
+  // Non-breaking gating: a meter with NO entitlement row is ungated (allowed,
+  // not gated). This is the guarantee that wiring the meter into existing flows
+  // later won't break production until a limit is explicitly configured.
+  it('checkEntitlement default-allows when no entitlement configured', async () => {
+    const { status, json } = await callJson(
+      'GET',
+      '/api/billing/usage?meter=calc_run',
+      { token: orgA.token },
+    );
+    expect(status).toBe(200);
+    expect(json.entitlement.allowed).toBe(true);
+    expect(json.entitlement.gated).toBe(false);
+  });
+});

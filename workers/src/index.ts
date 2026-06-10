@@ -11,6 +11,8 @@ import { platformRoutes } from './routes/platform';
 import { forumRoutes } from './routes/forum';
 import { permitRoutes } from './routes/permits';
 import { auditRoutes } from './routes/audit';
+import { billingRoutes } from './routes/billing';
+import { webhookRoutes } from './routes/webhooks';
 import { authMiddleware } from './middleware/auth';
 import { auditMiddleware } from './middleware/audit';
 
@@ -45,6 +47,12 @@ app.get('/health', (c) => c.json({ status: 'ok', env: c.env.ENVIRONMENT }));
 // Public auth routes
 app.route('/api/auth', authRoutes);
 
+// Provider webhook ingress — PUBLIC by design. Webhooks are signed by the
+// payment provider, not sent by a logged-in user, so they are NOT bearer-authed
+// (signature verification lives in each provider's handleWebhook). Mounted here,
+// ahead of authMiddleware, so the chain doesn't 401 them.
+app.route('/api/webhooks', webhookRoutes);
+
 // Protected routes
 app.use('/api/*', authMiddleware);
 // Audit middleware runs AFTER auth so user context is on c — every mutation
@@ -60,6 +68,7 @@ app.route('/api/platform', platformRoutes);
 app.route('/api/forum', forumRoutes);
 app.route('/api/permits', permitRoutes);
 app.route('/api/audit-log', auditRoutes);
+app.route('/api/billing', billingRoutes);
 
 // ── Scheduled handler (Cloudflare Cron Triggers) ───────────────────────────
 // Every cron schedule declared in wrangler.toml's [triggers] block fires

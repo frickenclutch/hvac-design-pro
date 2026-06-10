@@ -54,21 +54,28 @@ export async function applyMigrations(db: D1Database): Promise<void> {
   }
 
   // ── Out-of-band schema reconciliation (test DB only) ─────────────────────
-  // `organisations.billing_status` is queried by routes/platform.ts
-  // (GET /orgs, /orgs/:id, /metrics) but exists in NO migration (0001-0011) —
+  // `organisations.billing_status` was queried by routes/platform.ts
+  // (GET /orgs, /orgs/:id, /metrics) but historically existed in NO migration —
   // it was added to PRODUCTION out-of-band, the same class of drift CLAUDE.md
-  // §0 calls out for `is_platform_admin` + the base `audit_log` table. A
-  // fresh rebuild from migrations alone therefore 500s on those platform
-  // endpoints. This harness surfaced that gap (see the run report). We add the
-  // column HERE so the test DB mirrors production reality and can exercise the
-  // real handler — WITHOUT editing migrations or production code. The proper
-  // fix (codify the column in a migration) is a separate, flagged follow-up.
+  // §0 calls out for `is_platform_admin` + the base `audit_log` table.
+  //
+  // CODIFIED 2026-06-10: the column is now created by the 0001 organisations
+  // CREATE TABLE (no-op on prod via CREATE TABLE IF NOT EXISTS; see 0012's
+  // header for the reconciliation record). A fresh rebuild from migrations now
+  // gets the column, so the ALTER below is REDUNDANT. It stays as a harmless
+  // no-op (the try/catch already swallows "duplicate column") — it
+  // self-documents the historical gap and protects any environment somehow
+  // still missing the column.
   await reconcileOutOfBandColumns(db);
 }
 
 /** Add columns that exist in production-via-out-of-band-ALTER but are absent
  *  from the migration files, so the test schema matches prod. SQLite has no
- *  `ADD COLUMN IF NOT EXISTS`, so each is wrapped in try/catch (idempotent). */
+ *  `ADD COLUMN IF NOT EXISTS`, so each is wrapped in try/catch (idempotent).
+ *
+ *  NOTE: `billing_status` is now codified in the 0001 migration (2026-06-10),
+ *  so on a fresh rebuild the column already exists and this ALTER throws
+ *  "duplicate column name" — swallowed below. Kept as a harmless backstop. */
 async function reconcileOutOfBandColumns(db: D1Database): Promise<void> {
   const fixes = [
     `ALTER TABLE organisations ADD COLUMN billing_status TEXT NOT NULL DEFAULT 'free_beta'`,
@@ -151,6 +158,11 @@ export interface SeededOrgRows {
   cadDrawingId: string;
   cadVersionId: string;
   fileUploadId: string;
+  // Billing foundation (migration 0012) — one org-A-owned row per strict table.
+  subscriptionId: string;
+  paymentMethodId: string;
+  usageEventId: string;
+  invoiceId: string;
 }
 
 /** Seed one org-A-owned row in each strict table, written directly to D1 so
@@ -166,6 +178,10 @@ export async function seedOrgOwnedRows(
   const cadDrawingId = generateId();
   const cadVersionId = generateId();
   const fileUploadId = generateId();
+  const subscriptionId = generateId();
+  const paymentMethodId = generateId();
+  const usageEventId = generateId();
+  const invoiceId = generateId();
 
   await db
     .prepare(
@@ -230,7 +246,54 @@ export async function seedOrgOwnedRows(
     .bind(fileUploadId, orgId, projectId, `${orgId}/${projectId}/${fileUploadId}.pdf`, userId)
     .run();
 
-  return { projectId, calculationId, cadDrawingId, cadVersionId, fileUploadId };
+  // ── Billing foundation (migration 0012) — one org-A row per strict table ──
+  await db
+    .prepare(
+      `INSERT INTO subscriptions (id, org_id, provider, plan, status)
+       VALUES (?, ?, 'manual', 'free_beta', 'active')`,
+    )
+    .bind(subscriptionId, orgId)
+    .run();
+
+  await db
+    .prepare(
+      `INSERT INTO payment_methods
+         (id, org_id, provider, method_type, display_label, is_default, status)
+       VALUES (?, ?, 'manual', 'erp_invoice', 'Org-A NET-30', 1, 'active')`,
+    )
+    .bind(paymentMethodId, orgId)
+    .run();
+
+  await db
+    .prepare(
+      `INSERT INTO usage_events
+         (id, org_id, meter_key, quantity, unit, source_ref, metadata)
+       VALUES (?, ?, 'calc_run', 1, 'count', ?, ?)`,
+    )
+    .bind(usageEventId, orgId, calculationId, JSON.stringify({ secret: 'org-a-usage' }))
+    .run();
+
+  await db
+    .prepare(
+      `INSERT INTO invoices
+         (id, org_id, subscription_id, provider, provider_invoice_ref,
+          amount_minor, currency, status)
+       VALUES (?, ?, ?, 'manual', ?, 4900, 'USD', 'open')`,
+    )
+    .bind(invoiceId, orgId, subscriptionId, `manual:${orgId}:1`)
+    .run();
+
+  return {
+    projectId,
+    calculationId,
+    cadDrawingId,
+    cadVersionId,
+    fileUploadId,
+    subscriptionId,
+    paymentMethodId,
+    usageEventId,
+    invoiceId,
+  };
 }
 
 /** Dispatch an actual Request through the REAL Hono app + REAL authMiddleware.
