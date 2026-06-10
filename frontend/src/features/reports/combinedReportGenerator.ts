@@ -25,16 +25,26 @@
  */
 
 import { usePreferencesStore } from '../../stores/usePreferencesStore';
-import type { WholeHouseResult } from '../../engines/manualJ';
+import type { WholeHouseResult, DesignConditions } from '../../engines/manualJ';
 import type { AedResult } from '../../engines/aed';
 import {
   calculateManualS, coolingStatusLabel, heatingStatusLabel,
+  MANUAL_S_ENGINE_VERSION,
   type ManualSResult,
 } from '../../engines/manualS';
 import {
   calculateManualD,
   type ManualDResult,
 } from '../../engines/manualD';
+import { MANUAL_J8_ENGINE_VERSION } from '../../engines/manualJ8';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Engine version stamps. Manual J 8 and Manual S export their own constants;
+// AED and Manual D have no module-level constant, so they are pinned here (and
+// surfaced on the Codes & Standards Basis page + section footers).
+// ─────────────────────────────────────────────────────────────────────────────
+const MANUAL_D_ENGINE_VERSION = 'manualD-1.0';
+const AED_ENGINE_VERSION = 'aed-1.0';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public input shape
@@ -51,6 +61,9 @@ export interface CombinedReportData {
   manualS?: ManualSResult | null;
   /** Manual D result — recomputed by the page (or here) from stored inputs. */
   manualD?: ManualDResult | null;
+  /** Manual J design conditions — feeds the Codes & Standards Basis page.
+   *  Read from the Manual J inputs blob by the page. */
+  conditions?: DesignConditions | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -162,6 +175,30 @@ export function recomputeManualD(
 const fmt = (n: number): string => Math.round(n).toLocaleString();
 
 /**
+ * Tamper-evidence content hash. Computes a SHA-256 (hex) over a canonical
+ * JSON serialization of the attested calculation payload, using the WebCrypto
+ * subtle API (no dependency). The hash is printed in the attestation page
+ * footer; re-running the report on the same saved calculations reproduces the
+ * same digest, so any post-signing edit to the underlying numbers changes it.
+ * Returns null when WebCrypto is unavailable (non-secure context / old engine)
+ * — the attestation page then omits the hash line rather than failing.
+ */
+async function sha256Hex(payload: unknown): Promise<string | null> {
+  try {
+    const subtle = globalThis.crypto?.subtle;
+    if (!subtle) return null;
+    const json = JSON.stringify(payload);
+    const bytes = new TextEncoder().encode(json);
+    const digest = await subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Build the combined PDF and trigger a download. Lazy-imports jsPDF so it stays
  * out of the initial bundle, exactly like every calculator exporter does.
  */
@@ -189,13 +226,54 @@ export async function generateCombinedReport(data: CombinedReportData): Promise<
   ];
   const included = sections.filter((s) => s.present);
 
+  // Manual J engine-version stamp. The combined report's Manual J section
+  // displays whichever engine the user has selected; stamp that version.
+  const manualJEngineVersion = prefs.engineVersion === 'manualJ8'
+    ? MANUAL_J8_ENGINE_VERSION
+    : 'manualJ-legacy';
+
+  // AED pass/fail — taken from the standalone AED result when present, else
+  // from the whole-house Manual J AED summary. Drives the section-header /
+  // -footer stamp ("AED PASS" / "AED FAIL") on every page.
+  const aedPass: boolean | null = data.aed
+    ? data.aed.pass
+    : (data.manualJ?.aed ? data.manualJ.aed.pass : null);
+  const aedStamp = aedPass === null ? '' : `AED ${aedPass ? 'PASS' : 'FAIL'}`;
+
+  // Content hash over the exact calculation payload being attested. Computed
+  // once up front so it can be printed both as page chrome (optional) and in
+  // the attestation footer. Hash covers the gathered tool results + the
+  // design conditions + the engine versions in play — the full attested set.
+  const hashPayload = {
+    project: projectName,
+    engines: {
+      manualJ: manualJEngineVersion,
+      aed: AED_ENGINE_VERSION,
+      manualS: data.manualS?.engineVersion ?? MANUAL_S_ENGINE_VERSION,
+      manualD: MANUAL_D_ENGINE_VERSION,
+    },
+    manualJ: data.manualJ ?? null,
+    aed: data.aed ?? null,
+    manualS: data.manualS ?? null,
+    manualD: data.manualD ?? null,
+    conditions: data.conditions ?? null,
+  };
+  const contentHash = await sha256Hex(hashPayload);
+
   // ── Shared footer (engine-stamp convention, matches AED / Manual D / S) ─────
+  // engineLabel already carries the engine version; the optional AED stamp is
+  // centered so every page records the exposure-diversity verdict.
   const drawFooter = (engineLabel: string): void => {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(6);
     doc.setTextColor(150);
     const watermark = prefs.pdfWatermarkText || 'GENERATED BY HVAC DESIGNPRO';
     doc.text(`${watermark}  —  ${engineLabel}`, margin, ph - 24);
+    if (aedStamp) {
+      if (aedPass) doc.setTextColor(16, 150, 100); else doc.setTextColor(200, 60, 60);
+      doc.text(aedStamp, pw / 2, ph - 24, { align: 'center' });
+      doc.setTextColor(150);
+    }
     doc.text(dateStr, pw - margin, ph - 24, { align: 'right' });
     doc.setTextColor(0);
   };
@@ -232,6 +310,30 @@ export async function generateCombinedReport(data: CombinedReportData): Promise<
       y += 14;
     });
     return y + 8;
+  };
+
+  // Section header with the engine-version + AED pass/fail stamped on the right
+  // (right under the title rule). Returns the new y cursor below the rule.
+  const sectionHeader = (
+    title: string,
+    engineVersion: string,
+    showAed: boolean,
+  ): number => {
+    let y2 = 56;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(0);
+    doc.text(title, margin, y2);
+    // Right-aligned engine stamp + optional AED verdict on the title row.
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
+    doc.setTextColor(110);
+    doc.text(`Engine ${engineVersion}`, pw - margin, y2 - 8, { align: 'right' });
+    if (showAed && aedStamp) {
+      if (aedPass) doc.setTextColor(16, 150, 100); else doc.setTextColor(200, 60, 60);
+      doc.text(aedStamp, pw - margin, y2 + 4, { align: 'right' });
+    }
+    doc.setTextColor(0);
+    y2 += 10;
+    doc.setDrawColor(180); doc.setLineWidth(0.75); doc.line(margin, y2, pw - margin, y2); y2 += 22;
+    return y2;
   };
 
   // ════════════════════════════════════════════════════════════════════════
@@ -271,15 +373,110 @@ export async function generateCombinedReport(data: CombinedReportData): Promise<
   drawStamp();
 
   // ════════════════════════════════════════════════════════════════════════
+  // CODES & STANDARDS BASIS
+  // Maps each included result to: the engine version used, the ACCA/ASHRAE
+  // reference it implements, and the actual design conditions in effect.
+  // ════════════════════════════════════════════════════════════════════════
+  if (included.length > 0) {
+    doc.addPage();
+    y = sectionHeader('Codes & Standards Basis', `combined · ${manualJEngineVersion}`, true);
+
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(80);
+    {
+      const intro = doc.splitTextToSize(
+        'Each calculation in this report was produced by the engine version listed below, '
+        + 'implementing the cited ACCA / ASHRAE methodology. Design conditions are the values '
+        + 'used in the Manual J load calculation.',
+        pw - margin * 2,
+      ) as string[];
+      doc.text(intro, margin, y); y += intro.length * 12 + 8;
+    }
+
+    // Per-tool basis rows: code | engine version | reference.
+    const basis: { code: string; engine: string; ref: string }[] = [];
+    if (data.manualJ) {
+      basis.push({
+        code: 'Manual J',
+        engine: manualJEngineVersion,
+        ref: 'ACCA Manual J, 8th Edition (Residential Load Calculation)',
+      });
+    }
+    if (data.aed) {
+      basis.push({
+        code: 'AED',
+        engine: AED_ENGINE_VERSION,
+        ref: 'ACCA Manual J, Section N — Adequate Exposure Diversity (30% peak-vs-12hr-avg threshold)',
+      });
+    }
+    if (data.manualS) {
+      basis.push({
+        code: 'Manual S',
+        engine: data.manualS.engineVersion || MANUAL_S_ENGINE_VERSION,
+        ref: 'ACCA Manual S — Equipment Selection (115% total-cooling sizing limit; AHRI capacity matching)',
+      });
+    }
+    if (data.manualD) {
+      basis.push({
+        code: 'Manual D',
+        engine: MANUAL_D_ENGINE_VERSION,
+        ref: 'ACCA Manual D — Residential Duct Design (Equal-Friction Method)',
+      });
+    }
+
+    // Table header
+    const cb = { code: margin, eng: margin + 110, ref: margin + 250 };
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(0);
+    doc.text('Tool', cb.code, y);
+    doc.text('Engine Version', cb.eng, y);
+    doc.text('Standard / Method', cb.ref, y);
+    y += 4; doc.setDrawColor(180); doc.line(margin, y, pw - margin, y); y += 12;
+
+    for (const b of basis) {
+      if (y > ph - 60) { doc.addPage(); y = 56; }
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(0);
+      doc.text(b.code, cb.code, y);
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(60);
+      doc.text(b.engine, cb.eng, y);
+      const refLines = doc.splitTextToSize(b.ref, pw - margin - cb.ref) as string[];
+      doc.text(refLines, cb.ref, y);
+      y += Math.max(14, refLines.length * 11 + 4);
+    }
+
+    // Design conditions block (the actual ASHRAE values used in Manual J).
+    if (data.conditions) {
+      const dc = data.conditions;
+      if (y > ph - 140) { doc.addPage(); y = 56; }
+      y += 10;
+      const condPairs: [string, string][] = [
+        ['Outdoor heating design temp', `${dc.outdoorHeatingTemp}°F`],
+        ['Outdoor cooling design temp', `${dc.outdoorCoolingTemp}°F`],
+        ['Indoor heating setpoint', `${dc.indoorHeatingTemp}°F`],
+        ['Indoor cooling setpoint', `${dc.indoorCoolingTemp}°F`],
+        ['Cooling grains difference', `${Math.round(dc.outdoorGrains - dc.indoorGrains)} gr/lb (outdoor ${dc.outdoorGrains} − indoor ${dc.indoorGrains})`],
+        ['Cooling daily range', String(dc.coolingDailyRange)],
+        ['Latitude', `${dc.latitude}°N`],
+        ['Elevation', `${fmt(dc.elevation)} ft`],
+      ];
+      y = pairBlock(y, 'Design Conditions (ASHRAE — as used in Manual J)', condPairs);
+    } else {
+      if (y > ph - 60) { doc.addPage(); y = 56; }
+      y += 10;
+      doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(150);
+      doc.text('Design conditions not available from the saved Manual J inputs.', margin, y);
+      doc.setTextColor(0);
+    }
+
+    drawFooter('Codes & Standards Basis — ACCA Manual J / S / D');
+    drawStamp();
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
   // SECTION 1: MANUAL J
   // ════════════════════════════════════════════════════════════════════════
   if (data.manualJ) {
     const mj = data.manualJ;
     doc.addPage();
-    y = 56;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(0);
-    doc.text('Manual J — Load Calculation', margin, y); y += 10;
-    doc.setDrawColor(180); doc.setLineWidth(0.75); doc.line(margin, y, pw - margin, y); y += 22;
+    y = sectionHeader('Manual J — Load Calculation', manualJEngineVersion, true);
 
     y = pairBlock(y, 'Whole-House Loads', [
       ['Total heating', `${fmt(mj.totalHeatingBtu)} BTU/h`],
@@ -330,7 +527,7 @@ export async function generateCombinedReport(data: CombinedReportData): Promise<
       doc.text(fmt(mj.totalCoolingBtu), c.tot, y, { align: 'right' });
     }
 
-    drawFooter('Manual J — ACCA Manual J 8th Edition');
+    drawFooter(`Manual J ${manualJEngineVersion}  —  ACCA Manual J 8th Edition`);
     drawStamp();
   }
 
@@ -340,10 +537,7 @@ export async function generateCombinedReport(data: CombinedReportData): Promise<
   if (data.aed) {
     const aed = data.aed;
     doc.addPage();
-    y = 56;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(0);
-    doc.text('AED — Adequate Exposure Diversity', margin, y); y += 10;
-    doc.setDrawColor(180); doc.setLineWidth(0.75); doc.line(margin, y, pw - margin, y); y += 22;
+    y = sectionHeader('AED — Adequate Exposure Diversity', AED_ENGINE_VERSION, true);
 
     doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
     if (aed.pass) { doc.setTextColor(16, 150, 100); doc.text('PASS — exposure diversity within limits', margin, y); }
@@ -378,7 +572,7 @@ export async function generateCombinedReport(data: CombinedReportData): Promise<
       }
     }
 
-    drawFooter('AED — ACCA Manual J Section N');
+    drawFooter(`AED ${AED_ENGINE_VERSION}  —  ACCA Manual J Section N`);
     drawStamp();
   }
 
@@ -388,10 +582,7 @@ export async function generateCombinedReport(data: CombinedReportData): Promise<
   if (data.manualS) {
     const ms = data.manualS;
     doc.addPage();
-    y = 56;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(0);
-    doc.text('Manual S — Equipment Selection', margin, y); y += 10;
-    doc.setDrawColor(180); doc.setLineWidth(0.75); doc.line(margin, y, pw - margin, y); y += 22;
+    y = sectionHeader('Manual S — Equipment Selection', ms.engineVersion || MANUAL_S_ENGINE_VERSION, false);
 
     doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
     if (ms.overallPass) { doc.setTextColor(16, 150, 100); doc.text('PASS — selection within Manual S limits', margin, y); }
@@ -443,10 +634,7 @@ export async function generateCombinedReport(data: CombinedReportData): Promise<
   if (data.manualD) {
     const md = data.manualD;
     doc.addPage();
-    y = 56;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(0);
-    doc.text('Manual D — Duct Design & Sizing', margin, y); y += 10;
-    doc.setDrawColor(180); doc.setLineWidth(0.75); doc.line(margin, y, pw - margin, y); y += 22;
+    y = sectionHeader('Manual D — Duct Design & Sizing', MANUAL_D_ENGINE_VERSION, false);
 
     y = pairBlock(y, 'System Summary', [
       ['Total system airflow', `${fmt(md.totalSystemCfm)} CFM`],
@@ -511,8 +699,87 @@ export async function generateCombinedReport(data: CombinedReportData): Promise<
       doc.setTextColor(0);
     }
 
-    drawFooter('Manual D manualD-1.0  —  ACCA Manual D (Equal Friction Method)');
+    drawFooter(`Manual D ${MANUAL_D_ENGINE_VERSION}  —  ACCA Manual D (Equal Friction Method)`);
     drawStamp();
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // PE STAMP / E-SIGNATURE / ATTESTATION
+  // Preference-gated: renders ONLY when both a PE name and a signature image
+  // are configured. An un-configured user gets the report exactly as before —
+  // no empty/placeholder seal. Frames the platform as a calculation aid and
+  // the named engineer as the responsible engineer of record, with a visible
+  // independent-review disclaimer, plus the SHA-256 content hash in the footer.
+  // ════════════════════════════════════════════════════════════════════════
+  // A PE seal is not valid without a license number — require name + license +
+  // signature before rendering the sealed attestation page.
+  const peConfigured = !!(prefs.peName && prefs.peLicenseNumber && prefs.peSignatureDataUrl);
+  if (peConfigured) {
+    doc.addPage();
+    y = sectionHeader('Engineer of Record — Attestation & Seal', `combined · ${manualJEngineVersion}`, true);
+
+    // Attestation statement — the responsible-charge language.
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(20);
+    const attestation =
+      'These load calculations (ACCA Manual J), equipment selections (ACCA Manual S), and duct designs '
+      + '(ACCA Manual D) were prepared under my responsible charge and reviewed for conformance with the '
+      + 'applicable ACCA Manual J / S / D methodologies. The HVAC DesignPro software was used as a '
+      + 'calculation aid; the engineering judgment, verification of inputs, and acceptance of the results '
+      + 'are my own. I am a licensed Professional Engineer in the jurisdiction noted below and accept '
+      + 'professional responsibility for the contents of this report as the engineer of record.';
+    {
+      const lines = doc.splitTextToSize(attestation, pw - margin * 2) as string[];
+      doc.text(lines, margin, y); y += lines.length * 13 + 12;
+    }
+
+    // Independent-review disclaimer — visible, distinct from the attestation.
+    doc.setFont('helvetica', 'italic'); doc.setFontSize(8); doc.setTextColor(120);
+    {
+      const disclaimer =
+        'Disclaimer: Outputs generated by HVAC DesignPro are a calculation aid and do not constitute '
+        + 'engineering advice. They require independent review and acceptance by a qualified professional '
+        + 'before use in any permit application, construction, or equipment procurement decision.';
+      const dl = doc.splitTextToSize(disclaimer, pw - margin * 2) as string[];
+      doc.text(dl, margin, y); y += dl.length * 11 + 18;
+    }
+    doc.setTextColor(0);
+
+    // Credentials block.
+    y = pairBlock(y, 'Engineer of Record', [
+      ['Name', prefs.peName],
+      ['PE License Number', prefs.peLicenseNumber || '—'],
+      ['Jurisdiction', prefs.peJurisdiction || '—'],
+      ['Date', dateStr],
+    ]);
+
+    // Signature image + line.
+    if (y > ph - 160) { doc.addPage(); y = 56; }
+    y += 10;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(0);
+    doc.text('Signature', margin, y); y += 8;
+    const sigW = 200;
+    const sigH = 60;
+    try { doc.addImage(prefs.peSignatureDataUrl, 'PNG', margin, y, sigW, sigH); } catch { /* skip bad image */ }
+    y += sigH + 4;
+    doc.setDrawColor(60); doc.setLineWidth(0.75); doc.line(margin, y, margin + sigW + 60, y); y += 12;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(110);
+    doc.text(`${prefs.peName}${prefs.peLicenseNumber ? `  ·  PE ${prefs.peLicenseNumber}` : ''}`, margin, y);
+    doc.setTextColor(0);
+
+    // Firm seal overlay (if configured) sits on this page too.
+    drawStamp();
+
+    // Content-hash footer — the tamper-evidence line. Drawn just above the
+    // standard footer so it stays associated with the signed page.
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(6); doc.setTextColor(120);
+    if (contentHash) {
+      doc.text(`Content hash (SHA-256): ${contentHash}`, margin, ph - 36);
+    } else {
+      doc.text('Content hash unavailable in this environment (no WebCrypto).', margin, ph - 36);
+    }
+    doc.setTextColor(0);
+
+    drawFooter(`Attestation — sealed by ${prefs.peName}`);
   }
 
   // ── Save ────────────────────────────────────────────────────────────────
