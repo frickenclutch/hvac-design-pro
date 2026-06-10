@@ -27,6 +27,10 @@ export interface Env {
   CF_ACCESS_CLIENT_ID?: string;
   CF_ACCESS_CLIENT_SECRET?: string;
   CF_ACCESS_ISSUER?: string;
+  /** AES-256-GCM key (64 hex chars / 32 bytes) for encrypting TOTP secrets at
+   *  rest. Set via `wrangler secret put MFA_ENC_KEY`. Unset → MFA enrollment
+   *  refuses (never stores a plaintext secret). */
+  MFA_ENC_KEY?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();

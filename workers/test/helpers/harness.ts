@@ -353,6 +353,68 @@ export async function seedCatalogProducts(
   return { hvacId, waterHeaterId, pipeId };
 }
 
+// ── TOTP code generation (test-only) ─────────────────────────────────────────
+//
+// Mirrors the RFC-6238 HOTP the worker's utils/mfa.ts VERIFIES, so the suite
+// can present a live, valid code for a given base32 secret. Runs inside workerd,
+// where WebCrypto (crypto.subtle) is available — the same primitive the worker
+// uses. This is the test's "authenticator app".
+
+const B32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+function base32DecodeTest(s: string): Uint8Array {
+  const clean = s.replace(/[\s=]/g, '').toUpperCase();
+  let bits = 0;
+  let value = 0;
+  const out: number[] = [];
+  for (let i = 0; i < clean.length; i++) {
+    const idx = B32_ALPHABET.indexOf(clean[i]);
+    if (idx === -1) continue;
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      out.push((value >>> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+  return new Uint8Array(out);
+}
+
+/** Compute the current 6-digit TOTP code for a base32 secret (default: now). */
+export async function totpNow(base32Secret: string, atMs: number = Date.now()): Promise<string> {
+  const secret = base32DecodeTest(base32Secret);
+  const counter = Math.floor(atMs / 1000 / 30);
+  const key = await crypto.subtle.importKey(
+    'raw',
+    secret as unknown as ArrayBuffer,
+    { name: 'HMAC', hash: 'SHA-1' },
+    false,
+    ['sign'],
+  );
+  const msg = new Uint8Array(8);
+  let cnt = counter;
+  for (let i = 7; i >= 0; i--) {
+    msg[i] = cnt & 0xff;
+    cnt = Math.floor(cnt / 256);
+  }
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, msg));
+  const offset = sig[19] & 0x0f;
+  const bin =
+    ((sig[offset] & 0x7f) << 24) |
+    ((sig[offset + 1] & 0xff) << 16) |
+    ((sig[offset + 2] & 0xff) << 8) |
+    (sig[offset + 3] & 0xff);
+  return String(bin % 1_000_000).padStart(6, '0');
+}
+
+/** A 6-digit code GUARANTEED not to match the live TOTP for a secret. */
+export async function wrongTotp(base32Secret: string): Promise<string> {
+  const real = await totpNow(base32Secret);
+  // Bump the last digit so it can never equal the real code.
+  const bumped = (parseInt(real, 10) + 1) % 1_000_000;
+  return String(bumped).padStart(6, '0');
+}
+
 /** Dispatch an actual Request through the REAL Hono app + REAL authMiddleware.
  *  `token` is the RAW bearer (omit for an unauthenticated request). */
 export async function call(

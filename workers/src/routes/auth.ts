@@ -2,11 +2,17 @@ import { Hono } from 'hono';
 import { generateId } from '../utils/id';
 import { hashPassword, verifyPassword, isLegacyHash, hashToken } from '../utils/crypto';
 import { mintTokenPair } from '../utils/session';
-import { sendEmail, buildWelcomeEmail, buildVerificationEmail, buildPasswordResetEmail } from '../utils/email';
+import { sendEmail, buildWelcomeEmail, buildVerificationEmail, buildPasswordResetEmail, buildMfaEmailCode } from '../utils/email';
 import { createVerificationCode, validateVerificationCode } from '../utils/verificationCodes';
 import { checkRateLimit, recordRateLimitEvent, cleanupRateLimitEvents } from '../utils/rateLimit';
 import { buildAuthUrl, exchangeCodeForTokens, fetchMicrosoftProfile, buildCfAccessAuthUrl, exchangeCfAccessCode, fetchCfAccessUserInfo } from '../utils/oauth';
 import { writeAuthAudit } from '../middleware/audit';
+import { authMiddleware, type AuthUser } from '../middleware/auth';
+import {
+  randomBase32Secret, buildOtpauthUri, verifyTotp,
+  encryptSecret, decryptSecret, isMfaKeyConfigured,
+  generateBackupCodes, newChallengeToken,
+} from '../utils/mfa';
 
 interface Env {
   DB: D1Database;
@@ -18,9 +24,104 @@ interface Env {
   CF_ACCESS_CLIENT_SECRET?: string;
   CF_ACCESS_ISSUER?: string;
   ENVIRONMENT?: string;
+  MFA_ENC_KEY?: string;
 }
 
 export const authRoutes = new Hono<{ Bindings: Env }>();
+
+// ── MFA helpers (shared by login + the /mfa/* endpoints) ─────────────────────
+
+const MFA_CHALLENGE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+/** Has this user a CONFIRMED (active) TOTP credential? */
+async function isMfaEnrolled(db: D1Database, userId: string): Promise<boolean> {
+  const row = await db.prepare(
+    `SELECT confirmed_at FROM mfa_credentials WHERE user_id = ? AND type = 'totp' AND confirmed_at IS NOT NULL`,
+  ).bind(userId).first();
+  return !!row;
+}
+
+/** Role policy: MFA is REQUIRED for tenant admins and L0 platform admins. */
+function mfaRequiredFor(role: unknown, isPlatformAdmin: unknown): boolean {
+  return role === 'admin' || Number(isPlatformAdmin ?? 0) === 1;
+}
+
+/** Create a single-use login/enroll challenge bound to a user; returns the RAW
+ *  token (hashed at rest). The raw token is the only thing that lets the
+ *  second-factor (or grace-enroll) step proceed — a client cannot forge it. */
+async function createMfaChallenge(
+  db: D1Database,
+  userId: string,
+  orgId: string,
+  purpose: 'login' | 'enroll',
+): Promise<string> {
+  const raw = newChallengeToken();
+  await db.prepare(
+    `INSERT INTO mfa_challenges (id, user_id, org_id, token_hash, purpose, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    generateId(), userId, orgId, await hashToken(raw), purpose,
+    new Date(Date.now() + MFA_CHALLENGE_TTL_MS).toISOString(),
+  ).run();
+  return raw;
+}
+
+interface ChallengeRow {
+  id: string;
+  user_id: string;
+  org_id: string;
+}
+
+/** Resolve a live (unconsumed, unexpired) challenge by raw token + purpose.
+ *  Does NOT consume it — callers consume only on a fully-successful step. */
+async function loadMfaChallenge(
+  db: D1Database,
+  rawToken: string,
+  purpose: 'login' | 'enroll',
+): Promise<ChallengeRow | null> {
+  const hash = await hashToken(rawToken);
+  const row = await db.prepare(
+    `SELECT id, user_id, org_id FROM mfa_challenges
+     WHERE token_hash = ? AND purpose = ?
+       AND consumed_at IS NULL AND expires_at > datetime('now')`,
+  ).bind(hash, purpose).first<ChallengeRow>();
+  return row ?? null;
+}
+
+/** The exact login success payload shape, rebuilt from a user id (used by the
+ *  challenge + grace-confirm endpoints after the factor passes). Returns null
+ *  if the user is missing or no longer active. */
+async function buildSessionResponse(
+  db: D1Database, userId: string,
+): Promise<{ token: string; refreshToken: string; body: Record<string, unknown> } | null> {
+  const u = await db.prepare(
+    `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_platform_admin, u.is_permit_authority, u.org_id, u.status,
+            o.name as org_name, o.org_type, o.slug, o.region_code
+     FROM users u JOIN organisations o ON o.id = u.org_id
+     WHERE u.id = ?`,
+  ).bind(userId).first();
+  if (!u || (u.status as string) !== 'active') return null;
+
+  const { accessToken: token, refreshToken } = await mintTokenPair(db, u.id as string, u.org_id as string);
+  return {
+    token,
+    refreshToken,
+    body: {
+      token,
+      refreshToken,
+      user: {
+        id: u.id, email: u.email, firstName: u.first_name,
+        lastName: u.last_name, role: u.role, isVerified: true,
+        isPlatformAdmin: Number(u.is_platform_admin ?? 0) === 1,
+        isPermitAuthority: Number(u.is_permit_authority ?? 0) === 1,
+      },
+      organisation: {
+        id: u.org_id, name: u.org_name, type: u.org_type,
+        slug: u.slug, regionCode: u.region_code,
+      },
+    },
+  };
+}
 
 // ── Register new user + org ──────────────────────────────────────────────────
 authRoutes.post('/register', async (c) => {
@@ -182,6 +283,54 @@ authRoutes.post('/login', async (c) => {
       pendingVerification: true,
       email: normalizedEmail,
     }, 403);
+  }
+
+  // ── MFA second-factor gate ──────────────────────────────────────────────
+  // Password is correct + account active + email verified. Before minting a
+  // session we branch on the user's MFA state. A non-MFA, non-required user
+  // (the overwhelming majority today) falls straight through — byte-identical
+  // to the prior behavior. See the state machine in CLAUDE.md / the MFA design.
+  {
+    const enrolled = await isMfaEnrolled(db, user.id as string);
+    const required = mfaRequiredFor(user.role, user.is_platform_admin);
+
+    if (enrolled) {
+      // NEVER mint on password alone — issue a single-use login challenge.
+      const raw = await createMfaChallenge(db, user.id as string, user.org_id as string, 'login');
+      await writeAuthAudit(c, {
+        action: 'auth.mfa.challenge_started', status: 202,
+        userId: user.id as string, orgId: user.org_id as string,
+        actorRole: user.role as string, entityId: user.id as string,
+        entityLabel: user.email as string,
+        detail: { method: 'password' },
+      });
+      return c.json({
+        mfaRequired: true,
+        mfaChallengeToken: raw,
+        methods: ['totp', 'email', 'backup'],
+        email: user.email,
+      }, 202);
+    }
+
+    if (required) {
+      // Required-but-not-enrolled: DO NOT hard-fail (no admin lockout) and DO
+      // NOT mint a session. Hand back a grace-enroll challenge that forces
+      // enrollment in-flow.
+      const raw = await createMfaChallenge(db, user.id as string, user.org_id as string, 'enroll');
+      await writeAuthAudit(c, {
+        action: 'auth.mfa.enrollment_required', status: 403,
+        userId: user.id as string, orgId: user.org_id as string,
+        actorRole: user.role as string, entityId: user.id as string,
+        entityLabel: user.email as string,
+        detail: { method: 'password' },
+      });
+      return c.json({
+        enrollmentRequired: true,
+        mfaEnrollToken: raw,
+        email: user.email,
+        message: 'Your role requires multi-factor authentication. Set it up to continue.',
+      }, 403);
+    }
   }
 
   // Create session
@@ -522,6 +671,37 @@ authRoutes.post('/sso/microsoft/callback', async (c) => {
     c.executionCtx.waitUntil(sendEmail(c.env.RESEND_API_KEY, welcomeEmail));
   }
 
+  // ── MFA second-factor gate (returning SSO user) ─────────────────────────
+  // A freshly-created SSO user has no credential row, so isMfaEnrolled is
+  // false and (if their role isn't required) they fall straight through —
+  // unchanged. A returning enrolled user is challenged; a required-but-not-
+  // enrolled user gets the grace-enroll handoff.
+  {
+    const enrolled = await isMfaEnrolled(db, userId);
+    const required = mfaRequiredFor(userRole, isPlatformAdmin);
+    if (enrolled) {
+      const raw = await createMfaChallenge(db, userId, orgId, 'login');
+      await writeAuthAudit(c, {
+        action: 'auth.mfa.challenge_started', status: 202,
+        userId, orgId, actorRole: userRole, entityId: userId,
+        entityLabel: email, detail: { method: 'sso_microsoft' },
+      });
+      return c.json({ mfaRequired: true, mfaChallengeToken: raw, methods: ['totp', 'email', 'backup'], email }, 202);
+    }
+    if (required) {
+      const raw = await createMfaChallenge(db, userId, orgId, 'enroll');
+      await writeAuthAudit(c, {
+        action: 'auth.mfa.enrollment_required', status: 403,
+        userId, orgId, actorRole: userRole, entityId: userId,
+        entityLabel: email, detail: { method: 'sso_microsoft' },
+      });
+      return c.json({
+        enrollmentRequired: true, mfaEnrollToken: raw, email,
+        message: 'Your role requires multi-factor authentication. Set it up to continue.',
+      }, 403);
+    }
+  }
+
   // Create session
   const { accessToken: token, refreshToken } = await mintTokenPair(db, userId, orgId);
 
@@ -678,6 +858,33 @@ authRoutes.post('/sso/cloudflare/callback', async (c) => {
     const welcomeEmail = buildWelcomeEmail(firstName);
     welcomeEmail.to = email;
     c.executionCtx.waitUntil(sendEmail(c.env.RESEND_API_KEY, welcomeEmail));
+  }
+
+  // ── MFA second-factor gate (returning SSO user) — see Microsoft callback. ─
+  {
+    const enrolled = await isMfaEnrolled(db, userId);
+    const required = mfaRequiredFor(userRole, isPlatformAdmin);
+    if (enrolled) {
+      const raw = await createMfaChallenge(db, userId, orgId, 'login');
+      await writeAuthAudit(c, {
+        action: 'auth.mfa.challenge_started', status: 202,
+        userId, orgId, actorRole: userRole, entityId: userId,
+        entityLabel: email, detail: { method: 'sso_cloudflare' },
+      });
+      return c.json({ mfaRequired: true, mfaChallengeToken: raw, methods: ['totp', 'email', 'backup'], email }, 202);
+    }
+    if (required) {
+      const raw = await createMfaChallenge(db, userId, orgId, 'enroll');
+      await writeAuthAudit(c, {
+        action: 'auth.mfa.enrollment_required', status: 403,
+        userId, orgId, actorRole: userRole, entityId: userId,
+        entityLabel: email, detail: { method: 'sso_cloudflare' },
+      });
+      return c.json({
+        enrollmentRequired: true, mfaEnrollToken: raw, email,
+        message: 'Your role requires multi-factor authentication. Set it up to continue.',
+      }, 403);
+    }
   }
 
   // Create session
@@ -1018,4 +1225,468 @@ authRoutes.get('/me', async (c) => {
       slug: result.slug, regionCode: result.region_code
     }
   });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// MFA (TOTP) — second-factor enrollment, management, and login completion
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// SECURITY MODEL (see C:/Users/ngriffith/.claude/plans/mfa-design.md):
+//  - The AUTHED management endpoints (status/enroll/confirm/disable) manage the
+//    SESSION user's OWN factor. They run behind authMiddleware (registered just
+//    below) and ALWAYS bind c.get('user').id — never a client-supplied id.
+//  - The PUBLIC endpoints (challenge/email-code/enroll-grace/confirm-grace) are
+//    pre-session: the user has no bearer yet. They resolve the user ONLY via the
+//    opaque, single-use, hashed challenge token (loadMfaChallenge) — never from
+//    request-supplied identity. mintTokenPair runs ONLY inside /challenge and
+//    /confirm-grace, AFTER server-side factor verification AND atomic single-use
+//    challenge consumption (UPDATE ... consumed_at WHERE id=? AND consumed_at IS
+//    NULL, then meta.changes===1 BEFORE the mint). No bypass, no admin lockout.
+//  - MFA_ENC_KEY unset → enroll refuses (503), never stores a plaintext secret.
+//  - Rate-limiting reuses rate_limit_events keyed mfa:<userId>, recorded only on
+//    a FAILED attempt.
+//  - Backup codes are PBKDF2-hashed and one-time (used_at marked with a
+//    rows-affected guard).
+
+// Per-route auth: the four management endpoints require a live session. The
+// public challenge/grace/email endpoints are deliberately NOT listed here.
+authRoutes.use('/mfa/status', authMiddleware);
+authRoutes.use('/mfa/enroll', authMiddleware);
+authRoutes.use('/mfa/confirm', authMiddleware);
+authRoutes.use('/mfa/disable', authMiddleware);
+
+const MFA_RL_WINDOW_MIN = 15;
+const MFA_RL_MAX_VERIFY = 5; // challenge / confirm / disable
+const MFA_RL_MAX_EMAIL = 3;  // email-code dispatch
+
+/** Count how many UNUSED backup codes a user has left. */
+async function backupCodesRemaining(db: D1Database, userId: string): Promise<number> {
+  const row = await db.prepare(
+    `SELECT COUNT(*) AS cnt FROM mfa_backup_codes WHERE user_id = ? AND used_at IS NULL`,
+  ).bind(userId).first<{ cnt: number }>();
+  return row?.cnt ?? 0;
+}
+
+/**
+ * Verify a backup code for a user and atomically mark it used. Returns true on
+ * a first-time match, false otherwise. The used_at flip carries a rows-affected
+ * guard (WHERE id=? AND used_at IS NULL) so a code can NEVER be redeemed twice,
+ * even under concurrent submission.
+ */
+async function consumeBackupCode(db: D1Database, userId: string, code: string): Promise<boolean> {
+  const candidate = code.trim().toUpperCase();
+  if (!candidate) return false;
+  const { results } = await db.prepare(
+    `SELECT id, code_hash FROM mfa_backup_codes WHERE user_id = ? AND used_at IS NULL`,
+  ).bind(userId).all<{ id: string; code_hash: string }>();
+  for (const row of results ?? []) {
+    if (await verifyPassword(candidate, row.code_hash)) {
+      const upd = await db.prepare(
+        `UPDATE mfa_backup_codes SET used_at = datetime('now') WHERE id = ? AND used_at IS NULL`,
+      ).bind(row.id).run();
+      // Rows-affected guard: only a winning, first-time consumption returns true.
+      return upd.meta.changes === 1;
+    }
+  }
+  return false;
+}
+
+/**
+ * Atomically consume a challenge row (single-use). Returns true iff THIS call
+ * was the one that flipped consumed_at from NULL — the gate that must pass
+ * BEFORE mintTokenPair. A replayed/already-consumed token returns false.
+ */
+async function consumeChallenge(db: D1Database, challengeId: string): Promise<boolean> {
+  const res = await db.prepare(
+    `UPDATE mfa_challenges SET consumed_at = datetime('now') WHERE id = ? AND consumed_at IS NULL`,
+  ).bind(challengeId).run();
+  return res.meta.changes === 1;
+}
+
+// ── GET /api/auth/mfa/status (authed) ────────────────────────────────────────
+authRoutes.get('/mfa/status', async (c) => {
+  const user = c.get('user');
+  const db = c.env.DB;
+  const cred = await db.prepare(
+    `SELECT type, confirmed_at FROM mfa_credentials
+     WHERE user_id = ? AND type = 'totp' AND confirmed_at IS NOT NULL`,
+  ).bind(user.id).first<{ type: string }>();
+  const enabled = !!cred;
+  return c.json({
+    enabled,
+    method: enabled ? 'totp' : null,
+    required: mfaRequiredFor(user.role, user.isPlatformAdmin),
+    backupCodesRemaining: enabled ? await backupCodesRemaining(db, user.id) : 0,
+  });
+});
+
+// ── POST /api/auth/mfa/enroll (authed) — begin enrollment ────────────────────
+authRoutes.post('/mfa/enroll', async (c) => {
+  const user = c.get('user');
+  const db = c.env.DB;
+
+  // REFUSE if the encryption key is unset — never store a plaintext secret.
+  if (!isMfaKeyConfigured(c.env.MFA_ENC_KEY)) {
+    return c.json({ error: 'MFA is not configured on this server. Contact your administrator.' }, 503);
+  }
+
+  // A confirmed credential blocks re-enroll (must disable first).
+  const existing = await db.prepare(
+    `SELECT confirmed_at FROM mfa_credentials WHERE user_id = ? AND type = 'totp' AND confirmed_at IS NOT NULL`,
+  ).bind(user.id).first();
+  if (existing) {
+    return c.json({ error: 'MFA is already enabled. Disable it first to re-enroll.' }, 409);
+  }
+
+  const secret = randomBase32Secret();
+  const enc = await encryptSecret(secret, c.env.MFA_ENC_KEY);
+  // Replace any prior UNCONFIRMED row (single pending enrollment per type).
+  await db.prepare(
+    `INSERT OR REPLACE INTO mfa_credentials (id, user_id, type, secret_encrypted, confirmed_at)
+     VALUES (?, ?, 'totp', ?, NULL)`,
+  ).bind(generateId(), user.id, enc).run();
+
+  await writeAuthAudit(c, {
+    action: 'auth.mfa.enroll_started', status: 200,
+    userId: user.id, orgId: user.orgId, actorRole: user.role,
+    entityId: user.id, entityLabel: user.email, detail: { method: 'totp' },
+  });
+
+  return c.json({ secret, otpauthUri: buildOtpauthUri(secret, user.email) });
+});
+
+// ── POST /api/auth/mfa/confirm (authed) — activate + issue backup codes ──────
+authRoutes.post('/mfa/confirm', async (c) => {
+  const user = c.get('user');
+  const db = c.env.DB;
+  const body = await c.req.json().catch(() => ({}));
+  const code = (body.code ?? '').toString().trim();
+
+  const limit = await checkRateLimit(db, `mfa:${user.id}`, 'mfa_confirm', MFA_RL_MAX_VERIFY, MFA_RL_WINDOW_MIN);
+  if (!limit.allowed) {
+    return c.json({ error: 'Too many attempts. Try again shortly.', retryAfterSeconds: limit.retryAfterSeconds }, 429);
+  }
+
+  if (!isMfaKeyConfigured(c.env.MFA_ENC_KEY)) {
+    return c.json({ error: 'MFA is not configured on this server. Contact your administrator.' }, 503);
+  }
+
+  const pending = await db.prepare(
+    `SELECT id, secret_encrypted FROM mfa_credentials
+     WHERE user_id = ? AND type = 'totp' AND confirmed_at IS NULL`,
+  ).bind(user.id).first<{ id: string; secret_encrypted: string }>();
+  if (!pending) {
+    return c.json({ error: 'No pending enrollment. Start enrollment first.' }, 400);
+  }
+
+  const secret = await decryptSecret(pending.secret_encrypted, c.env.MFA_ENC_KEY);
+  if (!(await verifyTotp(secret, code))) {
+    await recordRateLimitEvent(db, `mfa:${user.id}`, 'mfa_confirm');
+    await writeAuthAudit(c, {
+      action: 'auth.mfa.confirm_failed', status: 401,
+      userId: user.id, orgId: user.orgId, actorRole: user.role,
+      entityId: user.id, entityLabel: user.email, detail: { method: 'totp' },
+    });
+    return c.json({ error: 'Invalid code. Check your authenticator app and try again.' }, 401);
+  }
+
+  // Activate + (re)issue backup codes atomically.
+  const backupCodes = generateBackupCodes();
+  const hashed = await Promise.all(backupCodes.map((bc) => hashPassword(bc)));
+  const batch: D1PreparedStatement[] = [
+    db.prepare(`UPDATE mfa_credentials SET confirmed_at = datetime('now'), last_used_at = datetime('now') WHERE id = ?`).bind(pending.id),
+    db.prepare(`DELETE FROM mfa_backup_codes WHERE user_id = ?`).bind(user.id),
+    db.prepare(`UPDATE users SET mfa_enforced_at = COALESCE(mfa_enforced_at, datetime('now')) WHERE id = ?`).bind(user.id),
+  ];
+  for (const h of hashed) {
+    batch.push(db.prepare(`INSERT INTO mfa_backup_codes (id, user_id, code_hash) VALUES (?, ?, ?)`).bind(generateId(), user.id, h));
+  }
+  await db.batch(batch);
+
+  await writeAuthAudit(c, {
+    action: 'auth.mfa.enrolled', status: 200,
+    userId: user.id, orgId: user.orgId, actorRole: user.role,
+    entityId: user.id, entityLabel: user.email, detail: { method: 'totp' },
+  });
+
+  return c.json({ enabled: true, backupCodes });
+});
+
+// ── POST /api/auth/mfa/disable (authed) — re-verify, then remove ─────────────
+authRoutes.post('/mfa/disable', async (c) => {
+  const user = c.get('user');
+  const db = c.env.DB;
+  const body = await c.req.json().catch(() => ({}));
+  const code = (body.code ?? '').toString().trim();
+
+  const limit = await checkRateLimit(db, `mfa:${user.id}`, 'mfa_confirm', MFA_RL_MAX_VERIFY, MFA_RL_WINDOW_MIN);
+  if (!limit.allowed) {
+    return c.json({ error: 'Too many attempts. Try again shortly.', retryAfterSeconds: limit.retryAfterSeconds }, 429);
+  }
+
+  const cred = await db.prepare(
+    `SELECT secret_encrypted FROM mfa_credentials
+     WHERE user_id = ? AND type = 'totp' AND confirmed_at IS NOT NULL`,
+  ).bind(user.id).first<{ secret_encrypted: string }>();
+  if (!cred) {
+    return c.json({ error: 'MFA is not enabled.' }, 400);
+  }
+
+  // Re-verify: a hijacked live session must not silently strip MFA. Accept a
+  // TOTP code OR a one-time backup code.
+  let ok = false;
+  if (/^\d{6}$/.test(code) && isMfaKeyConfigured(c.env.MFA_ENC_KEY)) {
+    const secret = await decryptSecret(cred.secret_encrypted, c.env.MFA_ENC_KEY);
+    ok = await verifyTotp(secret, code);
+  }
+  if (!ok) {
+    ok = await consumeBackupCode(db, user.id, code);
+  }
+  if (!ok) {
+    await recordRateLimitEvent(db, `mfa:${user.id}`, 'mfa_confirm');
+    await writeAuthAudit(c, {
+      action: 'auth.mfa.disable_failed', status: 401,
+      userId: user.id, orgId: user.orgId, actorRole: user.role,
+      entityId: user.id, entityLabel: user.email,
+    });
+    return c.json({ error: 'Invalid code.' }, 401);
+  }
+
+  await db.batch([
+    db.prepare(`DELETE FROM mfa_credentials WHERE user_id = ?`).bind(user.id),
+    db.prepare(`DELETE FROM mfa_backup_codes WHERE user_id = ?`).bind(user.id),
+  ]);
+
+  await writeAuthAudit(c, {
+    action: 'auth.mfa.disabled', status: 200,
+    userId: user.id, orgId: user.orgId, actorRole: user.role,
+    entityId: user.id, entityLabel: user.email,
+  });
+
+  return c.json({ enabled: false });
+});
+
+// ── POST /api/auth/mfa/challenge (PUBLIC) — completes a 'login' challenge ────
+//
+// The ONLY path that converts a 'login' challenge into a real session. Verifies
+// the second factor server-side, atomically consumes the single-use challenge,
+// and only THEN mints the token pair.
+authRoutes.post('/mfa/challenge', async (c) => {
+  const db = c.env.DB;
+  const body = await c.req.json().catch(() => ({}));
+  const challengeToken = (body.challengeToken ?? '').toString();
+  const code = (body.code ?? '').toString().trim();
+  const method = (body.method ?? 'totp').toString();
+
+  if (!challengeToken) return c.json({ error: 'Challenge expired. Please sign in again.' }, 401);
+
+  const challenge = await loadMfaChallenge(db, challengeToken, 'login');
+  if (!challenge) return c.json({ error: 'Challenge expired. Please sign in again.' }, 401);
+
+  // Per-attempt rate limit keyed to the challenge's user (resolved from the
+  // token, never the client). A locked-out user can't keep guessing even with a
+  // still-valid challenge.
+  const limit = await checkRateLimit(db, `mfa:${challenge.user_id}`, 'mfa_challenge', MFA_RL_MAX_VERIFY, MFA_RL_WINDOW_MIN);
+  if (!limit.allowed) {
+    return c.json({ error: 'Too many attempts. Try again shortly.', retryAfterSeconds: limit.retryAfterSeconds }, 429);
+  }
+
+  const cred = await db.prepare(
+    `SELECT id, secret_encrypted FROM mfa_credentials
+     WHERE user_id = ? AND type = 'totp' AND confirmed_at IS NOT NULL`,
+  ).bind(challenge.user_id).first<{ id: string; secret_encrypted: string }>();
+  if (!cred) return c.json({ error: 'Challenge expired. Please sign in again.' }, 401);
+
+  // Resolve the user's email for the email-OTP path / failure audit.
+  const userRow = await db.prepare(`SELECT email FROM users WHERE id = ?`).bind(challenge.user_id).first<{ email: string }>();
+
+  let verified = false;
+  if (method === 'totp') {
+    if (isMfaKeyConfigured(c.env.MFA_ENC_KEY)) {
+      const secret = await decryptSecret(cred.secret_encrypted, c.env.MFA_ENC_KEY);
+      verified = await verifyTotp(secret, code);
+    }
+  } else if (method === 'backup') {
+    verified = await consumeBackupCode(db, challenge.user_id, code);
+  } else if (method === 'email') {
+    if (userRow?.email) {
+      const r = await validateVerificationCode(db, userRow.email, code, 'mfa_verification');
+      verified = r.valid && r.userId === challenge.user_id;
+    }
+  }
+
+  if (!verified) {
+    await recordRateLimitEvent(db, `mfa:${challenge.user_id}`, 'mfa_challenge');
+    await writeAuthAudit(c, {
+      action: 'auth.mfa.challenge_failed', status: 401,
+      userId: challenge.user_id, orgId: challenge.org_id,
+      entityId: challenge.user_id, entityLabel: userRow?.email ?? null,
+      detail: { method },
+    });
+    return c.json({ error: 'Invalid code.' }, 401);
+  }
+
+  // ATOMIC single-use consumption BEFORE minting. If another request already
+  // consumed this challenge, bail without minting (no double-session).
+  if (!(await consumeChallenge(db, challenge.id))) {
+    return c.json({ error: 'Challenge expired. Please sign in again.' }, 401);
+  }
+
+  await db.prepare(
+    `UPDATE mfa_credentials SET last_used_at = datetime('now') WHERE id = ?`,
+  ).bind(cred.id).run();
+
+  const session = await buildSessionResponse(db, challenge.user_id);
+  if (!session) return c.json({ error: 'Account is not active.' }, 401);
+
+  await writeAuthAudit(c, {
+    action: 'auth.mfa.challenge_verified', status: 200,
+    userId: challenge.user_id, orgId: challenge.org_id,
+    entityId: challenge.user_id, entityLabel: userRow?.email ?? null,
+    detail: { method },
+  });
+
+  return c.json(session.body);
+});
+
+// ── POST /api/auth/mfa/email-code (PUBLIC) — dispatch the email-OTP fallback ─
+authRoutes.post('/mfa/email-code', async (c) => {
+  const db = c.env.DB;
+  const body = await c.req.json().catch(() => ({}));
+  const challengeToken = (body.challengeToken ?? '').toString();
+  if (!challengeToken) return c.json({ error: 'Challenge expired. Please sign in again.' }, 401);
+
+  const challenge = await loadMfaChallenge(db, challengeToken, 'login');
+  if (!challenge) return c.json({ error: 'Challenge expired. Please sign in again.' }, 401);
+
+  // Cap email dispatch spam (per-user).
+  const limit = await checkRateLimit(db, `mfa:${challenge.user_id}`, 'mfa_email_send', MFA_RL_MAX_EMAIL, MFA_RL_WINDOW_MIN);
+  if (!limit.allowed) {
+    return c.json({ error: 'Too many requests. Try again shortly.', retryAfterSeconds: limit.retryAfterSeconds }, 429);
+  }
+  await recordRateLimitEvent(db, `mfa:${challenge.user_id}`, 'mfa_email_send');
+
+  const userRow = await db.prepare(
+    `SELECT email, first_name FROM users WHERE id = ?`,
+  ).bind(challenge.user_id).first<{ email: string; first_name: string }>();
+  if (userRow?.email) {
+    const code = await createVerificationCode(db, challenge.user_id, userRow.email, 'mfa_verification');
+    const msg = buildMfaEmailCode(userRow.first_name ?? 'there', code);
+    msg.to = userRow.email;
+    c.executionCtx.waitUntil(sendEmail(c.env.RESEND_API_KEY, msg));
+  }
+
+  // Always return ok (don't leak whether the user exists / has email).
+  return c.json({ sent: true });
+});
+
+// ── POST /api/auth/mfa/enroll-grace (PUBLIC) — forced-enrollment, step 1 ─────
+//
+// A 'required'-but-not-enrolled login returns an 'enroll'-purpose challenge
+// (NOT a session). The user is unauthenticated, so they can't call the authed
+// /mfa/enroll. This resolves the user from the enroll challenge and begins
+// enrollment — same crypto, no session minted yet.
+authRoutes.post('/mfa/enroll-grace', async (c) => {
+  const db = c.env.DB;
+  const body = await c.req.json().catch(() => ({}));
+  const enrollToken = (body.mfaEnrollToken ?? '').toString();
+  if (!enrollToken) return c.json({ error: 'Enrollment session expired. Please sign in again.' }, 401);
+
+  const challenge = await loadMfaChallenge(db, enrollToken, 'enroll');
+  if (!challenge) return c.json({ error: 'Enrollment session expired. Please sign in again.' }, 401);
+
+  if (!isMfaKeyConfigured(c.env.MFA_ENC_KEY)) {
+    return c.json({ error: 'MFA is not configured on this server. Contact your administrator.' }, 503);
+  }
+
+  const userRow = await db.prepare(`SELECT email FROM users WHERE id = ?`).bind(challenge.user_id).first<{ email: string }>();
+  if (!userRow?.email) return c.json({ error: 'Enrollment session expired. Please sign in again.' }, 401);
+
+  const secret = randomBase32Secret();
+  const enc = await encryptSecret(secret, c.env.MFA_ENC_KEY);
+  await db.prepare(
+    `INSERT OR REPLACE INTO mfa_credentials (id, user_id, type, secret_encrypted, confirmed_at)
+     VALUES (?, ?, 'totp', ?, NULL)`,
+  ).bind(generateId(), challenge.user_id, enc).run();
+
+  await writeAuthAudit(c, {
+    action: 'auth.mfa.enroll_started', status: 200,
+    userId: challenge.user_id, orgId: challenge.org_id,
+    entityId: challenge.user_id, entityLabel: userRow.email, detail: { method: 'totp', grace: true },
+  });
+
+  return c.json({ secret, otpauthUri: buildOtpauthUri(secret, userRow.email) });
+});
+
+// ── POST /api/auth/mfa/confirm-grace (PUBLIC) — forced-enrollment, step 2 ────
+//
+// Confirms the pending credential AND mints the session in one flow — the admin
+// enrolls and lands logged-in without ever having held a session without MFA.
+// Atomically consumes the enroll challenge BEFORE minting.
+authRoutes.post('/mfa/confirm-grace', async (c) => {
+  const db = c.env.DB;
+  const body = await c.req.json().catch(() => ({}));
+  const enrollToken = (body.mfaEnrollToken ?? '').toString();
+  const code = (body.code ?? '').toString().trim();
+  if (!enrollToken) return c.json({ error: 'Enrollment session expired. Please sign in again.' }, 401);
+
+  const challenge = await loadMfaChallenge(db, enrollToken, 'enroll');
+  if (!challenge) return c.json({ error: 'Enrollment session expired. Please sign in again.' }, 401);
+
+  const limit = await checkRateLimit(db, `mfa:${challenge.user_id}`, 'mfa_confirm', MFA_RL_MAX_VERIFY, MFA_RL_WINDOW_MIN);
+  if (!limit.allowed) {
+    return c.json({ error: 'Too many attempts. Try again shortly.', retryAfterSeconds: limit.retryAfterSeconds }, 429);
+  }
+
+  if (!isMfaKeyConfigured(c.env.MFA_ENC_KEY)) {
+    return c.json({ error: 'MFA is not configured on this server. Contact your administrator.' }, 503);
+  }
+
+  const pending = await db.prepare(
+    `SELECT id, secret_encrypted FROM mfa_credentials
+     WHERE user_id = ? AND type = 'totp' AND confirmed_at IS NULL`,
+  ).bind(challenge.user_id).first<{ id: string; secret_encrypted: string }>();
+  if (!pending) {
+    return c.json({ error: 'No pending enrollment. Start enrollment first.' }, 400);
+  }
+
+  const secret = await decryptSecret(pending.secret_encrypted, c.env.MFA_ENC_KEY);
+  if (!(await verifyTotp(secret, code))) {
+    await recordRateLimitEvent(db, `mfa:${challenge.user_id}`, 'mfa_confirm');
+    await writeAuthAudit(c, {
+      action: 'auth.mfa.confirm_failed', status: 401,
+      userId: challenge.user_id, orgId: challenge.org_id,
+      entityId: challenge.user_id, detail: { method: 'totp', grace: true },
+    });
+    return c.json({ error: 'Invalid code. Check your authenticator app and try again.' }, 401);
+  }
+
+  // ATOMIC single-use consumption of the enroll challenge BEFORE minting.
+  if (!(await consumeChallenge(db, challenge.id))) {
+    return c.json({ error: 'Enrollment session expired. Please sign in again.' }, 401);
+  }
+
+  // Activate the credential + issue backup codes atomically.
+  const backupCodes = generateBackupCodes();
+  const hashed = await Promise.all(backupCodes.map((bc) => hashPassword(bc)));
+  const batch: D1PreparedStatement[] = [
+    db.prepare(`UPDATE mfa_credentials SET confirmed_at = datetime('now'), last_used_at = datetime('now') WHERE id = ?`).bind(pending.id),
+    db.prepare(`DELETE FROM mfa_backup_codes WHERE user_id = ?`).bind(challenge.user_id),
+    db.prepare(`UPDATE users SET mfa_enforced_at = COALESCE(mfa_enforced_at, datetime('now')) WHERE id = ?`).bind(challenge.user_id),
+  ];
+  for (const h of hashed) {
+    batch.push(db.prepare(`INSERT INTO mfa_backup_codes (id, user_id, code_hash) VALUES (?, ?, ?)`).bind(generateId(), challenge.user_id, h));
+  }
+  await db.batch(batch);
+
+  const session = await buildSessionResponse(db, challenge.user_id);
+  if (!session) return c.json({ error: 'Account is not active.' }, 401);
+
+  await writeAuthAudit(c, {
+    action: 'auth.mfa.enrolled', status: 200,
+    userId: challenge.user_id, orgId: challenge.org_id,
+    entityId: challenge.user_id, detail: { method: 'totp', grace: true },
+  });
+
+  return c.json({ ...session.body, backupCodes });
 });
