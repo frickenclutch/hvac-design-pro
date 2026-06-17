@@ -6,7 +6,7 @@ import { useProjectStore } from '../stores/useProjectStore';
 import ProjectContextBar from '../components/ProjectContextBar';
 import ProjectGateDialog from '../components/ProjectGateDialog';
 import { scopedKey } from '../utils/storage';
-import type { WholeHouseResult } from '../engines/manualJ';
+import type { WholeHouseResult, DesignConditions } from '../engines/manualJ';
 import type { AedResult } from '../engines/aed';
 import type { ManualSResult } from '../engines/manualS';
 import type { ManualDResult } from '../engines/manualD';
@@ -31,6 +31,14 @@ function manualSInputsKey(projectId: string | null): string {
 function manualDInputsKey(projectId: string | null): string {
   return scopedKey(`hvac_manuald_inputs_${projectId || 'draft'}`);
 }
+function mjInputsKey(projectId: string | null): string {
+  return scopedKey(`hvac_manualj_inputs_${projectId || 'draft'}`);
+}
+
+/** Shape of the Manual J persisted inputs blob — only the bit we need here. */
+interface StoredManualJInputs {
+  conditions?: DesignConditions;
+}
 
 /** Safely parse a JSON localStorage value; null on absence or corruption. */
 function safeParse<T>(raw: string | null): T | null {
@@ -43,9 +51,11 @@ interface GatheredData {
   aed: AedResult | null;
   manualS: ManualSResult | null;
   manualD: ManualDResult | null;
+  /** Design conditions from the Manual J inputs — feeds the Codes & Standards Basis page. */
+  conditions: DesignConditions | null;
 }
 
-const EMPTY: GatheredData = { manualJ: null, aed: null, manualS: null, manualD: null };
+const EMPTY: GatheredData = { manualJ: null, aed: null, manualS: null, manualD: null, conditions: null };
 
 /** Read + recompute every tool's data for the active project. Pure + defensive. */
 function gather(projectId: string | null, projectName: string): GatheredData {
@@ -73,7 +83,15 @@ function gather(projectId: string | null, projectName: string): GatheredData {
     try { manualD = recomputeManualD(mdInputs, projectName || 'Manual D Design'); } catch { manualD = null; }
   }
 
-  return { manualJ, aed, manualS, manualD };
+  // Design conditions — read from the Manual J inputs blob (drives the
+  // Codes & Standards Basis page's "actual ASHRAE design conditions used").
+  let conditions: DesignConditions | null = null;
+  const mjInputs = safeParse<StoredManualJInputs>(localStorage.getItem(mjInputsKey(projectId)));
+  if (mjInputs && mjInputs.conditions && typeof mjInputs.conditions.outdoorCoolingTemp === 'number') {
+    conditions = mjInputs.conditions;
+  }
+
+  return { manualJ, aed, manualS, manualD, conditions };
 }
 
 export default function CombinedReportPage() {
@@ -109,6 +127,7 @@ export default function CombinedReportPage() {
         aed: data.aed,
         manualS: data.manualS,
         manualD: data.manualD,
+        conditions: data.conditions,
       });
     } catch {
       alert('Failed to generate the combined report. Please try again.');

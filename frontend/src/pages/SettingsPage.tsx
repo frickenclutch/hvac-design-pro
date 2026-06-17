@@ -230,6 +230,58 @@ export default function SettingsPage() {
             />
           </Section>
 
+          {/* Professional Engineer (PE) Stamp & Attestation */}
+          <Section icon={<BadgeCheck className="w-5 h-5 text-amber-400" />} title="PE Stamp & Attestation">
+            <p className="text-xs text-slate-500 mb-4">
+              Configure your Professional Engineer credentials and signature for the permit-ready attestation page on
+              combined reports. The attestation page appears <span className="font-semibold text-slate-400">only</span> when
+              both your name and a signature image are set — otherwise combined reports export exactly as before. These outputs
+              remain a calculation aid requiring your independent professional review; you sign as the responsible engineer of record.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <ProfileInput
+                label="Engineer Name"
+                value={prefs.peName}
+                onChange={(v) => prefs.update({ peName: v })}
+                placeholder="John A. Smith, PE"
+              />
+              <ProfileInput
+                label="PE License Number"
+                value={prefs.peLicenseNumber}
+                onChange={(v) => prefs.update({ peLicenseNumber: v })}
+                placeholder="M-12345"
+              />
+              <ProfileInput
+                label="Jurisdiction"
+                value={prefs.peJurisdiction}
+                onChange={(v) => prefs.update({ peJurisdiction: v })}
+                placeholder="Maryland"
+              />
+            </div>
+
+            <div className="my-3 border-t border-slate-800/40" />
+
+            <StampUpload
+              label="PE Signature Image"
+              dataUrl={prefs.peSignatureDataUrl}
+              onUpload={(url) => prefs.update({ peSignatureDataUrl: url })}
+              onClear={() => prefs.update({ peSignatureDataUrl: '' })}
+            />
+
+            {prefs.peName && prefs.peLicenseNumber && prefs.peSignatureDataUrl ? (
+              <div className="flex items-start gap-2 px-3 py-2 mt-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300">
+                <BadgeCheck className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span>Attestation page is active. Combined reports will include a signed PE attestation with a SHA-256 content hash for tamper-evidence.</span>
+              </div>
+            ) : (
+              <div className="flex items-start gap-2 px-3 py-2 mt-3 rounded-lg bg-slate-800/40 border border-slate-700/40 text-xs text-slate-400">
+                <BadgeCheck className="w-4 h-4 text-slate-500 flex-shrink-0 mt-0.5" />
+                <span>Set an engineer name, PE license number, and a signature image to enable the attestation page. Until then, combined reports stay unchanged.</span>
+              </div>
+            )}
+          </Section>
+
           {/* Calculation Engine — gated to platform admins until ACCA cert review approves and Phase 2 cutover ships */}
           {user?.isPlatformAdmin && (
             <Section icon={<BadgeCheck className="w-5 h-5 text-amber-400" />} title="Calculation Engine (Beta)">
