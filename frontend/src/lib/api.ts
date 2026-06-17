@@ -147,6 +147,65 @@ export interface UpdateProjectInput {
   status?: string;
 }
 
+// ── Catalog / Product Inventory (org-owned) ──────────────────────────────────
+export type CatalogCategory = 'hvac_equipment' | 'water_heater' | 'pipe_fitting' | 'other';
+export type CatalogEquipmentType = 'ac' | 'heat_pump' | 'furnace_gas' | 'furnace_electric';
+
+/** A catalog_products row as returned by GET /api/catalog. Snake_case mirrors
+ *  the D1 column names. price_minor is in minor units (e.g. cents). The
+ *  equipment_* / *_btu / afue fields are populated only for hvac_equipment. */
+export interface ApiCatalogProductRow {
+  id: string;
+  org_id: string;
+  category: CatalogCategory;
+  sku: string;
+  name: string;
+  brand: string | null;
+  model: string | null;
+  description: string | null;
+  price_minor: number; // minor units (e.g. cents)
+  currency: string;
+  stock_qty: number;
+  unit: string;
+  active: number; // 0 | 1
+  metadata: string | null; // JSON string
+  equipment_type: CatalogEquipmentType | null;
+  total_cooling_btu: number | null;
+  sensible_cooling_btu: number | null;
+  ahri_ref: string | null;
+  heating_btu: number | null;
+  heating_cap_47: number | null;
+  heating_cap_17: number | null;
+  afue: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One item in a bulk-upsert push (POST /api/catalog/items). camelCase — the
+ *  server maps these onto the snake_case columns. Idempotent on (org, sku). */
+export interface BulkCatalogItemInput {
+  sku: string;
+  name: string;
+  category?: CatalogCategory;
+  brand?: string;
+  model?: string;
+  description?: string;
+  priceMinor?: number;
+  currency?: string;
+  stockQty?: number;
+  unit?: string;
+  active?: boolean;
+  metadata?: Record<string, unknown>;
+  equipmentType?: CatalogEquipmentType;
+  totalCoolingBtu?: number;
+  sensibleCoolingBtu?: number;
+  ahriRef?: string;
+  heatingBtu?: number;
+  heatingCap47?: number;
+  heatingCap17?: number;
+  afue?: number;
+}
+
 const MAX_RETRIES = 2;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -1000,6 +1059,28 @@ class ApiClient {
     return this.request<{ id: string; isInternal: boolean; created_at: string }>(
       `/api/permits/submissions/${id}/comments`,
       { method: 'POST', body: JSON.stringify({ body, isInternal }) },
+    );
+  }
+
+  // ── Catalog / Product Inventory (org-owned, session-scoped) ────────────────
+  /** List/search the org's product catalog. Every result is the caller's own
+   *  org inventory — the server scopes by the session-derived org_id. */
+  async listCatalog(filters?: { category?: string; q?: string; limit?: number; activeOnly?: boolean }) {
+    const qs = new URLSearchParams();
+    if (filters?.category) qs.set('category', filters.category);
+    if (filters?.q) qs.set('q', filters.q);
+    if (filters?.limit) qs.set('limit', String(filters.limit));
+    if (filters?.activeOnly) qs.set('activeOnly', '1');
+    const suffix = qs.toString() ? `?${qs}` : '';
+    return this.request<{ items: ApiCatalogProductRow[] }>(`/api/catalog${suffix}`);
+  }
+
+  /** Bulk-upsert (idempotent on org_id+sku). Admin-gated server-side; the same
+   *  endpoint a future ERP/inventory feed will push to via a service token. */
+  async bulkUpsertCatalog(items: BulkCatalogItemInput[]) {
+    return this.request<{ upsertedCount: number; createdCount: number; updatedCount: number }>(
+      '/api/catalog/items',
+      { method: 'POST', body: JSON.stringify({ items }) },
     );
   }
 
