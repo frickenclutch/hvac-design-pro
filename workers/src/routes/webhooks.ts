@@ -16,6 +16,7 @@
  */
 import { Hono } from 'hono';
 import { getProvider, type ProviderName } from '../billing/provider';
+import { hasProjection, projectWebhookOutcome } from '../billing/projections';
 
 interface Env {
   DB: D1Database;
@@ -33,8 +34,33 @@ webhookRoutes.post('/:provider', async (c) => {
 
   const outcome = await provider.handleWebhook({ rawBody, signature });
 
-  // Stubs return handled:false → 202 accepted, no-op. When wired, map
-  // outcome.subscription / outcome.invoice into D1 rows here (idempotent via
-  // the unique provider_*_ref indexes from migration 0012).
-  return c.json({ received: true, handled: outcome.handled, note: outcome.note }, 202);
+  // INBOUND projection pipe. If the (verified) provider returned a subscription
+  // / invoice projection, idempotently mirror it into D1 — with the org_id
+  // resolved SERVER-SIDE from our stored provider_subscription_ref → org
+  // mapping, NEVER from the webhook body (see billing/projections.ts). Stubs
+  // return handled:false with NO projection (hasProjection → false), so the
+  // pipe is skipped and the response is byte-unchanged from the dormant path:
+  // 202 { received:true, handled:false }. This try/catch keeps a projection
+  // fault from turning into a 5xx the provider would keep retrying.
+  let projection: Awaited<ReturnType<typeof projectWebhookOutcome>> | undefined;
+  if (hasProjection(outcome)) {
+    try {
+      // provider.name is the canonical ProviderName resolved from the URL param
+      // (getProvider falls back to 'manual' for an unknown name) — the
+      // AUTHORITATIVE provider rail, never read from the webhook body.
+      projection = await projectWebhookOutcome(c.env.DB, provider.name, outcome);
+    } catch (e) {
+      console.error('[billing] webhook projection failed:', e);
+    }
+  }
+
+  return c.json(
+    {
+      received: true,
+      handled: outcome.handled,
+      note: outcome.note,
+      ...(projection ? { projection } : {}),
+    },
+    202,
+  );
 });
