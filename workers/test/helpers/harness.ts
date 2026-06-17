@@ -296,6 +296,43 @@ export async function seedOrgOwnedRows(
   };
 }
 
+/** Insert an org-scoped `plan_entitlements` row directly into D1 so the
+ *  metering gate can be exercised. Defaults to a BLOCKING hard-cap rule
+ *  (enforcement='block') — the only configuration that can make
+ *  checkEntitlement deny. `period` defaults to 'lifetime' so the test isn't
+ *  sensitive to the calendar. */
+export async function seedPlanEntitlement(
+  db: D1Database,
+  opts: {
+    orgId: string;
+    meterKey: string;
+    hardCap: number;
+    enforcement?: 'block' | 'meter';
+    period?: 'monthly' | 'daily' | 'lifetime';
+    includedQuantity?: number | null;
+  },
+): Promise<string> {
+  const id = generateId();
+  await db
+    .prepare(
+      `INSERT INTO plan_entitlements
+         (id, org_id, scope_kind, meter_key, included_quantity, hard_cap,
+          period, enforcement)
+       VALUES (?, ?, 'org', ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      id,
+      opts.orgId,
+      opts.meterKey,
+      opts.includedQuantity ?? null,
+      opts.hardCap,
+      opts.period ?? 'lifetime',
+      opts.enforcement ?? 'block',
+    )
+    .run();
+  return id;
+}
+
 /** Dispatch an actual Request through the REAL Hono app + REAL authMiddleware.
  *  `token` is the RAW bearer (omit for an unauthenticated request). */
 export async function call(
