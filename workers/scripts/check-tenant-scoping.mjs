@@ -100,6 +100,19 @@ const STRICT_TABLES = [
  */
 
 /**
+ * MFA tables (migration 0014: mfa_credentials, mfa_backup_codes,
+ * mfa_challenges) are intentionally NOT strict tables. They are USER-OWNED
+ * per-user second-factor credentials, the same ownership model as `sessions`
+ * and `refresh_tokens`: every query reads them `WHERE user_id = ?` bound to
+ * the SESSION user (c.get('user').id) — or, for the pre-session login
+ * challenge, by the opaque challenge token's hash, never a client-supplied
+ * id. There is no org_id scoping because there is no org-level sharing: one
+ * user can never touch another user's MFA. No MFA endpoint ever accepts a
+ * userId from the client. Documented so the absence is a decision, not an
+ * oversight.
+ */
+
+/**
  * Files whose correctness is NOT "every query has org_id". Each uses a
  * distinct, separately-audited access model. The guard records their
  * strict-table queries as informational but does not fail on them. Keep this

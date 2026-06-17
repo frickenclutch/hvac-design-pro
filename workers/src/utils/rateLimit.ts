@@ -22,15 +22,21 @@ export async function checkRateLimit(
   maxAttempts: number,
   windowMinutes: number,
 ): Promise<RateLimitResult> {
-  const windowStart = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
-
+  // The window boundary MUST be computed in SQLite's own `datetime('now')`
+  // format ("YYYY-MM-DD HH:MM:SS") because that is exactly what
+  // rate_limit_events.created_at stores (its column DEFAULT). A JS ISO string
+  // ("YYYY-MM-DDTHH:MM:SS.sssZ") sorts LEXICALLY AFTER the space-separated SQL
+  // form for the same instant (' ' < 'T'), so `created_at > <ISO>` would be
+  // false for every just-written row — silently disabling rate limiting. Using
+  // the DB clock for both sides keeps the comparison apples-to-apples.
   const row = await db
     .prepare(
       `SELECT COUNT(*) as cnt, MIN(created_at) as oldest
        FROM rate_limit_events
-       WHERE identifier = ? AND action = ? AND created_at > ?`,
+       WHERE identifier = ? AND action = ?
+         AND created_at > datetime('now', ?)`,
     )
-    .bind(identifier, action, windowStart)
+    .bind(identifier, action, `-${windowMinutes} minutes`)
     .first<{ cnt: number; oldest: string | null }>();
 
   const count = row?.cnt ?? 0;

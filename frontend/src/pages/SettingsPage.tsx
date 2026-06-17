@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react';
 import { usePreferencesStore, type ThemeMode, type UIDensity, type UnitSystem, type EngineVersion } from '../stores/usePreferencesStore';
-import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock } from 'lucide-react';
+import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle } from 'lucide-react';
 import { api } from '../lib/api';
 import A11yPanel from '../components/accessibility/A11yPanel';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
@@ -41,6 +41,10 @@ export default function SettingsPage() {
 
           {/* User Profile */}
           <UserProfileSection token={token} user={user} />
+
+          {/* Multi-factor authentication — the session user manages their OWN
+              second factor. Admins/L0 see a "required" banner. */}
+          <MfaSection requiredForRole={user?.role === 'admin' || !!user?.isPlatformAdmin} />
 
           {/* Appearance */}
           <Section icon={<Palette className="w-5 h-5 text-violet-400" />} title="Appearance">
@@ -307,6 +311,240 @@ function Section({ icon, title, children }: { icon: React.ReactNode; title: stri
       </div>
       <div className="p-6 space-y-5">{children}</div>
     </section>
+  );
+}
+
+// ── MFA (TOTP) management ─────────────────────────────────────────────────────
+// The authed enrollment/management surface for the SESSION user's OWN factor.
+// All calls go through api.mfa* (Bearer + 401-refresh handled by lib/api.ts).
+// Disabled → "Enable" → show secret + otpauth URI + 6-digit verify → show backup
+// codes once → enabled. Enabled → status + "Disable" (prompts for a current
+// TOTP/backup code).
+type MfaPhase = 'idle' | 'enrolling' | 'backup' | 'disabling';
+
+function MfaSection({ requiredForRole }: { requiredForRole: boolean }) {
+  const [loading, setLoading] = useState(true);
+  const [enabled, setEnabled] = useState(false);
+  const [backupRemaining, setBackupRemaining] = useState(0);
+  const [phase, setPhase] = useState<MfaPhase>('idle');
+  const [secret, setSecret] = useState('');
+  const [otpauthUri, setOtpauthUri] = useState('');
+  const [code, setCode] = useState('');
+  const [backupCodes, setBackupCodes] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState<'secret' | 'backup' | null>(null);
+
+  const refresh = async () => {
+    try {
+      const s = await api.mfaStatus();
+      setEnabled(s.enabled);
+      setBackupRemaining(s.backupCodesRemaining);
+    } catch { /* toast already shown by api client */ }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { void refresh(); }, []);
+
+  const startEnroll = async () => {
+    setBusy(true);
+    try {
+      const r = await api.mfaEnrollStart();
+      setSecret(r.secret);
+      setOtpauthUri(r.otpauthUri);
+      setCode('');
+      setPhase('enrolling');
+    } catch { /* api toast */ }
+    finally { setBusy(false); }
+  };
+
+  const confirmEnroll = async () => {
+    if (code.length !== 6) return;
+    setBusy(true);
+    try {
+      const r = await api.mfaConfirm(code);
+      setBackupCodes(r.backupCodes);
+      setCode('');
+      setPhase('backup');
+      setEnabled(true);
+      toast.success('Two-factor authentication enabled.');
+    } catch { /* api toast */ }
+    finally { setBusy(false); }
+  };
+
+  const confirmDisable = async () => {
+    if (!code) return;
+    setBusy(true);
+    try {
+      await api.mfaDisable(code);
+      setEnabled(false);
+      setBackupRemaining(0);
+      setCode('');
+      setPhase('idle');
+      toast.success('Two-factor authentication disabled.');
+    } catch { /* api toast */ }
+    finally { setBusy(false); }
+  };
+
+  const copy = async (text: string, which: 'secret' | 'backup') => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(which);
+      setTimeout(() => setCopied(null), 1500);
+    } catch { /* clipboard unavailable */ }
+  };
+
+  return (
+    <Section icon={<ShieldCheck className="w-5 h-5 text-emerald-400" />} title="Two-Factor Authentication">
+      {requiredForRole && !enabled && phase === 'idle' && (
+        <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-amber-300 font-medium">
+            Your role requires two-factor authentication. Enable it now — you'll be prompted to set it up on your next sign-in otherwise.
+          </p>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex items-center justify-center py-6">
+          <div className="w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : phase === 'idle' && !enabled ? (
+        <div className="space-y-4">
+          <p className="text-sm text-slate-400 leading-relaxed">
+            Add an authenticator app (Google Authenticator, Authy, 1Password) as a second factor. You'll enter a 6-digit code at sign-in.
+          </p>
+          <button
+            onClick={startEnroll}
+            disabled={busy}
+            className="flex items-center justify-center gap-2 bg-emerald-500 text-slate-950 py-3 px-6 rounded-xl font-bold hover:bg-emerald-400 transition-all disabled:opacity-50 min-h-[44px]"
+          >
+            <Lock className="w-4 h-4" /> Enable Authenticator
+          </button>
+        </div>
+      ) : phase === 'idle' && enabled ? (
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+            <ShieldCheck className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+            <div>
+              <p className="text-sm text-emerald-300 font-bold">Authenticator app enabled</p>
+              <p className="text-xs text-slate-400 mt-0.5">{backupRemaining} backup code{backupRemaining === 1 ? '' : 's'} remaining</p>
+            </div>
+          </div>
+          <button
+            onClick={() => { setCode(''); setPhase('disabling'); }}
+            className="flex items-center justify-center gap-2 border border-red-500/30 text-red-300 py-3 px-6 rounded-xl font-bold hover:bg-red-500/10 transition-all min-h-[44px]"
+          >
+            Disable
+          </button>
+        </div>
+      ) : phase === 'enrolling' ? (
+        <div className="space-y-5">
+          <div>
+            <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2 block">Manual entry secret</label>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 bg-slate-900/80 border border-slate-700/60 rounded-xl py-3 px-4 text-emerald-300 font-mono text-sm break-all">{secret}</code>
+              <button
+                type="button"
+                onClick={() => copy(secret, 'secret')}
+                className="p-3 rounded-xl border border-slate-700/60 bg-slate-800/50 text-slate-400 hover:text-emerald-400 hover:border-emerald-500/40 transition-all min-w-[44px] min-h-[44px] flex items-center justify-center"
+                aria-label="Copy secret"
+              >
+                {copied === 'secret' ? <Check className="w-5 h-5 text-emerald-400" /> : <Copy className="w-5 h-5" />}
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2 block">Or paste this URI into your app</label>
+            <code className="block bg-slate-900/40 border border-slate-700/40 rounded-xl py-2.5 px-3 text-slate-400 font-mono text-[11px] break-all">{otpauthUri}</code>
+          </div>
+          <div>
+            <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2 block">Enter the 6-digit code</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={code}
+              onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="000000"
+              className="w-full bg-slate-900/80 border border-slate-700/60 rounded-xl py-4 px-6 text-white text-center text-2xl font-mono tracking-[0.4em] placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/30 transition-all"
+            />
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={confirmEnroll}
+              disabled={busy || code.length !== 6}
+              className="flex-1 flex items-center justify-center gap-2 bg-emerald-500 text-slate-950 py-3 rounded-xl font-bold hover:bg-emerald-400 transition-all disabled:opacity-50 min-h-[44px]"
+            >
+              {busy ? <div className="w-5 h-5 border-2 border-slate-700 border-t-transparent rounded-full animate-spin" /> : 'Verify & Enable'}
+            </button>
+            <button
+              onClick={() => { setPhase('idle'); setCode(''); }}
+              className="px-5 border border-slate-700/60 text-slate-400 rounded-xl font-bold hover:bg-slate-800/50 transition-all min-h-[44px]"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : phase === 'backup' ? (
+        <div className="space-y-5">
+          <div className="p-5 rounded-2xl bg-amber-500/10 border border-amber-500/20">
+            <div className="flex items-center gap-2 mb-4">
+              <KeyRound className="w-4 h-4 text-amber-400" />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-amber-300">One-time backup codes</span>
+            </div>
+            <p className="text-xs text-slate-400 mb-4">Save these somewhere safe. Each works once if you lose your device.</p>
+            <div className="grid grid-cols-2 gap-2 font-mono text-sm text-amber-200">
+              {backupCodes.map((bc) => (
+                <div key={bc} className="bg-slate-900/60 rounded-lg py-2 px-3 text-center tracking-wider">{bc}</div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => copy(backupCodes.join('\n'), 'backup')}
+              className="mt-4 w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-amber-500/30 text-amber-300 font-bold text-sm hover:bg-amber-500/10 transition-all min-h-[44px]"
+            >
+              {copied === 'backup' ? <><Check className="w-4 h-4" /> Copied</> : <><Copy className="w-4 h-4" /> Copy all codes</>}
+            </button>
+          </div>
+          <button
+            onClick={() => { setBackupCodes([]); setPhase('idle'); void refresh(); }}
+            className="w-full bg-emerald-500 text-slate-950 py-3 rounded-xl font-bold hover:bg-emerald-400 transition-all min-h-[44px]"
+          >
+            Done
+          </button>
+        </div>
+      ) : phase === 'disabling' ? (
+        <div className="space-y-5">
+          <p className="text-sm text-slate-400 leading-relaxed">
+            Enter a current 6-digit code from your authenticator app, or one of your backup codes, to disable two-factor authentication.
+          </p>
+          <input
+            type="text"
+            autoComplete="one-time-code"
+            value={code}
+            onChange={e => setCode(e.target.value.trim())}
+            placeholder="Code or backup code"
+            className="w-full bg-slate-900/80 border border-slate-700/60 rounded-xl py-4 px-6 text-white text-center text-xl font-mono tracking-[0.2em] placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:border-red-500/30 transition-all"
+          />
+          <div className="flex gap-3">
+            <button
+              onClick={confirmDisable}
+              disabled={busy || !code}
+              className="flex-1 flex items-center justify-center gap-2 bg-red-500 text-white py-3 rounded-xl font-bold hover:bg-red-400 transition-all disabled:opacity-50 min-h-[44px]"
+            >
+              {busy ? <div className="w-5 h-5 border-2 border-red-200 border-t-transparent rounded-full animate-spin" /> : 'Disable 2FA'}
+            </button>
+            <button
+              onClick={() => { setPhase('idle'); setCode(''); }}
+              className="px-5 border border-slate-700/60 text-slate-400 rounded-xl font-bold hover:bg-slate-800/50 transition-all min-h-[44px]"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </Section>
   );
 }
 

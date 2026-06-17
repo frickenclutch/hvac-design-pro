@@ -324,6 +324,64 @@ export function buildPasswordResetEmail(firstName: string, code: string): EmailP
   };
 }
 
+// ── MFA Email-OTP Fallback ───────────────────────────────────────────────────
+//
+// Sent from POST /api/auth/mfa/email-code when a user with confirmed MFA can't
+// use their authenticator (lost device, backup codes exhausted). The code is
+// validated inside POST /api/auth/mfa/challenge with method:'email'. Short
+// 5-minute TTL — it's a live login step, not an onboarding loop.
+
+export function buildMfaEmailCode(firstName: string, code: string): EmailPayload & { subject: string; html: string } {
+  return {
+    to: '',
+    subject: `Your HVAC DesignPro sign-in code: ${code}`,
+    html: `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0;padding:0;background-color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0f172a;padding:40px 20px;">
+    <tr>
+      <td align="center">
+        <table width="560" cellpadding="0" cellspacing="0" style="background-color:#1e293b;border-radius:16px;border:1px solid #334155;overflow:hidden;">
+          <tr>
+            <td style="padding:32px 40px 24px;border-bottom:1px solid #334155;">
+              <span style="font-size:24px;font-weight:800;color:#34d399;letter-spacing:-0.5px;">HVAC DesignPro</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px 40px;">
+              <h1 style="margin:0 0 16px;font-size:24px;font-weight:800;color:#f1f5f9;line-height:1.2;">
+                Your sign-in code, ${firstName}
+              </h1>
+              <p style="margin:0 0 28px;font-size:16px;color:#94a3b8;line-height:1.6;">
+                Enter this code to finish signing in. We sent it because you requested an email code instead of your authenticator app:
+              </p>
+              <div style="text-align:center;padding:24px;background-color:#0f172a;border:2px solid #334155;border-radius:16px;margin-bottom:28px;">
+                <span style="font-size:40px;font-weight:800;font-family:'Courier New',monospace;color:#34d399;letter-spacing:12px;">${code}</span>
+              </div>
+              <p style="margin:0;font-size:14px;color:#64748b;line-height:1.6;">
+                This code expires in <strong style="color:#94a3b8;">5 minutes</strong>. If you didn't try to sign in, change your password immediately — someone may have it.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 40px;border-top:1px solid #334155;background-color:#0f172a;">
+              <p style="margin:0;font-size:11px;color:#475569;line-height:1.6;">
+                C4 Technologies — HVAC DesignPro<br>
+                This email was sent because an email sign-in code was requested for this account.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`,
+  };
+}
+
 // ── Invite Email ──────────────────────────────────────────────────────────────
 //
 // Sent when a tenant admin invites a new member via `POST /api/org/invite`.

@@ -390,6 +390,40 @@ class ApiClient {
     return this.request<{ user: User; organisation: Organisation }>('/api/auth/me');
   }
 
+  // ── MFA (TOTP) — AUTHED management of the session user's own factor ───────
+  // These four go through request<T>() so the Bearer + 401-silent-refresh +
+  // toast handling come free. The PRE-SESSION challenge/grace calls do NOT live
+  // here — they go through the auth store's own apiFetch (no auto-refresh),
+  // mirroring how login/verifyEmail are implemented.
+  async mfaStatus() {
+    return this.request<{
+      enabled: boolean;
+      method: 'totp' | null;
+      required: boolean;
+      backupCodesRemaining: number;
+    }>('/api/auth/mfa/status');
+  }
+
+  async mfaEnrollStart() {
+    return this.request<{ secret: string; otpauthUri: string }>('/api/auth/mfa/enroll', {
+      method: 'POST',
+    });
+  }
+
+  async mfaConfirm(code: string) {
+    return this.request<{ enabled: boolean; backupCodes: string[] }>('/api/auth/mfa/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+  }
+
+  async mfaDisable(code: string) {
+    return this.request<{ enabled: boolean }>('/api/auth/mfa/disable', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+  }
+
   // Projects
   async listProjects() {
     return this.request<{ projects: ApiProjectRow[] }>('/api/projects');
