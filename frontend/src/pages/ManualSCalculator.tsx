@@ -392,7 +392,7 @@ export default function ManualSCalculator() {
   const exportPdf = useCallback(async () => {
     if (!result) { alert('Run a calculation first.'); return; }
     const { default: JsPDF } = await import('jspdf');
-    const doc = new JsPDF({ orientation: 'portrait', format: 'letter' });
+    const doc = new JsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
     const pw = doc.internal.pageSize.getWidth();
     const ph = doc.internal.pageSize.getHeight();
     const margin = 48;

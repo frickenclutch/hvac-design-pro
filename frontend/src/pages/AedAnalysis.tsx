@@ -287,8 +287,9 @@ export default function AedAnalysis() {
   const handleExportPdf = async () => {
     if (!result) return;
     const { default: JsPDF } = await import('jspdf');
-    const doc = new JsPDF({ orientation: 'portrait', format: 'letter' });
+    const doc = new JsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
     const pw = doc.internal.pageSize.getWidth();
+    const ph = doc.internal.pageSize.getHeight();
     const margin = 40;
     let y = 50;
 
@@ -335,6 +336,7 @@ export default function AedAnalysis() {
 
     doc.setFont('helvetica', 'normal');
     for (const h of result.hourlyLoads) {
+      if (y > ph - 40) { doc.addPage(); y = 50; }
       const isPeak = h.hour === result.peakHour;
       if (isPeak) doc.setFont('helvetica', 'bold');
       doc.text(h.label, margin, y);
@@ -346,7 +348,6 @@ export default function AedAnalysis() {
     // Engine + standard stamp at the bottom — same audit-trail purpose as
     // the Manual J PDF footer. AED uses its own engine so we stamp that
     // version explicitly.
-    const ph = doc.internal.pageSize.getHeight();
     doc.setFontSize(6); doc.setTextColor(150);
     doc.text('Engine aed-1.0  —  ACCA Manual J 8th Edition Section N (AED)', margin, ph - 20);
     doc.text(new Date().toISOString().slice(0, 10), pw - margin, ph - 20, { align: 'right' });
