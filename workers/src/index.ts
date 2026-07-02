@@ -35,16 +35,38 @@ export interface Env {
 
 const app = new Hono<{ Bindings: Env }>();
 
+const ALLOWED_ORIGINS = ['https://hvac-design-pro.pages.dev', 'http://localhost:5173'];
+
 // CORS for frontend. PATCH must be in allowMethods for the preflight on
 // every partial-update endpoint we ship — role change, authority toggle,
 // permit decisions, etc. Without it, browsers block the request before
 // it reaches the worker and the user sees "Unable to reach the server."
 app.use('*', cors({
-  origin: ['https://hvac-design-pro.pages.dev', 'http://localhost:5173'],
+  origin: ALLOWED_ORIGINS,
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 }));
+
+// Global error handler. An exception thrown from a handler bypasses the
+// cors middleware's response phase, so without this the browser receives
+// a 500 with NO Access-Control-Allow-Origin header and reports it as a
+// network failure — the frontend then shows "Unable to reach the server"
+// for what is really a server bug (this is how the audit_log FK bug on
+// project delete masqueraded as a connection problem for weeks). CORS
+// headers must be re-applied here by hand for exactly that reason. The
+// body stays generic: no stack traces or internals cross the wire.
+app.onError((err, c) => {
+  console.error(`[unhandled] ${c.req.method} ${new URL(c.req.url).pathname}:`, err);
+  const res = c.json({ error: 'Internal server error' }, 500);
+  const origin = c.req.header('Origin');
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    res.headers.set('Access-Control-Allow-Origin', origin);
+    res.headers.set('Access-Control-Allow-Credentials', 'true');
+    res.headers.set('Vary', 'Origin');
+  }
+  return res;
+});
 
 // Health check
 app.get('/health', (c) => c.json({ status: 'ok', env: c.env.ENVIRONMENT }));

@@ -99,6 +99,18 @@ async function recentlyAudited(db: D1Database, drawingId: string): Promise<boole
   return !!row;
 }
 
+/** Parse a stored canvas_json column defensively. A corrupt/truncated blob
+ *  (partial write, manual edit) must degrade to a blank canvas on the client
+ *  (which already handles canvasJson: null), not 500 the whole load. */
+function parseCanvasJson(raw: unknown): unknown {
+  if (typeof raw !== 'string' || !raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 // ── Routes ──────────────────────────────────────────────────────────────────
 
 // List CAD drawings for a project
@@ -127,7 +139,7 @@ cadRoutes.get('/:id', async (c) => {
 
   return c.json({
     ...drawing,
-    canvasJson: JSON.parse(drawing.canvas_json as string),
+    canvasJson: parseCanvasJson(drawing.canvas_json),
   });
 });
 
@@ -359,7 +371,7 @@ cadRoutes.get('/versions/:versionId', async (c) => {
 
   return c.json({
     ...row,
-    canvasJson: JSON.parse(row.canvas_json as string),
+    canvasJson: parseCanvasJson(row.canvas_json),
   });
 });
 
