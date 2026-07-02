@@ -104,15 +104,17 @@ export default function CadWorkspace() {
   // Hydrate the active project store from the route param
   const { id } = useParams<{ id: string }>();
   const setActiveProject = useProjectStore((s) => s.setActiveProject);
-  const clearActiveProject = useProjectStore((s) => s.clearActiveProject);
   const loadedProjectRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (id) {
       setActiveProject(id);
     }
-    return () => clearActiveProject();
-  }, [id, setActiveProject, clearActiveProject]);
+    // Deliberately NO cleanup: leaving the CAD workspace must not clear the
+    // active project. It used to, which re-opened the project gate dialog on
+    // every CAD round-trip and reset the calculators to draft data — the
+    // active project is workbench state and persists until the user switches.
+  }, [id, setActiveProject]);
 
   // ── Load saved CAD drawing data when entering a project ──────────────
   useEffect(() => {

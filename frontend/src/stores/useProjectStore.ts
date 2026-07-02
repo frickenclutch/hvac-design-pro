@@ -7,6 +7,7 @@ import {
   type ProjectCreateInput,
   type SyncStatus,
 } from '../features/projects/projectStorage';
+import { scopedKey } from '../utils/storage';
 
 // ── Project Store ─────────────────────────────────────────────────────────────
 // Single source of truth for the currently open project's identity.
@@ -40,6 +41,26 @@ interface ProjectState {
   createProject: (details: ProjectCreateInput) => Promise<string>;
 }
 
+// The active project is workbench state: it survives reloads and navigation
+// (a full-page reload used to silently drop it, re-opening the gate dialog).
+// User-scoped like every other per-user key; scopedKey is boot-order safe.
+const ACTIVE_PROJECT_KEY = 'hvac_active_project';
+
+function loadPersistedActiveId(): string | null {
+  try {
+    return localStorage.getItem(scopedKey(ACTIVE_PROJECT_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function persistActiveId(id: string | null): void {
+  try {
+    if (id) localStorage.setItem(scopedKey(ACTIVE_PROJECT_KEY), id);
+    else localStorage.removeItem(scopedKey(ACTIVE_PROJECT_KEY));
+  } catch { /* quota — non-fatal */ }
+}
+
 function hydrateFromCache(
   id: string
 ): Partial<ProjectState> {
@@ -62,25 +83,37 @@ function hydrateFromCache(
   };
 }
 
+// Restore the last active project on boot — only if it still exists in the
+// cached list (a deleted project must not resurrect as a dangling context).
+const persistedActiveId = loadPersistedActiveId();
+const initialActive: Partial<ProjectState> =
+  persistedActiveId && getCachedProject(persistedActiveId)
+    ? hydrateFromCache(persistedActiveId)
+    : {};
+
 export const useProjectStore = create<ProjectState>((set, get) => ({
   activeProjectId: null,
   activeProjectName: null,
   activeProjectType: null,
   activeProjectAddress: null,
   activeProjectSyncStatus: null,
+  ...initialActive,
 
   setActiveProject: (id: string) => {
+    persistActiveId(id);
     set(hydrateFromCache(id));
   },
 
-  clearActiveProject: () =>
+  clearActiveProject: () => {
+    persistActiveId(null);
     set({
       activeProjectId: null,
       activeProjectName: null,
       activeProjectType: null,
       activeProjectAddress: null,
       activeProjectSyncStatus: null,
-    }),
+    });
+  },
 
   renameProject: (newName: string) => {
     get().updateProjectDetails({ name: newName });
@@ -112,6 +145,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   createProject: async (details) => {
     const created = await createProjectSynced(details);
+    persistActiveId(created.id);
     set({
       activeProjectId: created.id,
       activeProjectName: created.name,
