@@ -372,9 +372,14 @@ orgRoutes.get('/team', async (c) => {
      ORDER BY created_at ASC`
   ).bind(user.orgId).all();
 
+  // token is included so the TeamPage "Copy redemption link" button can
+  // build a WORKING /onboarding?invite=<token> URL — it used to fall back
+  // to the row id, which the redeem lookup (WHERE token = ?) 404s. Same
+  // trust level as the POST /invite response, which already returns it to
+  // the same admin audience.
   const { results: invites } = await db.prepare(
     `SELECT id, invited_email, invited_role, status,
-            invited_by, expires_at, created_at
+            invited_by, expires_at, created_at, token
      FROM org_invites
      WHERE org_id = ? AND status = 'pending'
        AND expires_at > datetime('now')

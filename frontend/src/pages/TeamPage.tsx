@@ -43,6 +43,10 @@ interface Invite {
   invited_by: string;
   expires_at: string;
   created_at: string;
+  /** Raw redemption token — what /onboarding?invite= actually looks up.
+   *  Returned by GET /api/org/team; the row `id` deliberately is NOT usable
+   *  in the link (redeem matches WHERE token = ?). */
+  token: string;
 }
 
 const ROLES: Role[] = ['admin', 'engineer', 'tech', 'viewer'];
@@ -521,7 +525,7 @@ function PendingInvitesCard({ invites, isAdmin, onRevoke, onCopy }: { invites: I
               {isAdmin && (
                 <>
                   <button
-                    onClick={() => onCopy((inv as Invite & { token?: string }).token ?? inv.id)}
+                    onClick={() => onCopy(inv.token)}
                     className="text-slate-400 hover:text-emerald-400 text-xs font-bold flex items-center gap-1"
                     title="Copy redemption link"
                   >

@@ -554,7 +554,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return;
     }
 
-    persistSession(resp.token, resp.user, resp.organisation);
+    persistSession(resp.token, resp.user, resp.organisation, resp.refreshToken);
     set({
       user: resp.user,
       organisation: resp.organisation,
@@ -589,8 +589,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // the stored refresh token) before we give up on the session.
     let { data, error, status } = await apiFetch<{ user: User; organisation: Organisation }>('/api/auth/me');
     if (status === 401) {
-      const refreshed = await api.refreshSession();
-      if (refreshed) {
+      const outcome = await api.refreshSession();
+      // Transient = the refresh endpoint was unreachable, NOT a dead
+      // session. Keep the persisted session (offline-capable PWA) — the
+      // next heartbeat retries. Only a definitive rejection falls through
+      // to the clear below.
+      if (outcome === 'transient') return;
+      if (outcome === 'ok') {
         ({ data, error, status } = await apiFetch<{ user: User; organisation: Organisation }>('/api/auth/me'));
       }
     }
@@ -616,3 +621,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
 // Register user getter for scoped localStorage keys
 registerAuthGetter(() => useAuthStore.getState().user);
+
+// Terminal 401 (refresh definitively rejected): flip the app to logged-out
+// exactly once so the route guard redirects to the login surface. Without
+// this the auth store kept isAuthenticated=true after api.ts dropped the
+// tokens, leaving a zombie UI where every click re-toasted "Session expired".
+api.onSessionExpired(() => {
+  clearPersistedSession();
+  useAuthStore.setState({
+    user: null, organisation: null, token: null, isAuthenticated: false,
+    mfaRequired: false, mfaChallengeToken: null, mfaMethods: [],
+    enrollmentRequired: false, mfaEnrollToken: null,
+  });
+});

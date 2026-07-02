@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { generateId } from '../utils/id';
+import { generateId, uniqueOrgSlug } from '../utils/id';
 import { hashPassword, verifyPassword, isLegacyHash, hashToken } from '../utils/crypto';
 import { mintTokenPair } from '../utils/session';
 import { sendEmail, buildWelcomeEmail, buildVerificationEmail, buildPasswordResetEmail, buildMfaEmailCode } from '../utils/email';
@@ -158,7 +158,7 @@ authRoutes.post('/register', async (c) => {
 
   const orgId = generateId();
   const userId = generateId();
-  const slug = (orgName || `${firstName}-${lastName}`).toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50);
+  const slug = await uniqueOrgSlug(db, orgName || `${firstName}-${lastName}`);
 
   const passwordHash = await hashPassword(password);
 
@@ -643,7 +643,7 @@ authRoutes.post('/sso/microsoft/callback', async (c) => {
     // New user via SSO — create org + user (no password, pre-verified)
     orgId = generateId();
     userId = generateId();
-    const slug = `${firstName}-${surname}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50) || 'user';
+    const slug = await uniqueOrgSlug(db, `${firstName}-${surname}`);
 
     await db.batch([
       db.prepare(
@@ -833,7 +833,7 @@ authRoutes.post('/sso/cloudflare/callback', async (c) => {
   } else {
     orgId = generateId();
     userId = generateId();
-    const slug = `${firstName}-${surname}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50) || 'user';
+    const slug = await uniqueOrgSlug(db, `${firstName}-${surname}`);
 
     await db.batch([
       db.prepare(
@@ -1158,8 +1158,28 @@ authRoutes.post('/refresh', async (c) => {
 
   if (!row) return c.json({ error: 'Invalid refresh token' }, 401);
 
-  // Reuse of a consumed token → theft response: revoke the user's whole set.
+  // Reuse of a consumed token. Two very different causes share this shape:
+  //  • THEFT — a stolen copy replayed long after the legitimate rotation.
+  //  • RACE — two tabs/windows sharing localStorage both hit the 30-min
+  //    access expiry and rotated simultaneously; the loser replays a token
+  //    consumed milliseconds ago. The client serializes rotation with a Web
+  //    Lock, but older sessions and edge cases (frozen tabs) still race.
+  // A token revoked within the last 60s is treated as the benign race: the
+  // loser gets a plain 401 and adopts the winner's pair from localStorage —
+  // WITHOUT nuking every session the user has. Outside the grace window the
+  // full theft response stands.
   if (row.revoked_at) {
+    const revokedAtMs = new Date(String(row.revoked_at).replace(' ', 'T') + 'Z').getTime();
+    const withinGrace = Number.isFinite(revokedAtMs) && Date.now() - revokedAtMs < 60_000;
+    if (withinGrace) {
+      await writeAuthAudit(c, {
+        action: 'auth.refresh_reuse', status: 401,
+        userId: row.user_id as string, orgId: row.org_id as string,
+        actorRole: null, entityId: row.user_id as string, entityLabel: null,
+        detail: { revokedAllRefreshTokens: false, graceWindowRace: true },
+      });
+      return c.json({ error: 'Refresh token already rotated' }, 401);
+    }
     await db.prepare(
       `UPDATE refresh_tokens SET revoked_at = datetime('now')
        WHERE user_id = ? AND revoked_at IS NULL`

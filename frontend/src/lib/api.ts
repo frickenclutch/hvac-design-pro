@@ -209,14 +209,28 @@ export interface BulkCatalogItemInput {
 const MAX_RETRIES = 2;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/**
+ * Outcome of a silent refresh rotation.
+ *  'ok'        — fresh pair in hand (rotated here, or adopted from another tab)
+ *  'rejected'  — the server definitively refused the refresh token; the
+ *                session is dead and credentials should be torn down
+ *  'transient' — the refresh endpoint was unreachable or 5xx'd; the stored
+ *                refresh token is still perfectly valid and MUST NOT be
+ *                discarded — surface a connection error, not a logout
+ */
+export type RefreshOutcome = 'ok' | 'rejected' | 'transient';
+
 class ApiClient {
   private token: string | null = null;
-  private refreshInFlight: Promise<boolean> | null = null;
+  private refreshInFlight: Promise<RefreshOutcome> | null = null;
+  private sessionExpiredHandler: (() => void) | null = null;
+  private sessionExpiredNotified = false;
 
   setToken(token: string | null) {
     this.token = token;
     if (token) {
       localStorage.setItem('hvac_session_token', token);
+      this.sessionExpiredNotified = false;
     } else {
       // Clearing the access token tears down the whole credential set.
       localStorage.removeItem('hvac_session_token');
@@ -229,6 +243,26 @@ class ApiClient {
     this.token = accessToken;
     localStorage.setItem('hvac_session_token', accessToken);
     localStorage.setItem('hvac_refresh_token', refreshToken);
+    this.sessionExpiredNotified = false;
+  }
+
+  /** Registered by the auth store. A terminal 401 flips the app to the
+   *  logged-out state exactly once (the route guard then redirects to the
+   *  login surface) instead of leaving a zombie authenticated UI where
+   *  every click re-toasts "Session expired". */
+  onSessionExpired(handler: () => void) {
+    this.sessionExpiredHandler = handler;
+  }
+
+  private sessionExpired() {
+    this.setToken(null);
+    const onPublicSurface =
+      window.location.pathname.includes('/login') || window.location.pathname === '/';
+    if (!this.sessionExpiredNotified && !onPublicSurface) {
+      this.sessionExpiredNotified = true;
+      toast.error('Session expired. Please sign in again.');
+    }
+    this.sessionExpiredHandler?.();
   }
 
   getToken(): string | null {
@@ -244,31 +278,17 @@ class ApiClient {
 
   /**
    * Exchange the stored refresh token for a fresh access + refresh pair.
-   * Concurrent callers share one in-flight request, so a burst of 401s
-   * triggers a single rotation (not a stampede that would trip the server's
-   * reuse-detection). Returns false when there's no refresh token or the
-   * server rejects it — the caller then clears the session.
+   * Concurrent callers in THIS tab share one in-flight rotation; a Web Lock
+   * serializes rotation across OTHER tabs sharing this localStorage, and a
+   * tab that lost the race adopts the winner's freshly-written pair instead
+   * of replaying a consumed token (which would trip the server's theft
+   * detection and revoke the whole set — the "session expired in both
+   * windows" failure). Transient network/5xx failures are retried and never
+   * destroy the stored refresh token.
    */
-  async refreshSession(): Promise<boolean> {
+  async refreshSession(): Promise<RefreshOutcome> {
     if (this.refreshInFlight) return this.refreshInFlight;
-    this.refreshInFlight = (async () => {
-      const refreshToken = this.getRefreshToken();
-      if (!refreshToken) return false;
-      try {
-        const res = await fetch(`${API_BASE}/api/auth/refresh`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refreshToken }),
-        });
-        if (!res.ok) return false;
-        const data = await res.json() as { token?: string; refreshToken?: string };
-        if (!data.token || !data.refreshToken) return false;
-        this.setTokens(data.token, data.refreshToken);
-        return true;
-      } catch {
-        return false;
-      }
-    })();
+    this.refreshInFlight = this.runExclusiveRefresh();
     try {
       return await this.refreshInFlight;
     } finally {
@@ -276,10 +296,67 @@ class ApiClient {
     }
   }
 
+  private async runExclusiveRefresh(): Promise<RefreshOutcome> {
+    const seen = this.getRefreshToken();
+    if (!seen) return 'rejected';
+
+    const rotate = async (): Promise<RefreshOutcome> => {
+      // Re-read AFTER acquiring the lock — another tab may have already
+      // rotated while we waited. If so, adopt its pair and skip the network.
+      const current = localStorage.getItem('hvac_refresh_token');
+      if (!current) return 'rejected';
+      if (current !== seen) {
+        this.token = localStorage.getItem('hvac_session_token');
+        return this.token ? 'ok' : 'rejected';
+      }
+      return this.rotateRefreshToken(current);
+    };
+
+    if (typeof navigator !== 'undefined' && navigator.locks?.request) {
+      return navigator.locks.request('hvac_refresh_rotation', rotate);
+    }
+    return rotate();
+  }
+
+  private async rotateRefreshToken(refreshToken: string): Promise<RefreshOutcome> {
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken }),
+        });
+        if (res.status >= 500) throw new Error(`refresh ${res.status}`);
+        if (!res.ok) {
+          // Before declaring the session dead, check whether another tab
+          // rotated while our request was in flight (no-Web-Locks fallback):
+          // if the stored refresh token changed, adopt the winner's pair.
+          const current = localStorage.getItem('hvac_refresh_token');
+          if (current && current !== refreshToken) {
+            this.token = localStorage.getItem('hvac_session_token');
+            if (this.token) return 'ok';
+          }
+          return 'rejected'; // 4xx — definitive server refusal
+        }
+        const data = await res.json() as { token?: string; refreshToken?: string };
+        if (!data.token || !data.refreshToken) return 'rejected';
+        this.setTokens(data.token, data.refreshToken);
+        return 'ok';
+      } catch {
+        if (attempt < MAX_RETRIES) await sleep(500 * Math.pow(2, attempt));
+      }
+    }
+    return 'transient';
+  }
+
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     let lastError: Error | null = null;
     let triedRefresh = false;
-    const isAuthPath = path.startsWith('/api/auth/');
+    // Auth endpoints 401 for their own reasons (bad password, consumed
+    // one-time token) — never treat that as session death. The MFA
+    // *management* endpoints are the exception: they run behind the normal
+    // bearer session, so they get standard silent-refresh semantics.
+    const isAuthPath = path.startsWith('/api/auth/') && !path.startsWith('/api/auth/mfa/');
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       // Build headers fresh each iteration so a silent refresh's rotated
@@ -302,17 +379,27 @@ class ApiClient {
           headers,
         });
 
-        // 401 — try one silent token refresh + retry, then clear the session.
+        // 401 — try one silent token refresh + retry, then end the session.
         if (res.status === 401) {
-          if (!triedRefresh && !isAuthPath) {
+          if (isAuthPath) {
+            const body = await res.json().catch(() => ({ error: res.statusText }));
+            const msg = body.error || 'Authentication failed';
+            toast.error(msg);
+            throw new Error(msg);
+          }
+          if (!triedRefresh) {
             triedRefresh = true;
-            const refreshed = await this.refreshSession();
-            if (refreshed) continue; // retry with the rotated access token
+            const outcome = await this.refreshSession();
+            if (outcome === 'ok') continue; // retry with the rotated access token
+            if (outcome === 'transient') {
+              // The refresh endpoint was unreachable — the session is very
+              // likely still valid. Surface a connection error and leave
+              // the stored credentials alone.
+              toast.error('Unable to reach the server. Please check your connection.');
+              throw new Error('Unable to reach the server. Please check your connection.');
+            }
           }
-          this.setToken(null);
-          if (!window.location.pathname.includes('/login') && window.location.pathname !== '/') {
-            toast.error('Session expired. Please sign in again.');
-          }
+          this.sessionExpired();
           throw new Error('Session expired');
         }
 
@@ -794,6 +881,7 @@ class ApiClient {
         id: string; invited_email: string; invited_role: string;
         status: string; invited_by: string;
         expires_at: string; created_at: string;
+        token: string;
       }>;
       domain: { claimed: string | null; verifiedAt: string | null };
     }>('/api/org/team');
