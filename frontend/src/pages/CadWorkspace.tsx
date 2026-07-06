@@ -18,6 +18,7 @@ import { useCadStore, type SerializedDrawing } from '../features/cad/store/useCa
 import { useAccessPolicyStore } from '../stores/useAccessPolicyStore';
 import Mason from '../components/Mason';
 import ErrorBoundary from '../components/ErrorBoundary';
+import ProjectGateDialog from '../components/ProjectGateDialog';
 import { useProjectStore } from '../stores/useProjectStore';
 import { toast } from '../stores/useToastStore';
 
@@ -104,7 +105,17 @@ export default function CadWorkspace() {
   // Hydrate the active project store from the route param
   const { id } = useParams<{ id: string }>();
   const setActiveProject = useProjectStore((s) => s.setActiveProject);
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const loadedProjectRef = useRef<string | null>(null);
+
+  // Project gate — CAD produces project-scoped data, so entering it from the
+  // sidebar (`/cad`, no route id) with no active project must prompt for a
+  // project or an explicit draft, exactly like the calculators (§4.2). Without
+  // this, CAD silently dropped the user onto whatever geometry was last in the
+  // store/draft cache — "loads but isn't blank". Arriving via
+  // /project/:id/cad (id present) is an explicit choice and skips the gate.
+  const [gateAccepted, setGateAccepted] = useState(false);
+  const showGate = !id && !activeProjectId && !gateAccepted;
 
   useEffect(() => {
     if (id) {
@@ -117,8 +128,14 @@ export default function CadWorkspace() {
   }, [id, setActiveProject]);
 
   // ── Load saved CAD drawing data when entering a project ──────────────
+  // Keyed on both the route id AND the reactive activeProjectId so a project
+  // chosen from the gate dialog (which sets activeProjectId, not the route)
+  // triggers its drawing to load.
   useEffect(() => {
-    const projectId = id ?? useProjectStore.getState().activeProjectId;
+    // Hold off until the user has resolved the gate — don't load draft
+    // geometry behind the dialog only to replace it when they pick a project.
+    if (showGate) return;
+    const projectId = id ?? activeProjectId;
     // Skip if we already loaded this project (avoids re-loading on every render)
     if (loadedProjectRef.current === (projectId ?? '__draft__')) return;
     loadedProjectRef.current = projectId ?? '__draft__';
@@ -176,7 +193,21 @@ export default function CadWorkspace() {
       store.setProjectId(null);
       store.setDrawingId(null);
     }
-  }, [id]);
+  }, [id, activeProjectId, showGate]);
+
+  // Draft chosen from the gate: start a genuinely blank canvas (unless
+  // geometry was just handed in from Manual J → Export to CAD), matching the
+  // user's "new canvas" intent rather than resurrecting a stale draft.
+  const handleDraft = () => {
+    const store = useCadStore.getState();
+    const hasGeometry = store.floors.some(f => f.walls.length > 0 || f.rooms.length > 0);
+    if (!hasGeometry) {
+      store.loadDrawing({});
+      store.setProjectId(null);
+      store.setDrawingId(null);
+    }
+    setGateAccepted(true);
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950 font-sans text-slate-100 overflow-hidden">
@@ -243,6 +274,17 @@ export default function CadWorkspace() {
           onExit={exitPreview}
           onRestore={() => void restoreFromPreview()}
         />
+      )}
+
+      {/* Project gate — rendered last, in a z-[60] layer so it sits above the
+          canvas and every floating panel/modal in this z-50 workspace. */}
+      {showGate && (
+        <div className="fixed inset-0 z-[60]">
+          <ProjectGateDialog
+            onProjectSelected={() => setGateAccepted(true)}
+            onDraft={handleDraft}
+          />
+        </div>
       )}
 
     </div>
