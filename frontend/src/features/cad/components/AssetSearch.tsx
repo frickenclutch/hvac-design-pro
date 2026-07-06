@@ -77,7 +77,7 @@ function buildIndex(floors: Floor[], pxPerFt: number): SearchResult[] {
       results.push({
         id: o.id,
         type: 'opening',
-        name: `${o.type.replace('_', ' ')} ${dims}`,
+        name: `${(o.type ?? 'opening').replace('_', ' ')} ${dims}`,
         description: `${dims}" | ${extra}`.trim(),
         floorId: floor.id,
         floorName: floor.name,

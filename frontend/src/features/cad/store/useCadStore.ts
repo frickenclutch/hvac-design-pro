@@ -1080,9 +1080,21 @@ export const useCadStore = create<CadState>((set, get) => {
       // canvas payload). We've confirmed it's an object; read it through the
       // serialized shape and defend every field for backwards/forwards compat.
       const d = data as Partial<SerializedDrawing>;
-      // Ensure all floors have required arrays (backwards compat)
+      // Ensure all floors have EVERY geometry array (backwards/forwards compat
+      // + corruption defense). CadCanvas and the 3D viewer iterate these
+      // directly (e.g. `for (const u of floor.hvacUnits)`), so a legacy or
+      // partial snapshot missing any one of them threw "X is not iterable" and
+      // took down the canvas via its ErrorBoundary. Backfill the complete set —
+      // the original arrays (walls/openings/rooms/hvacUnits/pipes/annotations)
+      // were previously omitted here, which is what crashed on older drafts.
       const floors: Floor[] = (d.floors ?? [createDefaultFloor()]).map((f) => ({
         ...f,
+        walls: f.walls ?? [],
+        openings: f.openings ?? [],
+        rooms: f.rooms ?? [],
+        hvacUnits: f.hvacUnits ?? [],
+        pipes: f.pipes ?? [],
+        annotations: f.annotations ?? [],
         underlays: f.underlays ?? [],
         ductSegments: f.ductSegments ?? [],
         ductFittings: f.ductFittings ?? [],

@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
+import { History, FilePlus, ArrowLeft } from 'lucide-react';
 import { scopedKey } from '../utils/storage';
 import CadCanvas from '../features/cad/components/CadCanvas';
 import Toolbox from '../features/cad/components/Toolbox';
@@ -115,7 +116,12 @@ export default function CadWorkspace() {
   // store/draft cache — "loads but isn't blank". Arriving via
   // /project/:id/cad (id present) is an explicit choice and skips the gate.
   const [gateAccepted, setGateAccepted] = useState(false);
-  const showGate = !id && !activeProjectId && !gateAccepted;
+  // Secondary "resume vs blank" choice, shown after Continue as Draft when
+  // there IS a resumable draft. forceBlankDraftRef carries the user's pick
+  // into the load effect below.
+  const [draftChoiceOpen, setDraftChoiceOpen] = useState(false);
+  const forceBlankDraftRef = useRef(false);
+  const showGate = !id && !activeProjectId && !gateAccepted && !draftChoiceOpen;
 
   useEffect(() => {
     if (id) {
@@ -132,9 +138,9 @@ export default function CadWorkspace() {
   // chosen from the gate dialog (which sets activeProjectId, not the route)
   // triggers its drawing to load.
   useEffect(() => {
-    // Hold off until the user has resolved the gate — don't load draft
-    // geometry behind the dialog only to replace it when they pick a project.
-    if (showGate) return;
+    // Hold off until the user has resolved the gate (and the draft choice) —
+    // don't load geometry behind a dialog only to replace it once they pick.
+    if (showGate || draftChoiceOpen) return;
     const projectId = id ?? activeProjectId;
     // Skip if we already loaded this project (avoids re-loading on every render)
     if (loadedProjectRef.current === (projectId ?? '__draft__')) return;
@@ -170,42 +176,71 @@ export default function CadWorkspace() {
         toast.error('Failed to load drawing. Starting with a blank canvas.');
       });
     } else {
-      // Draft mode: preserve any geometry already in the store (e.g. from
-      // Manual J → Export to CAD). If the store is empty, try loading from
-      // localStorage persistence.
-      const hasGeometry = store.floors.some(
-        f => f.walls.length > 0 || f.rooms.length > 0
-      );
-      if (!hasGeometry) {
-        try {
-          const saved = localStorage.getItem(scopedKey('hvac_cad_drawing'));
-          if (saved) {
-            const data = JSON.parse(saved) as Partial<SerializedDrawing>;
-            const savedHasGeometry = data.floors?.some(
-              (f) => (f.walls?.length || 0) > 0 || (f.rooms?.length || 0) > 0
-            );
-            if (savedHasGeometry) {
-              store.loadDrawing(data);
+      // Draft mode. If the user explicitly chose "start blank", wipe to an
+      // empty canvas. Otherwise preserve any geometry already in the store
+      // (e.g. from Manual J → Export to CAD) and, if empty, resume the saved
+      // localStorage draft.
+      if (forceBlankDraftRef.current) {
+        store.loadDrawing({});
+      } else {
+        const hasGeometry = store.floors.some(
+          f => f.walls.length > 0 || f.rooms.length > 0
+        );
+        if (!hasGeometry) {
+          try {
+            const saved = localStorage.getItem(scopedKey('hvac_cad_drawing'));
+            if (saved) {
+              const data = JSON.parse(saved) as Partial<SerializedDrawing>;
+              const savedHasGeometry = data.floors?.some(
+                (f) => (f.walls?.length || 0) > 0 || (f.rooms?.length || 0) > 0
+              );
+              if (savedHasGeometry) {
+                store.loadDrawing(data);
+              }
             }
-          }
-        } catch { /* start fresh */ }
+          } catch { /* start fresh */ }
+        }
       }
       store.setProjectId(null);
       store.setDrawingId(null);
     }
-  }, [id, activeProjectId, showGate]);
+  }, [id, activeProjectId, showGate, draftChoiceOpen]);
 
-  // Draft chosen from the gate: start a genuinely blank canvas (unless
-  // geometry was just handed in from Manual J → Export to CAD), matching the
-  // user's "new canvas" intent rather than resurrecting a stale draft.
+  // "Continue as Draft" from the gate. If there's a resumable draft (geometry
+  // already in the store, or a saved localStorage draft), let the user decide
+  // between resuming it and starting a blank canvas. If there's nothing to
+  // resume, go straight to a blank canvas.
   const handleDraft = () => {
     const store = useCadStore.getState();
-    const hasGeometry = store.floors.some(f => f.walls.length > 0 || f.rooms.length > 0);
-    if (!hasGeometry) {
-      store.loadDrawing({});
-      store.setProjectId(null);
-      store.setDrawingId(null);
+    const storeHasGeometry = store.floors.some(f => f.walls.length > 0 || f.rooms.length > 0);
+    let savedHasGeometry = false;
+    try {
+      const saved = localStorage.getItem(scopedKey('hvac_cad_drawing'));
+      if (saved) {
+        const data = JSON.parse(saved) as Partial<SerializedDrawing>;
+        savedHasGeometry = data.floors?.some(
+          (f) => (f.walls?.length || 0) > 0 || (f.rooms?.length || 0) > 0
+        ) ?? false;
+      }
+    } catch { /* ignore */ }
+
+    if (storeHasGeometry || savedHasGeometry) {
+      setDraftChoiceOpen(true);
+    } else {
+      forceBlankDraftRef.current = true;
+      setGateAccepted(true);
     }
+  };
+
+  const startBlankDraft = () => {
+    forceBlankDraftRef.current = true;
+    setDraftChoiceOpen(false);
+    setGateAccepted(true);
+  };
+
+  const resumeDraft = () => {
+    forceBlankDraftRef.current = false;
+    setDraftChoiceOpen(false);
     setGateAccepted(true);
   };
 
@@ -284,6 +319,51 @@ export default function CadWorkspace() {
             onProjectSelected={() => setGateAccepted(true)}
             onDraft={handleDraft}
           />
+        </div>
+      )}
+
+      {/* Draft resume-vs-blank choice — shown only when there's a resumable
+          draft, so the user decides rather than the app guessing. */}
+      {draftChoiceOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="glass-panel w-full max-w-md mx-4 rounded-3xl border border-slate-700/60 shadow-2xl overflow-hidden">
+            <div className="px-8 pt-8 pb-2">
+              <h2 className="text-xl font-bold text-white mb-1">Continue your draft?</h2>
+              <p className="text-sm text-slate-400">
+                You have an unsaved draft drawing. Pick up where you left off, or start a fresh blank canvas.
+              </p>
+            </div>
+            <div className="px-8 py-6 space-y-3">
+              <button
+                onClick={resumeDraft}
+                className="w-full flex items-center gap-3 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/15 transition-all text-left"
+              >
+                <History className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold text-white">Resume last draft</p>
+                  <p className="text-[11px] text-slate-400">Reopen the drawing you were working on</p>
+                </div>
+              </button>
+              <button
+                onClick={startBlankDraft}
+                className="w-full flex items-center gap-3 p-4 rounded-xl bg-slate-800/50 border border-slate-700/50 hover:border-slate-600 transition-all text-left"
+              >
+                <FilePlus className="w-5 h-5 text-slate-300 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold text-white">Start a blank canvas</p>
+                  <p className="text-[11px] text-slate-400">Begin a new drawing (your saved draft stays intact until you draw)</p>
+                </div>
+              </button>
+            </div>
+            <div className="px-8 py-4 border-t border-slate-800/60 bg-slate-900/30">
+              <button
+                onClick={() => setDraftChoiceOpen(false)}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-semibold text-slate-500 hover:text-slate-300 hover:bg-slate-800/50 transition-all"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" /> Back
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
