@@ -3,6 +3,7 @@ import { usePreferencesStore, type ThemeMode, type UIDensity, type UnitSystem, t
 import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle } from 'lucide-react';
 import { api } from '../lib/api';
 import A11yPanel from '../components/accessibility/A11yPanel';
+import TotpQr from '../components/TotpQr';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { useAccessPolicyStore } from '../stores/useAccessPolicyStore';
 import { toast } from '../stores/useToastStore';
@@ -492,7 +493,11 @@ function MfaSection({ requiredForRole }: { requiredForRole: boolean }) {
       ) : phase === 'enrolling' ? (
         <div className="space-y-5">
           <div>
-            <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2 block">Manual entry secret</label>
+            <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-3 block text-center">Scan with your authenticator app</label>
+            <TotpQr uri={otpauthUri} />
+          </div>
+          <div>
+            <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2 block">Can't scan? Enter this secret manually</label>
             <div className="flex items-center gap-2">
               <code className="flex-1 bg-slate-900/80 border border-slate-700/60 rounded-xl py-3 px-4 text-emerald-300 font-mono text-sm break-all">{secret}</code>
               <button
@@ -504,10 +509,6 @@ function MfaSection({ requiredForRole }: { requiredForRole: boolean }) {
                 {copied === 'secret' ? <Check className="w-5 h-5 text-emerald-400" /> : <Copy className="w-5 h-5" />}
               </button>
             </div>
-          </div>
-          <div>
-            <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2 block">Or paste this URI into your app</label>
-            <code className="block bg-slate-900/40 border border-slate-700/40 rounded-xl py-2.5 px-3 text-slate-400 font-mono text-[11px] break-all">{otpauthUri}</code>
           </div>
           <div>
             <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2 block">Enter the 6-digit code</label>

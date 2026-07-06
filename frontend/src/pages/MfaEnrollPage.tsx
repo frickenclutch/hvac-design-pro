@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { SecurityBadge } from '../features/auth/components/SecurityComponents';
+import TotpQr from '../components/TotpQr';
 import { Compass, ShieldCheck, AlertCircle, ArrowRight, Copy, Check, KeyRound } from 'lucide-react';
 
 type Stage = 'loading' | 'setup' | 'backup';
@@ -147,7 +148,11 @@ export default function MfaEnrollPage() {
               <>
                 <div className="mb-6 space-y-4">
                   <div>
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2 block">Manual entry secret</label>
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-3 block text-center">Scan with your authenticator app</label>
+                    <TotpQr uri={otpauthUri} />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2 block">Can't scan? Enter this secret manually</label>
                     <div className="flex items-center gap-2">
                       <code className="flex-1 bg-slate-800/80 border border-slate-700/60 rounded-xl py-3 px-4 text-emerald-300 font-mono text-sm break-all">{secret}</code>
                       <button
@@ -159,10 +164,6 @@ export default function MfaEnrollPage() {
                         {copied === 'secret' ? <Check className="w-5 h-5 text-emerald-400" /> : <Copy className="w-5 h-5" />}
                       </button>
                     </div>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2 block">Or paste this URI into your app</label>
-                    <code className="block bg-slate-800/40 border border-slate-700/40 rounded-xl py-2.5 px-3 text-slate-400 font-mono text-[11px] break-all">{otpauthUri}</code>
                   </div>
                 </div>
 
