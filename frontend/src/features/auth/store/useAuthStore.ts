@@ -120,6 +120,17 @@ interface AuthState {
   pendingVerification: boolean;
   pendingEmail: string | null;
 
+  // ── MFA second-factor state ──────────────────────────────────────────────
+  // Set when a login returns 202 (enrolled user must complete a challenge) or
+  // 403 (required-but-not-enrolled user must enroll in a grace flow). Both are
+  // cleared on a successful session mint and on logout. The tokens are opaque,
+  // single-use, server-hashed — they are NOT session credentials.
+  mfaRequired: boolean;
+  mfaChallengeToken: string | null;
+  mfaMethods: string[];
+  enrollmentRequired: boolean;
+  mfaEnrollToken: string | null;
+
   // Actions
   login: (email: string, password: string) => Promise<void>;
   register: (data: { email: string; password: string; firstName: string; lastName: string; orgName?: string; orgType?: OrgType; regionCode?: RegionCode; addressLine1?: string; city?: string; state?: string; zip?: string; country?: string; phone?: string }) => Promise<void>;
@@ -128,6 +139,13 @@ interface AuthState {
   setOnboarding: (isOnboarding: boolean) => void;
   restoreSession: () => Promise<void>;
   clearError: () => void;
+
+  // MFA actions (pre-session — routed through the store's own apiFetch, which
+  // does NOT auto-refresh/retry on 401, exactly like login).
+  submitMfaChallenge: (code: string, method: 'totp' | 'email' | 'backup') => Promise<void>;
+  sendMfaEmailCode: () => Promise<boolean>;
+  enrollGrace: () => Promise<{ secret: string; otpauthUri: string } | null>;
+  confirmEnrollGrace: (code: string) => Promise<string[] | null>;
 
   // Verification & password reset actions
   verifyEmail: (email: string, code: string) => Promise<void>;
@@ -160,11 +178,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   authLoading: false,
   pendingVerification: false,
   pendingEmail: null,
+  mfaRequired: false,
+  mfaChallengeToken: null,
+  mfaMethods: [],
+  enrollmentRequired: false,
+  mfaEnrollToken: null,
 
   login: async (email, password) => {
     set({ authLoading: true, authError: null });
 
-    const { data, error, status } = await apiFetch<{ token?: string; refreshToken?: string; user?: User; organisation?: Organisation; pendingVerification?: boolean; email?: string }>('/api/auth/login', {
+    const { data, error, status } = await apiFetch<{ token?: string; refreshToken?: string; user?: User; organisation?: Organisation; pendingVerification?: boolean; email?: string; mfaRequired?: boolean; mfaChallengeToken?: string; methods?: string[]; enrollmentRequired?: boolean; mfaEnrollToken?: string }>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
@@ -176,6 +199,36 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         authError: null,
         pendingVerification: true,
         pendingEmail: data.email || email.toLowerCase().trim(),
+      });
+      return;
+    }
+
+    // ── MFA second-factor required (enrolled user) — 202, NO session ────────
+    // Must return BEFORE the "no token == failure" check below.
+    if (status === 202 && data?.mfaRequired && data.mfaChallengeToken) {
+      set({
+        authLoading: false,
+        authError: null,
+        mfaRequired: true,
+        mfaChallengeToken: data.mfaChallengeToken,
+        mfaMethods: data.methods ?? ['totp'],
+        pendingEmail: data.email || email.toLowerCase().trim(),
+        enrollmentRequired: false,
+        mfaEnrollToken: null,
+      });
+      return;
+    }
+
+    // ── Forced enrollment (required role, not yet enrolled) — 403, NO session ─
+    if (status === 403 && data?.enrollmentRequired && data.mfaEnrollToken) {
+      set({
+        authLoading: false,
+        authError: null,
+        enrollmentRequired: true,
+        mfaEnrollToken: data.mfaEnrollToken,
+        pendingEmail: data.email || email.toLowerCase().trim(),
+        mfaRequired: false,
+        mfaChallengeToken: null,
       });
       return;
     }
@@ -195,7 +248,115 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       authError: null,
       pendingVerification: false,
       pendingEmail: null,
+      mfaRequired: false,
+      mfaChallengeToken: null,
+      mfaMethods: [],
+      enrollmentRequired: false,
+      mfaEnrollToken: null,
     });
+  },
+
+  submitMfaChallenge: async (code, method) => {
+    const challengeToken = get().mfaChallengeToken;
+    if (!challengeToken) {
+      set({ authError: 'Your sign-in session expired. Please sign in again.' });
+      return;
+    }
+    set({ authLoading: true, authError: null });
+
+    const { data, error } = await apiFetch<{ token?: string; refreshToken?: string; user?: User; organisation?: Organisation }>('/api/auth/mfa/challenge', {
+      method: 'POST',
+      body: JSON.stringify({ challengeToken, code, method }),
+    });
+
+    if (error || !data?.token) {
+      set({ authLoading: false, authError: error || 'Invalid code. Please try again.' });
+      return;
+    }
+
+    persistSession(data.token, data.user!, data.organisation!, data.refreshToken);
+    set({
+      user: data.user!,
+      organisation: data.organisation!,
+      token: data.token,
+      isAuthenticated: true,
+      authLoading: false,
+      authError: null,
+      pendingVerification: false,
+      pendingEmail: null,
+      mfaRequired: false,
+      mfaChallengeToken: null,
+      mfaMethods: [],
+      enrollmentRequired: false,
+      mfaEnrollToken: null,
+    });
+  },
+
+  sendMfaEmailCode: async () => {
+    const challengeToken = get().mfaChallengeToken;
+    if (!challengeToken) return false;
+    const { error } = await apiFetch('/api/auth/mfa/email-code', {
+      method: 'POST',
+      body: JSON.stringify({ challengeToken }),
+    });
+    if (error) {
+      set({ authError: error });
+      return false;
+    }
+    return true;
+  },
+
+  enrollGrace: async () => {
+    const mfaEnrollToken = get().mfaEnrollToken;
+    if (!mfaEnrollToken) {
+      set({ authError: 'Your enrollment session expired. Please sign in again.' });
+      return null;
+    }
+    set({ authLoading: true, authError: null });
+    const { data, error } = await apiFetch<{ secret?: string; otpauthUri?: string }>('/api/auth/mfa/enroll-grace', {
+      method: 'POST',
+      body: JSON.stringify({ mfaEnrollToken }),
+    });
+    set({ authLoading: false });
+    if (error || !data?.secret || !data.otpauthUri) {
+      set({ authError: error || 'Could not start enrollment. Please sign in again.' });
+      return null;
+    }
+    return { secret: data.secret, otpauthUri: data.otpauthUri };
+  },
+
+  confirmEnrollGrace: async (code) => {
+    const mfaEnrollToken = get().mfaEnrollToken;
+    if (!mfaEnrollToken) {
+      set({ authError: 'Your enrollment session expired. Please sign in again.' });
+      return null;
+    }
+    set({ authLoading: true, authError: null });
+    const { data, error } = await apiFetch<{ token?: string; refreshToken?: string; user?: User; organisation?: Organisation; backupCodes?: string[] }>('/api/auth/mfa/confirm-grace', {
+      method: 'POST',
+      body: JSON.stringify({ mfaEnrollToken, code }),
+    });
+    if (error || !data?.token) {
+      set({ authLoading: false, authError: error || 'Invalid code. Please try again.' });
+      return null;
+    }
+    persistSession(data.token, data.user!, data.organisation!, data.refreshToken);
+    set({
+      user: data.user!,
+      organisation: data.organisation!,
+      token: data.token,
+      isAuthenticated: true,
+      authLoading: false,
+      authError: null,
+      pendingVerification: false,
+      pendingEmail: null,
+      mfaRequired: false,
+      mfaChallengeToken: null,
+      mfaMethods: [],
+      enrollmentRequired: false,
+      mfaEnrollToken: null,
+    });
+    return data.backupCodes ?? [];
   },
 
   register: async (data) => {
@@ -393,7 +554,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return;
     }
 
-    persistSession(resp.token, resp.user, resp.organisation);
+    persistSession(resp.token, resp.user, resp.organisation, resp.refreshToken);
     set({
       user: resp.user,
       organisation: resp.organisation,
@@ -412,7 +573,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     }
     clearPersistedSession();
-    set({ user: null, organisation: null, token: null, isAuthenticated: false, isOnboarding: false, authError: null, pendingVerification: false, pendingEmail: null });
+    set({ user: null, organisation: null, token: null, isAuthenticated: false, isOnboarding: false, authError: null, pendingVerification: false, pendingEmail: null, mfaRequired: false, mfaChallengeToken: null, mfaMethods: [], enrollmentRequired: false, mfaEnrollToken: null });
   },
 
   setAuthenticated: (isAuthenticated) => set({ isAuthenticated }),
@@ -428,8 +589,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // the stored refresh token) before we give up on the session.
     let { data, error, status } = await apiFetch<{ user: User; organisation: Organisation }>('/api/auth/me');
     if (status === 401) {
-      const refreshed = await api.refreshSession();
-      if (refreshed) {
+      const outcome = await api.refreshSession();
+      // Transient = the refresh endpoint was unreachable, NOT a dead
+      // session. Keep the persisted session (offline-capable PWA) — the
+      // next heartbeat retries. Only a definitive rejection falls through
+      // to the clear below.
+      if (outcome === 'transient') return;
+      if (outcome === 'ok') {
         ({ data, error, status } = await apiFetch<{ user: User; organisation: Organisation }>('/api/auth/me'));
       }
     }
@@ -455,3 +621,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
 // Register user getter for scoped localStorage keys
 registerAuthGetter(() => useAuthStore.getState().user);
+
+// Terminal 401 (refresh definitively rejected): flip the app to logged-out
+// exactly once so the route guard redirects to the login surface. Without
+// this the auth store kept isAuthenticated=true after api.ts dropped the
+// tokens, leaving a zombie UI where every click re-toasted "Session expired".
+api.onSessionExpired(() => {
+  clearPersistedSession();
+  useAuthStore.setState({
+    user: null, organisation: null, token: null, isAuthenticated: false,
+    mfaRequired: false, mfaChallengeToken: null, mfaMethods: [],
+    enrollmentRequired: false, mfaEnrollToken: null,
+  });
+});

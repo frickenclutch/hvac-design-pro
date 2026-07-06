@@ -66,6 +66,14 @@ export interface UserPreferences {
   firmStampPosition: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
   notaryStampDataUrl: string;
 
+  // Professional Engineer (PE) attestation — drives the permit-ready
+  // attestation/signature page on combined reports. The attestation page
+  // renders ONLY when peName + peSignatureDataUrl are both populated.
+  peName: string;                 // e.g. "John A. Smith, PE"
+  peLicenseNumber: string;        // e.g. "M-12345"
+  peJurisdiction: string;         // e.g. "Maryland"
+  peSignatureDataUrl: string;     // Base64 signature image (same upload pattern as firmStampDataUrl)
+
   // Calculation engine (Manual J)
   engineVersion: EngineVersion;
   /** When true, the calculator runs the Manual J 8 engine alongside legacy
@@ -103,6 +111,10 @@ const defaults: UserPreferences = {
   firmStampDataUrl: '',
   firmStampPosition: 'bottom-right',
   notaryStampDataUrl: '',
+  peName: '',
+  peLicenseNumber: '',
+  peJurisdiction: '',
+  peSignatureDataUrl: '',
   engineVersion: 'legacy',
   shadowRunManualJ8: true,
 };
@@ -179,6 +191,10 @@ function migrateUnscopedOrphan(): void {
           scopedObj.notaryStampDataUrl = orphan.notaryStampDataUrl;
           changed = true;
         }
+        if (!scopedObj.peSignatureDataUrl && orphan.peSignatureDataUrl) {
+          scopedObj.peSignatureDataUrl = orphan.peSignatureDataUrl;
+          changed = true;
+        }
         if (changed) {
           try {
             localStorage.setItem(scoped, JSON.stringify(scopedObj));
@@ -212,7 +228,7 @@ function persist(prefs: UserPreferences) {
       // each as base64). User keeps the in-memory toggle they just made; the
       // stamps are dropped from persistence so future clicks don't re-throw.
       try {
-        const slim: UserPreferences = { ...prefs, firmStampDataUrl: '', notaryStampDataUrl: '' };
+        const slim: UserPreferences = { ...prefs, firmStampDataUrl: '', notaryStampDataUrl: '', peSignatureDataUrl: '' };
         localStorage.setItem(scopedKey(STORAGE_KEY), JSON.stringify(slim));
         // eslint-disable-next-line no-console
         console.warn('[preferences] localStorage quota exceeded — dropped stamp images from persisted prefs.');

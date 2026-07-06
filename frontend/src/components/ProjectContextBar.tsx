@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ChevronDown, FolderOpen, Home, Building2, Globe } from 'lucide-react';
 import { useProjectStore } from '../stores/useProjectStore';
 import { getCachedProjects, type Project } from '../features/projects/projectStorage';
@@ -8,6 +8,20 @@ export default function ProjectContextBar() {
   const { activeProjectId, activeProjectName, activeProjectType, setActiveProject } = useProjectStore();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Switch WITHOUT a full page reload — a reload wipes the in-memory
+  // project store, so the user's own selection was lost and the gate
+  // dialog reappeared. Calculators reload their scoped data reactively on
+  // activeProjectId change (§4.1); CAD is route-bound, so switching there
+  // navigates to the new project's CAD route instead.
+  const switchProject = (id: string) => {
+    setActiveProject(id);
+    setDropdownOpen(false);
+    const onCadRoute = location.pathname.startsWith('/project/') || location.pathname === '/cad';
+    if (onCadRoute) navigate(`/project/${id}/cad`);
+  };
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -85,12 +99,7 @@ export default function ProjectContextBar() {
             {projects.map((p: any) => (
               <button
                 key={p.id}
-                onClick={() => {
-                  setActiveProject(p.id);
-                  setDropdownOpen(false);
-                  // Force page reload to pick up new project's scoped data
-                  window.location.reload();
-                }}
+                onClick={() => switchProject(p.id)}
                 className={`w-full flex items-center gap-2.5 p-2.5 rounded-lg text-left transition-all ${p.id === activeProjectId ? 'bg-emerald-500/10 border border-emerald-500/20' : 'hover:bg-slate-800/50 border border-transparent'}`}
               >
                 {p.type === 'commercial'

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   PackageCheck, Snowflake, Flame, Gauge, ArrowRight, RotateCcw,
-  AlertTriangle, CheckCircle, Info, Mountain,
+  AlertTriangle, CheckCircle, Info, Mountain, PackageSearch,
 } from 'lucide-react';
 import {
   calculateManualS, coolingStatusLabel, heatingStatusLabel,
@@ -17,6 +17,8 @@ import { useProjectStore } from '../stores/useProjectStore';
 import Mason from '../components/Mason';
 import ProjectContextBar from '../components/ProjectContextBar';
 import ProjectGateDialog from '../components/ProjectGateDialog';
+import CatalogPickerModal from '../components/CatalogPickerModal';
+import type { ApiCatalogProductRow } from '../lib/api';
 import { scopedKey } from '../utils/storage';
 import { syncCalcToD1 } from '../features/calculations/calcStorage';
 
@@ -160,6 +162,8 @@ export default function ManualSCalculator() {
 
   const [result, setResult] = useState<ManualSResult | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
+  // Catalog picker — null when closed, else which equipment block it fills.
+  const [pickerMode, setPickerMode] = useState<'cooling' | 'heating' | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
   const derivedLatent = Math.max(0, totalCoolingBtu - sensibleCoolingBtu);
@@ -322,6 +326,43 @@ export default function ManualSCalculator() {
       coolingType, coolingModel, ahriRef, coolTotalCap, coolSensCap, applyAltitude,
       heatingType, heatingModel, heatCap, cap47, cap17, afue]);
 
+  // Map a picked catalog row (category='hvac_equipment') onto the equipment
+  // setters. The catalog's equipment_type IS the engine's own discriminator, so
+  // this is a near-identity field copy onto CoolingEquipmentInput /
+  // HeatingEquipmentInput. A heat_pump fills BOTH blocks (it cools AND heats);
+  // an ac fills cooling only; a furnace_* fills heating only.
+  const applyCatalogItem = useCallback((row: ApiCatalogProductRow) => {
+    const label = row.model || row.name;
+    const et = row.equipment_type;
+
+    // Cooling block — only AC and heat pumps cool.
+    if (et === 'ac' || et === 'heat_pump') {
+      setCoolingType(et === 'heat_pump' ? 'heat_pump' : 'ac');
+      setCoolingModel(label);
+      setAhriRef(row.ahri_ref ?? '');
+      if (row.total_cooling_btu != null) setCoolTotalCap(row.total_cooling_btu);
+      if (row.sensible_cooling_btu != null) setCoolSensCap(row.sensible_cooling_btu);
+    }
+
+    // Heating block — heat pumps and furnaces heat.
+    if (et === 'heat_pump') {
+      setHeatingType('heat_pump');
+      setHeatingModel(label);
+      if (row.heating_btu != null) setHeatCap(row.heating_btu);
+      setCap47(row.heating_cap_47 ?? 0);
+      setCap17(row.heating_cap_17 ?? 0);
+    } else if (et === 'furnace_gas' || et === 'furnace_electric') {
+      setHeatingType(et);
+      setHeatingModel(label);
+      if (row.heating_btu != null) setHeatCap(row.heating_btu);
+      if (row.afue != null) setAfue(row.afue);
+    }
+
+    // Picking equipment doesn't change the design loads — clear the stale
+    // result so the user re-runs against the newly filled equipment.
+    setResult(null);
+  }, []);
+
   const resetAll = useCallback(() => {
     const d = defaultState();
     setLoadsSource(d.loadsSource);
@@ -351,7 +392,7 @@ export default function ManualSCalculator() {
   const exportPdf = useCallback(async () => {
     if (!result) { alert('Run a calculation first.'); return; }
     const { default: JsPDF } = await import('jspdf');
-    const doc = new JsPDF({ orientation: 'portrait', format: 'letter' });
+    const doc = new JsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
     const pw = doc.internal.pageSize.getWidth();
     const ph = doc.internal.pageSize.getHeight();
     const margin = 48;
@@ -520,11 +561,20 @@ export default function ManualSCalculator() {
 
         {/* ═══ Cooling Equipment ═══ */}
         <section className="glass-panel rounded-3xl border border-slate-800/60 p-8 mb-8">
-          <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-            <Snowflake className="w-5 h-5 text-sky-400" />
-            Cooling Equipment
-            <span className="text-[11px] font-normal text-slate-500">capacities at design conditions</span>
-          </h3>
+          <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <Snowflake className="w-5 h-5 text-sky-400" />
+              Cooling Equipment
+              <span className="text-[11px] font-normal text-slate-500">capacities at design conditions</span>
+            </h3>
+            <button
+              type="button"
+              onClick={() => setPickerMode('cooling')}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 transition-all text-sm font-semibold min-h-[44px]"
+            >
+              <PackageSearch className="w-4 h-4" /> Pick from catalog
+            </button>
+          </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
             <div>
@@ -559,10 +609,19 @@ export default function ManualSCalculator() {
 
         {/* ═══ Heating Equipment ═══ */}
         <section className="glass-panel rounded-3xl border border-slate-800/60 p-8 mb-8">
-          <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-            <Flame className="w-5 h-5 text-orange-400" />
-            Heating Equipment
-          </h3>
+          <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <Flame className="w-5 h-5 text-orange-400" />
+              Heating Equipment
+            </h3>
+            <button
+              type="button"
+              onClick={() => setPickerMode('heating')}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 transition-all text-sm font-semibold min-h-[44px]"
+            >
+              <PackageSearch className="w-4 h-4" /> Pick from catalog
+            </button>
+          </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
             <div>
@@ -703,6 +762,19 @@ export default function ManualSCalculator() {
           </section>
         )}
       </div>
+
+      {/* Catalog picker — fills the cooling or heating equipment block from the
+          org's hvac_equipment inventory. */}
+      {pickerMode && (
+        <CatalogPickerModal
+          mode={pickerMode}
+          allowedTypes={pickerMode === 'cooling'
+            ? ['ac', 'heat_pump']
+            : ['heat_pump', 'furnace_gas', 'furnace_electric']}
+          onSelect={applyCatalogItem}
+          onClose={() => setPickerMode(null)}
+        />
+      )}
 
       {/* Mason AI Assistant */}
       <Mason context="manual-s" position="bottom-left" />

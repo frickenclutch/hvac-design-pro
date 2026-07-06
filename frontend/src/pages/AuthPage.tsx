@@ -18,6 +18,10 @@ export default function AuthPage() {
     const state = useAuthStore.getState();
     if (state.isAuthenticated) {
       navigate('/dashboard');
+    } else if (state.mfaRequired) {
+      navigate('/auth/mfa-challenge');
+    } else if (state.enrollmentRequired) {
+      navigate('/auth/mfa-enroll');
     } else if (state.pendingVerification) {
       navigate('/verify-email');
     }

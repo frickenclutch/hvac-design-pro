@@ -6,11 +6,13 @@
 
 import { generateId } from './id';
 
-type CodePurpose = 'email_verification' | 'password_reset';
+type CodePurpose = 'email_verification' | 'password_reset' | 'mfa_verification';
 
 const DEFAULT_EXPIRY: Record<CodePurpose, number> = {
   email_verification: 10, // minutes
   password_reset: 15,
+  // MFA second-factor codes are a LIVE login step — keep them short-lived.
+  mfa_verification: 5,
 };
 
 const MAX_ATTEMPTS = 5;

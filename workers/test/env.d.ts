@@ -11,5 +11,9 @@ declare namespace Cloudflare {
     DB: D1Database;
     STORAGE: R2Bucket;
     ENVIRONMENT: string;
+    /** AES-256-GCM key for encrypting TOTP secrets at rest. Provided to the
+     *  test runtime via wrangler.toml [env.test.vars]; the MFA suite reads it
+     *  to drive enroll/confirm/challenge end-to-end. */
+    MFA_ENC_KEY?: string;
   }
 }

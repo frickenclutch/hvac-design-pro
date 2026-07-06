@@ -71,6 +71,10 @@ CF_ACCESS_ISSUER = "https://test.invalid"
 FEEDBACK_BUG_EMAILS = "test@test.invalid"
 FEEDBACK_SUPPORT_EMAIL = "test@test.invalid"
 FEEDBACK_FROM_ADDRESS = "Test <noreply@test.invalid>"
+# A fixed, valid 32-byte (64-hex-char) AES-256-GCM key so the MFA suite can
+# encrypt/decrypt TOTP secrets in-runtime. Inert test value — never deployed.
+# The "MFA_ENC_KEY unset" test overrides this binding per-call.
+MFA_ENC_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 [[env.test.d1_databases]]
 binding = "DB"

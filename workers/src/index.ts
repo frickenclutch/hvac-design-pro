@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { authRoutes } from './routes/auth';
 import { projectRoutes } from './routes/projects';
+import { catalogRoutes } from './routes/catalog';
 import { calcRoutes } from './routes/calculations';
 import { uploadRoutes } from './routes/uploads';
 import { cadRoutes } from './routes/cad';
@@ -26,20 +27,46 @@ export interface Env {
   CF_ACCESS_CLIENT_ID?: string;
   CF_ACCESS_CLIENT_SECRET?: string;
   CF_ACCESS_ISSUER?: string;
+  /** AES-256-GCM key (64 hex chars / 32 bytes) for encrypting TOTP secrets at
+   *  rest. Set via `wrangler secret put MFA_ENC_KEY`. Unset → MFA enrollment
+   *  refuses (never stores a plaintext secret). */
+  MFA_ENC_KEY?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
+
+const ALLOWED_ORIGINS = ['https://hvac-design-pro.pages.dev', 'http://localhost:5173'];
 
 // CORS for frontend. PATCH must be in allowMethods for the preflight on
 // every partial-update endpoint we ship — role change, authority toggle,
 // permit decisions, etc. Without it, browsers block the request before
 // it reaches the worker and the user sees "Unable to reach the server."
 app.use('*', cors({
-  origin: ['https://hvac-design-pro.pages.dev', 'http://localhost:5173'],
+  origin: ALLOWED_ORIGINS,
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 }));
+
+// Global error handler. An exception thrown from a handler bypasses the
+// cors middleware's response phase, so without this the browser receives
+// a 500 with NO Access-Control-Allow-Origin header and reports it as a
+// network failure — the frontend then shows "Unable to reach the server"
+// for what is really a server bug (this is how the audit_log FK bug on
+// project delete masqueraded as a connection problem for weeks). CORS
+// headers must be re-applied here by hand for exactly that reason. The
+// body stays generic: no stack traces or internals cross the wire.
+app.onError((err, c) => {
+  console.error(`[unhandled] ${c.req.method} ${new URL(c.req.url).pathname}:`, err);
+  const res = c.json({ error: 'Internal server error' }, 500);
+  const origin = c.req.header('Origin');
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    res.headers.set('Access-Control-Allow-Origin', origin);
+    res.headers.set('Access-Control-Allow-Credentials', 'true');
+    res.headers.set('Vary', 'Origin');
+  }
+  return res;
+});
 
 // Health check
 app.get('/health', (c) => c.json({ status: 'ok', env: c.env.ENVIRONMENT }));
@@ -60,6 +87,7 @@ app.use('/api/*', authMiddleware);
 app.use('/api/*', auditMiddleware());
 app.route('/api/org', orgRoutes);
 app.route('/api/projects', projectRoutes);
+app.route('/api/catalog', catalogRoutes);
 app.route('/api/calculations', calcRoutes);
 app.route('/api/uploads', uploadRoutes);
 app.route('/api/cad', cadRoutes);

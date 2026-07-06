@@ -9,6 +9,10 @@ import DemoPage from './pages/DemoPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
+// MFA pages run PRE-SESSION (no bearer yet), so they belong in the public
+// route group alongside verify-email / forgot-password. Lazy-loaded.
+const MfaChallengePage = lazy(() => import('./pages/MfaChallengePage'));
+const MfaEnrollPage = lazy(() => import('./pages/MfaEnrollPage'));
 import UserAvatarMenu from './components/UserAvatarMenu';
 import ErrorBoundary from './components/ErrorBoundary';
 import ToastContainer from './components/ToastContainer';
@@ -138,7 +142,7 @@ function AppLayout() {
   const showSidebar = isAuthenticated && !isCadRoute;
 
   // Public pages that need full-page scroll (not locked in app shell)
-  const isPublicScrollPage = ['/', '/terms', '/login', '/onboarding', '/landing', '/demo', '/verify-email', '/forgot-password', '/auth/callback'].includes(location.pathname);
+  const isPublicScrollPage = ['/', '/terms', '/login', '/onboarding', '/landing', '/demo', '/verify-email', '/forgot-password', '/auth/callback', '/auth/mfa-challenge', '/auth/mfa-enroll'].includes(location.pathname);
 
   return (
     <div className="flex flex-col md:flex-row bg-slate-950 text-slate-100 font-sans min-h-screen md:h-screen md:overflow-hidden">
@@ -276,6 +280,11 @@ function AppLayout() {
           <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
+          {/* MFA — pre-session second-factor completion + forced enrollment.
+              The pages self-guard (redirect to / when no live challenge token
+              is in the store), so no isAuthenticated gate here. */}
+          <Route path="/auth/mfa-challenge" element={<MfaChallengePage />} />
+          <Route path="/auth/mfa-enroll" element={<MfaEnrollPage />} />
           <Route path="/terms" element={<TermsPage />} />
 
           {/* App Routes — redirect to sign-in if not authenticated */}

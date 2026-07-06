@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { generateId } from '../utils/id';
 import { setAudit } from '../middleware/audit';
 import { roleSatisfies } from '../utils/accessPolicy';
+import { checkEntitlement, recordUsageEvent } from '../billing/usage';
 
 interface Env {
   DB: D1Database;
@@ -48,6 +49,39 @@ calcRoutes.post('/', async (c) => {
     return c.json({ error: 'Project not found in your organisation' }, 404);
   }
 
+  // ── Usage entitlement gate (NON-BREAKING) ──────────────────────────────────
+  // Before accepting the calc, check the org's 'calc_run' entitlement. This is
+  // DEFAULT-ALLOW: with no plan_entitlements row configured, checkEntitlement
+  // returns { allowed:true, gated:false } and we fall straight through — the
+  // calc-save path is byte-identical to before for every existing prod org.
+  // ONLY when an admin/L0 has configured a row with enforcement='block' + a
+  // hard_cap, and the org is over it, does this deny with a 402. The check is
+  // org-scoped to the SESSION-derived org (user.orgId), never a client value.
+  // Wrapped so a billing-layer fault can NEVER fail an otherwise-valid calc:
+  // if checkEntitlement throws, we treat it as allow (fail-open) — metering is
+  // not allowed to take down the core calc path.
+  try {
+    const decision = await checkEntitlement(c.env.DB, user.orgId, 'calc_run');
+    if (!decision.allowed) {
+      return c.json(
+        {
+          error:
+            'Calculation usage limit reached for your plan. ' +
+            'Contact your administrator to raise the limit.',
+          code: 'entitlement_exceeded',
+          meter: 'calc_run',
+          used: decision.used,
+          hardCap: decision.hardCap,
+          reason: decision.reason,
+        },
+        402,
+      );
+    }
+  } catch (e) {
+    // Fail-OPEN: a gate fault must not block a legitimate calc save.
+    console.error('[billing] checkEntitlement failed (allowing calc):', e);
+  }
+
   // NOTE on the version-number "race" flagged in the May-2026 audit:
   // we intentionally do NOT add a UNIQUE(project_id, calc_type, version)
   // constraint here. The Manual J Phase-1 shadow-run writes TWO calc rows
@@ -69,6 +103,19 @@ calcRoutes.post('/', async (c) => {
   ).bind(id, body.projectId, user.orgId, body.calcType, version,
          JSON.stringify(body.inputs), JSON.stringify(body.outputs),
          body.engineVersion || '1.0.0', user.id, body.durationMs || 0).run();
+
+  // ── Usage metering (FIRE-AND-FORGET, NON-FATAL) ────────────────────────────
+  // Record one 'calc_run' event for the SESSION-derived org. The meter is
+  // idempotent on (org_id, meter_key, source_ref) — sourceRef = the calc id,
+  // which is freshly generated per request, so each accepted calc counts once
+  // and a client retry of the SAME calc id won't double-count. This is wrapped
+  // so ANY failure (D1 error, constraint, whatever) is swallowed: a metering
+  // failure must NEVER fail the calc save, which has already succeeded above.
+  try {
+    await recordUsageEvent(c.env.DB, user.orgId, 'calc_run', 1, { sourceRef: id });
+  } catch (e) {
+    console.error('[billing] recordUsageEvent failed (calc still saved):', e);
+  }
 
   // Calc records are immutable, so audit just notes the run; the calc
   // itself IS the audit record for the inputs/outputs. We capture the

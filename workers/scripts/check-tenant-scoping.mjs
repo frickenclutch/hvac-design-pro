@@ -73,6 +73,8 @@ const STRICT_TABLES = [
   'payment_methods',
   'usage_events',
   'invoices',
+  // ── Product/inventory catalog (migration 0013, routes/catalog.ts) ─────────
+  'catalog_products',
 ];
 
 /**
@@ -94,6 +96,19 @@ const STRICT_TABLES = [
  * filter, and the sentinel `'*'` is never bound from request input (real org
  * ids are UUIDs). That one query carries an inline `tenant-scope-ok:` waiver
  * with this reasoning. Documented here so the absence is a decision, not an
+ * oversight.
+ */
+
+/**
+ * MFA tables (migration 0014: mfa_credentials, mfa_backup_codes,
+ * mfa_challenges) are intentionally NOT strict tables. They are USER-OWNED
+ * per-user second-factor credentials, the same ownership model as `sessions`
+ * and `refresh_tokens`: every query reads them `WHERE user_id = ?` bound to
+ * the SESSION user (c.get('user').id) — or, for the pre-session login
+ * challenge, by the opaque challenge token's hash, never a client-supplied
+ * id. There is no org_id scoping because there is no org-level sharing: one
+ * user can never touch another user's MFA. No MFA endpoint ever accepts a
+ * userId from the client. Documented so the absence is a decision, not an
  * oversight.
  */
 

@@ -294,22 +294,25 @@ export async function updateProject(
 }
 
 /**
- * Delete a project locally + remotely. Never throws — if the remote delete
- * fails, the local entry is still removed (user intent respected) and a
- * background retry could be implemented later via audit_log / a queue.
+ * Delete a project. Remote-first for D1-backed projects: the local cache
+ * entry is only purged once the server confirms, so a failed remote delete
+ * can't leave a "zombie" that vanishes from the UI but resurrects from D1
+ * on the next load. Returns false when the remote delete failed — the
+ * caller should restore its optimistic UI state. Never throws.
  */
-export async function deleteProject(id: string): Promise<void> {
-  const cache = readCache();
-  const next = cache.filter((p) => p.id !== id);
-  writeCache(next);
-
-  if (isLocalId(id) || !isAuthenticated()) return;
-
-  try {
-    await api.deleteProject(id);
-  } catch (err) {
-    console.warn('[projectStorage] remote delete failed (local removed)', err);
+export async function deleteProject(id: string): Promise<boolean> {
+  if (!isLocalId(id) && isAuthenticated()) {
+    try {
+      await api.deleteProject(id);
+    } catch (err) {
+      console.warn('[projectStorage] remote delete failed (local kept)', err);
+      return false;
+    }
   }
+
+  const cache = readCache();
+  writeCache(cache.filter((p) => p.id !== id));
+  return true;
 }
 
 /**

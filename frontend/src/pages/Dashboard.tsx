@@ -62,6 +62,7 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<Partial<Project>>({});
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const editNameRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
@@ -177,9 +178,16 @@ export default function Dashboard() {
   const cancelEdit = () => {
     setEditingId(null);
     setEditDraft({});
+    setConfirmDeleteId(null);
   };
 
   const deleteProject = async (id: string) => {
+    const victim = projects.find(p => p.id === id);
+    if (!victim) return;
+    const layoutSnapshot = layout;
+    setConfirmDeleteId(null);
+    // Optimistic removal for a snappy tile — restored below if the server
+    // refuses the delete, so the UI never lies about what D1 contains.
     setProjects(prev => prev.filter(p => p.id !== id));
     if (editingId === id) cancelEdit();
     setLayout(prev => {
@@ -188,7 +196,15 @@ export default function Dashboard() {
       saveLayout(next);
       return next;
     });
-    await deleteProjectSynced(id);
+    const ok = await deleteProjectSynced(id);
+    if (!ok) {
+      setProjects(prev => (prev.some(p => p.id === id) ? prev : [...prev, victim]));
+      setLayout(() => {
+        saveLayout(layoutSnapshot);
+        return layoutSnapshot;
+      });
+      toast.error(`Delete failed — "${victim.name}" was not removed.`);
+    }
   };
 
   const migrateToCloud = async (id: string) => {
@@ -515,13 +531,31 @@ export default function Dashboard() {
                             <X className="w-4 h-4" /> Cancel
                           </button>
                           <div className="flex-1" />
-                          <button
-                            onClick={() => deleteProject(proj.id)}
-                            className="flex items-center gap-1.5 text-red-400/60 hover:text-red-400 hover:bg-red-500/10 px-3 py-2 rounded-xl text-sm font-semibold transition-all"
-                            title="Delete project"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {confirmDeleteId === proj.id ? (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-red-400/80 font-medium">Delete this project?</span>
+                              <button
+                                onClick={() => deleteProject(proj.id)}
+                                className="flex items-center gap-1.5 bg-red-500/15 text-red-400 border border-red-500/40 px-3 py-2 rounded-xl text-sm font-semibold hover:bg-red-500/25 transition-all"
+                              >
+                                <Trash2 className="w-4 h-4" /> Delete
+                              </button>
+                              <button
+                                onClick={() => setConfirmDeleteId(null)}
+                                className="text-slate-400 hover:text-white px-3 py-2 rounded-xl text-sm font-semibold hover:bg-slate-800 transition-all"
+                              >
+                                Keep
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setConfirmDeleteId(proj.id)}
+                              className="flex items-center gap-1.5 text-red-400/60 hover:text-red-400 hover:bg-red-500/10 px-3 py-2 rounded-xl text-sm font-semibold transition-all"
+                              title="Delete project"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </>
                     ) : (

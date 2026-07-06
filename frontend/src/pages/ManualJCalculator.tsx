@@ -27,6 +27,7 @@ import { scopedKey } from '../utils/storage';
 import { buildFormJ1, MANUAL_J8_ENGINE_VERSION } from '../engines/manualJ8';
 import { roomInputsToFormJ1Input } from '../engines/manualJ8/adapters/legacy';
 import { syncCalcToD1 } from '../features/calculations/calcStorage';
+import { toast } from '../stores/useToastStore';
 
 // ── Display formatting (engine values are full-precision floats) ─────────────
 /** Round to integer and format with locale separators for display */
@@ -248,10 +249,44 @@ export default function ManualJCalculator() {
     setWholeHouse(null);
   };
 
+  // Input gate. R-values and window U-value are divisors in the engine —
+  // a zero (or a cleared field, which parses to NaN) reaches the results,
+  // the print report, and the persisted D1 record as Infinity/NaN. The
+  // engine's cert-validated math is untouched; invalid input is refused
+  // here with a message instead. (`!(x > 0)` also rejects NaN.)
+  const validateInputs = (): string | null => {
+    for (const room of rooms) {
+      const label = room.name || 'Room';
+      if (!(room.lengthFt > 0) || !(room.widthFt > 0) || !(room.ceilingHeightFt > 0)) {
+        return `${label}: length, width, and ceiling height must all be greater than zero.`;
+      }
+      if (!(room.wallRValue > 0) || !(room.ceilingRValue > 0) || !(room.floorRValue > 0)) {
+        return `${label}: R-values must be greater than zero — enter the actual assembly R-value (even an uninsulated assembly has a small one, e.g. R-1).`;
+      }
+      if (!(room.windowUValue > 0)) {
+        return `${label}: window U-value must be greater than zero.`;
+      }
+      if (!Number.isFinite(room.windowSqFt) || room.windowSqFt < 0) {
+        return `${label}: window area must be a number of 0 or more.`;
+      }
+    }
+    return null;
+  };
+
   const runCalculation = () => {
+    const invalid = validateInputs();
+    if (invalid) {
+      toast.error(invalid);
+      return;
+    }
     const t0 = performance.now();
     const res = calculateWholeHouse(rooms, conditions);
     const durationMs = Math.round(performance.now() - t0);
+    if (!Number.isFinite(res.totalHeatingBtu) || !Number.isFinite(res.totalCoolingBtu)) {
+      // Backstop: never display or persist non-finite totals.
+      toast.error('Calculation produced invalid values — please review the room inputs.');
+      return;
+    }
     setWholeHouse(res);
     // Persist results so Manual D can import them (project-scoped)
     try {

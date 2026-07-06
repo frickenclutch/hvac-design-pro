@@ -37,9 +37,16 @@ function coolingDelta(
   if (c.kind === 'door') {
     return lookupDoorCLTD(ctd, dr);
   }
-  // Direct-CLTD constructions (e.g. ceilings under attic)
+  // Direct-CLTD constructions (e.g. ceilings under attic — Table 4D).
+  // Attribute any data-gap throw to the specific element + table so the
+  // cutover cockpit can name exactly which ceiling and which (CTD, DR)
+  // cell is missing from the encoded Table 4D matrix.
   if (c.directCLTD) {
-    return lookupDirectCLTD(c.directCLTD, ctd, dr);
+    const table = c.kind === 'ceiling' ? 'Table 4D' : 'Table 4A';
+    return lookupDirectCLTD(
+      c.directCLTD, ctd, dr,
+      `Manual J ${table} (${c.kind} "${c.id}")`,
+    );
   }
   // Partition path (use PTDC)
   if (asPartition && c.ptdc !== undefined) {
