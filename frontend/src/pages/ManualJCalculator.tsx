@@ -1269,7 +1269,7 @@ export default function ManualJCalculator() {
 
         {/* Retailer Finder Slide-Over */}
         {wholeHouse && (
-          <RetailerFinderPanel wholeHouse={wholeHouse} conditions={conditions} />
+          <RetailerFinderPanel wholeHouse={wholeHouse} conditions={conditions} onExportPdf={handleExportPdf} />
         )}
       </div>
 
