@@ -37,7 +37,46 @@ export interface CostEstimate {
   tonnage: number;
   generatedAt: string;
   disclaimer: string;
+  /** Regional adjustment applied, so the UI can show "localized for NJ". */
+  region: {
+    state: string | null;
+    laborIndex: number;   // multiplier vs national average (1.0 = national)
+    localized: boolean;   // true when a state-specific index/tax was applied
+  };
 }
+
+/**
+ * Approximate state labor-cost index for HVAC installation vs. the national
+ * average (1.0). Regional labor is the single largest driver of install-cost
+ * variation, so it is what we localize. Values are ballpark (RSMeans-style
+ * city cost indices, state-rolled) and clearly disclaimed — not a quote.
+ * Unlisted states default to 1.0.
+ */
+const STATE_LABOR_INDEX: Record<string, number> = {
+  AK: 1.28, AL: 0.86, AR: 0.85, AZ: 0.98, CA: 1.22, CO: 1.02, CT: 1.15, DC: 1.15,
+  DE: 1.02, FL: 0.95, GA: 0.92, HI: 1.30, IA: 0.96, ID: 0.95, IL: 1.10, IN: 0.97,
+  KS: 0.93, KY: 0.88, LA: 0.90, MA: 1.18, MD: 1.08, ME: 1.00, MI: 1.02, MN: 1.05,
+  MO: 0.96, MS: 0.85, MT: 0.96, NC: 0.90, ND: 0.98, NE: 0.94, NH: 1.03, NJ: 1.13,
+  NM: 0.93, NV: 1.03, NY: 1.20, OH: 1.00, OK: 0.87, OR: 1.06, PA: 1.05, RI: 1.12,
+  SC: 0.90, SD: 0.93, TN: 0.88, TX: 0.94, UT: 0.97, VA: 0.97, VT: 1.02, WA: 1.10,
+  WI: 1.01, WV: 0.93, WY: 0.96,
+};
+
+/**
+ * Approximate combined (state + typical local) sales-tax rate applied to the
+ * taxable material/equipment portion. Labor and permits are excluded from the
+ * tax base below. Ballpark, disclaimed. Unlisted → 7% national placeholder.
+ */
+const STATE_SALES_TAX: Record<string, number> = {
+  AK: 0.018, AL: 0.092, AR: 0.094, AZ: 0.084, CA: 0.0875, CO: 0.077, CT: 0.0635,
+  DC: 0.06, DE: 0.0, FL: 0.07, GA: 0.073, HI: 0.045, IA: 0.069, ID: 0.06, IL: 0.089,
+  IN: 0.07, KS: 0.087, KY: 0.06, LA: 0.0955, MA: 0.0625, MD: 0.06, ME: 0.055,
+  MI: 0.06, MN: 0.075, MO: 0.082, MS: 0.07, MT: 0.0, NC: 0.069, ND: 0.069,
+  NE: 0.069, NH: 0.0, NJ: 0.06625, NM: 0.078, NV: 0.083, NY: 0.085, OH: 0.072,
+  OK: 0.089, OR: 0.0, PA: 0.063, RI: 0.07, SC: 0.075, SD: 0.064, TN: 0.0955,
+  TX: 0.0825, UT: 0.072, VA: 0.057, VT: 0.062, WA: 0.093, WI: 0.055, WV: 0.065,
+  WY: 0.054,
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // COST TABLES
@@ -97,8 +136,13 @@ export function generateCostEstimate(
   result: WholeHouseResult,
   conditions: DesignConditions,
   systemType: SystemType = 'heat_pump',
-  taxRate: number = 0.07,
+  state: string | null = null,
 ): CostEstimate {
+  const stateKey = state?.toUpperCase().trim() || null;
+  const laborIndex = (stateKey && STATE_LABOR_INDEX[stateKey]) || 1.0;
+  const taxRate = (stateKey && STATE_SALES_TAX[stateKey] != null) ? STATE_SALES_TAX[stateKey] : 0.07;
+  const localized = !!(stateKey && (STATE_LABOR_INDEX[stateKey] != null || STATE_SALES_TAX[stateKey] != null));
+
   const tonnage = result.recommendedTons;
   const matchTon = closestTonnage(tonnage);
   const lineItems: LineItem[] = [];
@@ -184,13 +228,17 @@ export function generateCostEstimate(
     totalCost: 44,
   });
 
-  // 8. Labor
+  // 8. Labor — scaled by the regional labor-cost index (the largest source
+  // of geographic cost variation).
   const materialSubtotal = lineItems.reduce((s, li) => s + li.totalCost, 0);
   const laborRate = LABOR_MULTIPLIER[conditions.ductLocation];
-  const laborCost = Math.round(materialSubtotal * laborRate);
+  const laborCost = Math.round(materialSubtotal * laborRate * laborIndex);
+  const laborRegionNote = laborIndex !== 1.0
+    ? ` — ${stateKey} regional index ×${laborIndex.toFixed(2)}`
+    : '';
   lineItems.push({
     category: 'labor',
-    description: `Installation Labor (${conditions.ductLocation} duct routing)`,
+    description: `Installation Labor (${conditions.ductLocation} duct routing)${laborRegionNote}`,
     quantity: 1,
     unitCost: laborCost,
     totalCost: laborCost,
@@ -227,9 +275,11 @@ export function generateCostEstimate(
     tonnage,
     generatedAt: new Date().toISOString(),
     disclaimer:
-      'This is an approximate cost estimate based on industry-average pricing. ' +
-      'Actual costs vary by region, equipment brand, and installation complexity. ' +
+      'This is an approximate cost estimate based on industry-average pricing' +
+      (localized ? `, regionally adjusted for ${stateKey}` : '') +
+      '. Actual costs vary by region, equipment brand, and installation complexity. ' +
       'Contact your preferred HVAC distributor for a formal project quote.',
+    region: { state: stateKey, laborIndex, localized },
   };
 }
 

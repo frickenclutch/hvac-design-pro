@@ -1,14 +1,30 @@
 /**
  * Retailer Finder Store
  *
- * Manages geolocation, retailer search, cost estimation, and quote flow.
+ * Manages retailer ranking, cost estimation, and quote flow. The primary
+ * distance reference is the PROJECT location (derived from the ZIP entered in
+ * the calculator), not the browser's GPS — the retailer list should reflect
+ * the job site, not wherever the person running the software happens to be.
+ * GPS remains available as a manual override.
  */
 
 import { create } from 'zustand';
 import { ALL_RETAILERS } from '../data/retailers';
+import { stateCentroid, type LatLng } from '../data/stateCentroids';
 import { getUserLocation, sortRetailersByDistance, type RetailerWithDistance, type Coords } from '../utils/geolocation';
 import { generateCostEstimate, type CostEstimate, type SystemType } from '../../../engines/costEstimator';
 import type { WholeHouseResult, DesignConditions } from '../../../engines/manualJ';
+
+/** A job within this many miles of a branch is treated as "in footprint"
+ *  (a walk-in/local-delivery branch leads). Beyond it, the nationwide
+ *  e-commerce channel leads instead. */
+export const FOOTPRINT_RADIUS_MI = 100;
+
+export interface ProjectLocation {
+  zip: string;
+  city: string;
+  state: string;
+}
 
 interface RetailerState {
   // Panel visibility
@@ -16,7 +32,12 @@ interface RetailerState {
   open: () => void;
   close: () => void;
 
-  // Geolocation
+  // Project location (primary reference — from the calculator ZIP)
+  projectLocation: ProjectLocation | null;
+  projectCoords: LatLng | null;
+  setProjectLocation: (loc: ProjectLocation | null) => void;
+
+  // Geolocation (optional manual override)
   userCoords: Coords | null;
   locationStatus: 'idle' | 'requesting' | 'granted' | 'denied' | 'error';
   locationError: string | null;
@@ -24,6 +45,9 @@ interface RetailerState {
 
   // Retailers
   retailers: RetailerWithDistance[];
+  nearest: RetailerWithDistance | null;
+  /** True when the nearest branch is within FOOTPRINT_RADIUS_MI of the job. */
+  inFootprint: boolean;
   selectedRetailer: RetailerWithDistance | null;
   selectRetailer: (r: RetailerWithDistance) => void;
 
@@ -38,10 +62,37 @@ interface RetailerState {
   _cachedConditions: DesignConditions | null;
 }
 
+/** Re-rank retailers against a reference point and derive nearest + footprint. */
+function rank(ref: LatLng | null): Pick<RetailerState, 'retailers' | 'nearest' | 'inFootprint'> {
+  const sorted = sortRetailersByDistance(ALL_RETAILERS, ref);
+  // Nearest by actual distance (sortRetailersByDistance keeps preferred-first,
+  // then distance; with a single preferred tier the first IS the nearest).
+  const withDist = sorted.filter((r) => r.distanceMiles !== null);
+  const nearest = withDist.length > 0
+    ? withDist.reduce((a, b) => (b.distanceMiles! < a.distanceMiles! ? b : a))
+    : sorted[0] ?? null;
+  const inFootprint = nearest?.distanceMiles != null && nearest.distanceMiles <= FOOTPRINT_RADIUS_MI;
+  return { retailers: sorted, nearest, inFootprint };
+}
+
 export const useRetailerStore = create<RetailerState>((set, get) => ({
   isOpen: false,
   open: () => set({ isOpen: true }),
   close: () => set({ isOpen: false }),
+
+  projectLocation: null,
+  projectCoords: null,
+
+  setProjectLocation: (loc) => {
+    const coords = loc ? stateCentroid(loc.state) : null;
+    const ranked = rank(coords ?? get().userCoords);
+    set({
+      projectLocation: loc,
+      projectCoords: coords,
+      ...ranked,
+      selectedRetailer: ranked.nearest,
+    });
+  },
 
   userCoords: null,
   locationStatus: 'idle',
@@ -51,27 +102,19 @@ export const useRetailerStore = create<RetailerState>((set, get) => ({
     set({ locationStatus: 'requesting', locationError: null });
     try {
       const coords = await getUserLocation();
-      const sorted = sortRetailersByDistance(ALL_RETAILERS, coords);
-      set({
-        userCoords: coords,
-        locationStatus: 'granted',
-        retailers: sorted,
-        // Auto-select first preferred retailer
-        selectedRetailer: sorted[0] ?? null,
-      });
+      // GPS override takes precedence over the project state centroid when
+      // the user explicitly asks for "near me".
+      const ranked = rank(coords);
+      set({ userCoords: coords, locationStatus: 'granted', ...ranked, selectedRetailer: ranked.nearest });
     } catch (err) {
-      // Still show retailers, just without distance
-      const sorted = sortRetailersByDistance(ALL_RETAILERS, null);
       set({
         locationStatus: 'denied',
         locationError: err instanceof Error ? err.message : 'Location unavailable',
-        retailers: sorted,
-        selectedRetailer: sorted[0] ?? null,
       });
     }
   },
 
-  retailers: sortRetailersByDistance(ALL_RETAILERS, null),
+  ...rank(null),
   selectedRetailer: null,
   selectRetailer: (r) => set({ selectedRetailer: r }),
 
@@ -82,14 +125,14 @@ export const useRetailerStore = create<RetailerState>((set, get) => ({
     set({ systemType: st });
     const { _cachedResult, _cachedConditions } = get();
     if (_cachedResult && _cachedConditions) {
-      const estimate = generateCostEstimate(_cachedResult, _cachedConditions, st);
+      const estimate = generateCostEstimate(_cachedResult, _cachedConditions, st, get().projectLocation?.state ?? null);
       set({ costEstimate: estimate });
     }
   },
 
   generateEstimate: (result, conditions) => {
-    const { systemType } = get();
-    const estimate = generateCostEstimate(result, conditions, systemType);
+    const { systemType, projectLocation } = get();
+    const estimate = generateCostEstimate(result, conditions, systemType, projectLocation?.state ?? null);
     set({
       costEstimate: estimate,
       _cachedResult: result,
