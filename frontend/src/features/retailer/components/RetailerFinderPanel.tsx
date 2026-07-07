@@ -1,10 +1,11 @@
 import { useEffect } from 'react';
 import {
   X, MapPin, Phone, ExternalLink, Navigation, Star, ShoppingCart,
-  ChevronRight, AlertCircle, Loader2, Shield
+  ChevronRight, AlertCircle, Loader2, Shield, Truck, Globe
 } from 'lucide-react';
 import { useRetailerStore } from '../store/useRetailerStore';
 import { getDirectionsUrl, type RetailerWithDistance } from '../utils/geolocation';
+import { ECOMMERCE } from '../data/retailers';
 import { SYSTEM_TYPE_OPTIONS, type SystemType } from '../../../engines/costEstimator';
 import type { WholeHouseResult, DesignConditions } from '../../../engines/manualJ';
 
@@ -16,18 +17,18 @@ interface Props {
 export default function RetailerFinderPanel({ wholeHouse, conditions }: Props) {
   const store = useRetailerStore();
 
-  // Request location + generate estimate on mount
+  // Generate the estimate on mount. Distance is driven by the project location
+  // (set by the calculator before opening) — we do NOT auto-request GPS.
   useEffect(() => {
     store.generateEstimate(wholeHouse, conditions);
-    if (store.locationStatus === 'idle') {
-      store.requestLocation();
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (!store.isOpen) return null;
 
   const estimate = store.costEstimate;
+  const loc = store.projectLocation;
+  const locLabel = loc ? `${loc.city ? loc.city + ', ' : ''}${loc.state} ${loc.zip}`.trim() : null;
 
   return (
     <div className="fixed inset-0 z-[100] flex">
@@ -43,8 +44,10 @@ export default function RetailerFinderPanel({ wholeHouse, conditions }: Props) {
               <ShoppingCart className="w-5 h-5 text-amber-400" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-white">Project Cost & Retailers</h3>
-              <p className="text-xs text-slate-500">Estimate based on your Manual J results</p>
+              <h3 className="text-lg font-bold text-white">Project Cost & Suppliers</h3>
+              <p className="text-xs text-slate-500">
+                {locLabel ? `For ${locLabel}` : 'Estimate based on your Manual J results'}
+              </p>
             </div>
           </div>
           <button onClick={store.close}
@@ -77,9 +80,14 @@ export default function RetailerFinderPanel({ wholeHouse, conditions }: Props) {
           {/* ═══ Cost Estimate ═══ */}
           {estimate && (
             <section className="glass-panel rounded-2xl border border-slate-800/60 overflow-hidden">
-              <div className="p-4 border-b border-slate-800/40 flex items-center gap-2">
+              <div className="p-4 border-b border-slate-800/40 flex items-center gap-2 flex-wrap">
                 <ShoppingCart className="w-4 h-4 text-emerald-400" />
                 <h4 className="text-sm font-bold text-white">Cost Estimate</h4>
+                {estimate.region.localized && estimate.region.state && (
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+                    Localized · {estimate.region.state}
+                  </span>
+                )}
                 <span className="ml-auto text-xs text-slate-500">{estimate.tonnage} Ton</span>
               </div>
 
@@ -105,7 +113,7 @@ export default function RetailerFinderPanel({ wholeHouse, conditions }: Props) {
                   <span className="text-white font-mono">${estimate.subtotal.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">Tax ({(estimate.taxRate * 100).toFixed(0)}%)</span>
+                  <span className="text-slate-400">Tax ({(estimate.taxRate * 100).toFixed(1)}%{estimate.region.state ? ` · ${estimate.region.state}` : ''})</span>
                   <span className="text-white font-mono">${estimate.tax.toLocaleString()}</span>
                 </div>
                 <div className="h-px bg-slate-700/50" />
@@ -130,34 +138,38 @@ export default function RetailerFinderPanel({ wholeHouse, conditions }: Props) {
             </section>
           )}
 
-          {/* ═══ Nearest Retailers ═══ */}
+          {/* ═══ Out-of-footprint: lead with nationwide e-commerce ═══ */}
+          {!store.inFootprint && (
+            <EcommerceCard zip={loc?.zip} nearest={store.nearest} prominent />
+          )}
+
+          {/* ═══ Branches ═══ */}
           <section>
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-sm font-bold text-white flex items-center gap-2">
                 <MapPin className="w-4 h-4 text-amber-400" />
-                Nearest HVAC Supply
+                {store.inFootprint ? 'Nearest Howland branches' : 'Nearest branch (for reference)'}
               </h4>
-              {store.locationStatus === 'requesting' && (
+              {store.locationStatus === 'requesting' ? (
                 <span className="flex items-center gap-1.5 text-xs text-sky-400">
                   <Loader2 className="w-3 h-3 animate-spin" /> Locating...
                 </span>
-              )}
-              {store.locationStatus === 'denied' && (
+              ) : (
                 <button onClick={store.requestLocation}
-                  className="text-xs text-amber-400 hover:text-amber-300 font-bold transition-colors">
-                  Retry Location
+                  className="text-xs text-slate-500 hover:text-slate-300 font-semibold transition-colors">
+                  Use my location instead
                 </button>
               )}
             </div>
 
             {store.locationError && (
-              <div className="mb-3 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-300">
+              <div className="mb-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300">
                 <AlertCircle className="w-3 h-3 inline mr-1" /> {store.locationError}
               </div>
             )}
 
             <div className="space-y-3">
-              {store.retailers.map(retailer => (
+              {(store.inFootprint ? store.retailers : store.retailers.slice(0, 3)).map(retailer => (
                 <RetailerCard
                   key={retailer.id}
                   retailer={retailer}
@@ -167,6 +179,9 @@ export default function RetailerFinderPanel({ wholeHouse, conditions }: Props) {
               ))}
             </div>
           </section>
+
+          {/* In-footprint: e-commerce as a secondary option */}
+          {store.inFootprint && <EcommerceCard zip={loc?.zip} nearest={store.nearest} />}
 
           {/* ═══ Selected Retailer Actions ═══ */}
           {store.selectedRetailer && (
@@ -288,6 +303,42 @@ function RetailerCard({ retailer, isSelected, onSelect }: {
         )}
       </div>
     </div>
+  );
+}
+
+// ── Nationwide e-commerce card ─────────────────────────────────────────────────
+
+function EcommerceCard({ zip, nearest, prominent }: {
+  zip?: string;
+  nearest: RetailerWithDistance | null;
+  prominent?: boolean;
+}) {
+  return (
+    <section className={`rounded-2xl border p-5 ${
+      prominent ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-slate-900/50 border-slate-800/40'
+    }`}>
+      <div className="flex items-center gap-2 mb-2">
+        <Truck className="w-4 h-4 text-emerald-400" />
+        <h4 className="text-sm font-bold text-white">
+          Order Online — Ships to {zip || 'Your Job Site'}
+        </h4>
+      </div>
+      <p className="text-xs text-slate-400 leading-relaxed mb-4">
+        {prominent
+          ? `The nearest branch${nearest?.distanceMiles != null ? ` (${nearest.name.replace(/ — .*/, '')}, ~${Math.round(nearest.distanceMiles)} mi)` : ''} is outside local-delivery range — order equipment and materials online and have them shipped to your job site.`
+          : 'Prefer delivery? Order online and have it shipped straight to the job site.'}
+      </p>
+      <div className="grid grid-cols-2 gap-3">
+        <a href={ECOMMERCE.url} target="_blank" rel="noopener noreferrer"
+          className="flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 font-bold text-sm hover:bg-emerald-500/25 transition-all">
+          <Globe className="w-4 h-4" /> Shop Online
+        </a>
+        <a href={`tel:${ECOMMERCE.phone}`}
+          className="flex items-center justify-center gap-2 py-3 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-400 font-bold text-sm hover:bg-sky-500/20 transition-all">
+          <Phone className="w-4 h-4" /> Call to Order
+        </a>
+      </div>
+    </section>
   );
 }
 

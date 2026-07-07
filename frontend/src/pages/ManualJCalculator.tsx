@@ -21,6 +21,7 @@ import Mason from '../components/Mason';
 import ProjectContextBar from '../components/ProjectContextBar';
 import ProjectGateDialog from '../components/ProjectGateDialog';
 import { useProjectStore } from '../stores/useProjectStore';
+import { getCachedProject } from '../features/projects/projectStorage';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { usePreferencesStore } from '../stores/usePreferencesStore';
 import { scopedKey } from '../utils/storage';
@@ -91,6 +92,7 @@ export default function ManualJCalculator() {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
   const [zipCode, setZipCode] = useState('');
   const [zipLocation, setZipLocation] = useState<string | null>(null);
+  const [zipGeo, setZipGeo] = useState<{ city: string; state: string } | null>(null);
   const [showExportCadDialog, setShowExportCadDialog] = useState(false);
   const [layoutAlgorithm, setLayoutAlgorithm] = useState<LayoutAlgorithm>('horizontal_strip');
 
@@ -946,8 +948,10 @@ export default function ManualJCalculator() {
                   if (result.found && result.conditions) {
                     setConditions(c => ({ ...c, ...result.conditions }));
                     setZipLocation(`${result.city}, ${result.state}`);
+                    setZipGeo({ city: result.city ?? '', state: result.state ?? '' });
                   } else {
                     setZipLocation(null);
+                    setZipGeo(null);
                     alert(`No ASHRAE data found for ZIP ${zipCode}. Enter outdoor conditions manually.`);
                   }
                 }}
@@ -1201,6 +1205,17 @@ export default function ManualJCalculator() {
                 <Printer className="w-4 h-4" /> Print
               </button>
               <button onClick={() => {
+                  // Anchor the retailer finder + estimate to the JOB SITE. Prefer
+                  // the ZIP the user auto-filled; else fall back to the active
+                  // project's saved address. setProjectLocation must run BEFORE
+                  // generateEstimate so pricing is regionally localized.
+                  const proj = activeProjectId ? getCachedProject(activeProjectId) : null;
+                  const loc = zipGeo && zipCode
+                    ? { zip: zipCode, city: zipGeo.city, state: zipGeo.state }
+                    : proj?.state
+                      ? { zip: proj.zip ?? '', city: proj.city ?? '', state: proj.state }
+                      : null;
+                  useRetailerStore.getState().setProjectLocation(loc);
                   useRetailerStore.getState().open();
                   if (wholeHouse) useRetailerStore.getState().generateEstimate(wholeHouse, conditions);
                 }}
