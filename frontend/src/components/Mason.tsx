@@ -1613,6 +1613,9 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
   const [isDragging, setIsDragging] = useState(false);
   // When set, the annotation editor is open with this captured image (dataURL).
   const [annotatorImage, setAnnotatorImage] = useState<string | null>(null);
+  // True only during the brief frame-grab, when Mason's own UI is hidden so it
+  // doesn't appear in the screenshot of the user's working environment.
+  const [capturing, setCapturing] = useState(false);
   const feedbackFileRef = useRef<HTMLInputElement>(null);
   const feedbackFormRef = useRef<HTMLDivElement>(null);
   const { user, organisation } = useAuthStore();
@@ -1657,7 +1660,12 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
       video.srcObject = stream;
       video.muted = true;
       await video.play();
-      await new Promise((r) => setTimeout(r, 250)); // let a frame arrive
+      // Hide Mason's own UI so the grab shows the user's WORKING environment,
+      // not the feedback panel that launched the capture. Then wait long
+      // enough for the screen to repaint AND the live capture stream to
+      // deliver those clean frames (stream latency is why 250ms wasn't enough).
+      setCapturing(true);
+      await new Promise((r) => setTimeout(r, 550));
       const w = video.videoWidth, h = video.videoHeight;
       if (!w || !h) throw new Error('no frame');
       const canvas = document.createElement('canvas');
@@ -1665,9 +1673,10 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('no canvas context');
       ctx.drawImage(video, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL('image/png');
       // Hand the capture to the annotation editor (arrows/boxes/text/redact)
       // rather than attaching it raw — the editor exports the final PNG.
-      setAnnotatorImage(canvas.toDataURL('image/png'));
+      setAnnotatorImage(dataUrl);
     } catch (err) {
       // NotAllowedError = the user cancelled the picker — silent. Anything
       // else is a real failure worth surfacing.
@@ -1675,6 +1684,7 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
         setFeedbackError('Could not capture the screen. Use Upload File instead.');
       }
     } finally {
+      setCapturing(false);
       stream?.getTracks().forEach((t) => t.stop());
     }
   }, [addFeedbackFiles]);
@@ -1784,7 +1794,10 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
   }
 
   return (
-    <div className={`fixed bottom-6 ${posClass} z-[60] w-[400px] max-h-[75vh] glass-panel rounded-2xl flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.6),0_0_20px_rgba(245,158,11,0.05)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/85 overflow-hidden animate-in zoom-in-95 fade-in duration-200`}>
+    <div
+      style={capturing ? { opacity: 0, pointerEvents: 'none' } : undefined}
+      className={`fixed bottom-6 ${posClass} z-[60] w-[400px] max-h-[75vh] glass-panel rounded-2xl flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.6),0_0_20px_rgba(245,158,11,0.05)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/85 overflow-hidden animate-in zoom-in-95 fade-in duration-200`}
+    >
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-gradient-to-r from-slate-900/80 to-amber-950/20 flex-shrink-0">
         <div className="flex items-center gap-2.5">
