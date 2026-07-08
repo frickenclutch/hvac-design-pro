@@ -803,11 +803,13 @@ Click the **+** button in my header to open the feedback form.
 - **Idea** — a feature suggestion or improvement
 - **Question** — need help understanding something
 
-**Attach files** three ways:
-- **Click** "Attach Screenshot" or "Add File"
+**Attach files** several ways:
+- **Capture Screen** (desktop) — snapshot your screen, window, or tab
+- **Upload File** — pick a file from your device
 - **Drag & drop** files onto the form
 - **Ctrl+V** to paste screenshots from your clipboard
 
+Attached images now appear inline in the report email (and are archived).
 Supports images, videos, PDFs, docs, and text files (up to 5 files, 10MB each).
 
 Submissions go to the C4 Technologies support team and are tracked in our system.`,
@@ -1631,6 +1633,51 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
     });
   }, []);
 
+  // Real screen capture (desktop only). Uses the Screen Capture API so the
+  // button ACTUALLY grabs the user's working environment — they pick a
+  // screen/window/tab and we snapshot a frame to PNG. Not supported on
+  // mobile browsers (iOS/Android), where the button is hidden and the user
+  // uploads an OS screenshot instead.
+  const canCaptureScreen = typeof navigator !== 'undefined'
+    && !!navigator.mediaDevices?.getDisplayMedia;
+
+  const captureScreen = useCallback(async () => {
+    const md = navigator.mediaDevices;
+    if (!md?.getDisplayMedia) {
+      setFeedbackError('Screen capture is not supported on this device. Use Upload File instead.');
+      return;
+    }
+    let stream: MediaStream | null = null;
+    try {
+      stream = await md.getDisplayMedia({ video: true, audio: false });
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      video.muted = true;
+      await video.play();
+      await new Promise((r) => setTimeout(r, 250)); // let a frame arrive
+      const w = video.videoWidth, h = video.videoHeight;
+      if (!w || !h) throw new Error('no frame');
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('no canvas context');
+      ctx.drawImage(video, 0, 0, w, h);
+      const blob: Blob | null = await new Promise((res) => canvas.toBlob(res, 'image/png'));
+      if (blob) {
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        addFeedbackFiles([new File([blob], `screenshot-${ts}.png`, { type: 'image/png' })]);
+      }
+    } catch (err) {
+      // NotAllowedError = the user cancelled the picker — silent. Anything
+      // else is a real failure worth surfacing.
+      if (!(err instanceof DOMException && err.name === 'NotAllowedError')) {
+        setFeedbackError('Could not capture the screen. Use Upload File instead.');
+      }
+    } finally {
+      stream?.getTracks().forEach((t) => t.stop());
+    }
+  }, [addFeedbackFiles]);
+
   // Paste handler for clipboard images
   useEffect(() => {
     if (!showFeedback) return;
@@ -2012,19 +2059,23 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
                 </div>
               )}
 
-              {/* Add file buttons */}
+              {/* Add file buttons. "Capture Screen" performs a real Screen
+                  Capture API snapshot and only appears where that's supported
+                  (desktop). Elsewhere, just Upload File. */}
               <div className="flex items-center gap-3">
+                {canCaptureScreen && (
+                  <button
+                    onClick={captureScreen}
+                    className="flex items-center gap-1.5 text-[10px] text-slate-500 hover:text-slate-300 transition-colors"
+                  >
+                    <Camera className="w-3.5 h-3.5" /> Capture Screen
+                  </button>
+                )}
                 <button
                   onClick={() => feedbackFileRef.current?.click()}
                   className="flex items-center gap-1.5 text-[10px] text-slate-500 hover:text-slate-300 transition-colors"
                 >
-                  <Camera className="w-3.5 h-3.5" /> Attach Screenshot
-                </button>
-                <button
-                  onClick={() => feedbackFileRef.current?.click()}
-                  className="flex items-center gap-1.5 text-[10px] text-slate-500 hover:text-slate-300 transition-colors"
-                >
-                  <Paperclip className="w-3.5 h-3.5" /> Add File
+                  <Paperclip className="w-3.5 h-3.5" /> Upload File
                 </button>
                 <span className="text-[9px] text-slate-700 ml-auto">or drag & drop / Ctrl+V</span>
               </div>

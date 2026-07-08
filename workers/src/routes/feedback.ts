@@ -17,6 +17,18 @@ interface Env {
 
 export const feedbackRoutes = new Hono<{ Bindings: Env }>();
 
+/** Base64-encode an ArrayBuffer for email attachment content. Chunked so a
+ *  large buffer doesn't blow the argument limit of String.fromCharCode. */
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  const CHUNK = 0x8000; // 32KB
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
 // Fallback defaults if env vars are missing — matches pre-configuration behavior.
 const DEFAULT_BUG_EMAILS = ['ngriffith@c4tech.dev', 'support@c4tech.co'];
 const DEFAULT_SUPPORT_EMAIL = 'support@c4tech.co';
@@ -54,9 +66,21 @@ feedbackRoutes.post('/', async (c) => {
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).bind(feedbackId, user.orgId, user.id, type, text.trim(), context, userAgent).run();
 
-  // Process file attachments (multiple files supported)
-  const attachments: { filename: string; contentType: string; sizeBytes: number }[] = [];
+  // Process file attachments (multiple files supported). Each file is read
+  // ONCE into memory, then (a) archived to R2 and (b) base64-encoded onto the
+  // notification email so the reviewer sees it inline — not just a filename.
+  const attachments: {
+    filename: string; contentType: string; sizeBytes: number;
+    content?: string; contentId?: string;
+  }[] = [];
   const fileEntries = formData.getAll('files');
+
+  // Cap what we attach to the email so we stay well under Resend's ~40MB
+  // message limit (base64 inflates ~33%). Larger files are archived to R2
+  // only and flagged in the email. Screenshots are KBs, so this rarely trips.
+  const MAX_EMAIL_ATTACH_BYTES = 8 * 1024 * 1024;   // per file
+  const MAX_EMAIL_TOTAL_BYTES = 18 * 1024 * 1024;   // across all files
+  let emailBytesUsed = 0;
 
   for (const raw of fileEntries) {
     // FormData values are string | File — skip strings and cast the rest.
@@ -68,8 +92,11 @@ feedbackRoutes.post('/', async (c) => {
     const ext = entry.name.split('.').pop() || 'bin';
     const r2Key = `${user.orgId}/feedback/${feedbackId}/${attachId}.${ext}`;
 
-    // Upload to R2
-    await c.env.STORAGE.put(r2Key, entry.stream(), {
+    // Read the bytes once — used for both R2 and the email.
+    const buf = await entry.arrayBuffer();
+
+    // Archive to R2 (unchanged behavior — the file is always saved).
+    await c.env.STORAGE.put(r2Key, buf, {
       httpMetadata: { contentType: entry.type },
       customMetadata: { uploadedBy: user.id, originalName: entry.name, feedbackId },
     });
@@ -80,7 +107,18 @@ feedbackRoutes.post('/', async (c) => {
        VALUES (?, ?, ?, ?, ?, ?)`
     ).bind(attachId, feedbackId, r2Key, entry.name, entry.type, entry.size).run();
 
-    attachments.push({ filename: entry.name, contentType: entry.type, sizeBytes: entry.size });
+    // Attach to the email if it fits the caps.
+    const fits = entry.size <= MAX_EMAIL_ATTACH_BYTES
+      && emailBytesUsed + entry.size <= MAX_EMAIL_TOTAL_BYTES;
+    const isImage = (entry.type || '').startsWith('image/');
+    attachments.push({
+      filename: entry.name,
+      contentType: entry.type || 'application/octet-stream',
+      sizeBytes: entry.size,
+      ...(fits ? { content: arrayBufferToBase64(buf) } : {}),
+      ...(fits && isImage ? { contentId: `att-${attachId}@hvacdesignpro` } : {}),
+    });
+    if (fits) emailBytesUsed += entry.size;
   }
 
   setAudit(c, {

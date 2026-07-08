@@ -13,6 +13,17 @@ const RESEND_API = 'https://api.resend.com/emails';
 // Default FROM address. Can be overridden by env var FEEDBACK_FROM_ADDRESS.
 const DEFAULT_FROM_ADDRESS = 'HVAC DesignPro <noreply@c4tech.co>';
 
+/** A file attached to an outbound email. `content` is base64-encoded bytes.
+ *  When `contentId` is set the attachment is INLINE — reference it in the HTML
+ *  as <img src="cid:THE_CONTENT_ID">. Without it, the file shows as a normal
+ *  downloadable attachment. */
+export interface EmailAttachment {
+  filename: string;
+  content: string;        // base64
+  contentType?: string;
+  contentId?: string;     // set → inline (cid); unset → regular attachment
+}
+
 export interface EmailPayload {
   /** Single address or array of addresses. Resend supports up to 50 recipients per request. */
   to: string | string[];
@@ -20,6 +31,8 @@ export interface EmailPayload {
   html: string;
   /** Optional override for the From address (falls back to DEFAULT_FROM_ADDRESS). */
   from?: string;
+  /** Optional file attachments (feedback screenshots, PDFs, etc.). */
+  attachments?: EmailAttachment[];
 }
 
 export interface EmailSendResult {
@@ -50,6 +63,18 @@ export async function sendEmail(apiKey: string | undefined, payload: EmailPayloa
         to: payload.to, // Resend accepts both string and array
         subject: payload.subject,
         html: payload.html,
+        // Resend attachment shape: { filename, content(base64), content_type,
+        // content_id }. content_id makes an image render inline (cid).
+        ...(payload.attachments && payload.attachments.length > 0
+          ? {
+              attachments: payload.attachments.map((a) => ({
+                filename: a.filename,
+                content: a.content,
+                ...(a.contentType ? { content_type: a.contentType } : {}),
+                ...(a.contentId ? { content_id: a.contentId } : {}),
+              })),
+            }
+          : {}),
       }),
     });
 
@@ -89,6 +114,17 @@ export function parseEmailList(raw: string | undefined, fallback: string[] = [])
 
 // ── Feedback Email ────────────────────────────────────────────────────────────
 
+interface FeedbackAttachment {
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  /** base64 bytes — present when the file was small enough to attach to the
+   *  email. Absent → the file is in R2 only (too large to email). */
+  content?: string;
+  /** cid for inline image rendering (images only). */
+  contentId?: string;
+}
+
 interface FeedbackEmailData {
   type: string;          // 'BUG' | 'IDEA' | 'QUESTION'
   text: string;
@@ -98,7 +134,7 @@ interface FeedbackEmailData {
   userRole: string;
   orgName: string;
   userAgent: string;
-  attachments: { filename: string; contentType: string; sizeBytes: number }[];
+  attachments: FeedbackAttachment[];
   feedbackId: string;
   timestamp: string;
 }
@@ -121,12 +157,33 @@ export function buildFeedbackEmail(data: FeedbackEmailData): EmailPayload & { su
   const attachmentRows = data.attachments.length > 0
     ? data.attachments.map(a => {
         const sizeKb = (a.sizeBytes / 1024).toFixed(1);
-        return `<tr><td style="padding:4px 8px;font-size:13px;color:#94a3b8;border-bottom:1px solid #1e293b;">${a.filename}</td><td style="padding:4px 8px;font-size:13px;color:#64748b;border-bottom:1px solid #1e293b;">${sizeKb} KB</td></tr>`;
+        const note = a.content ? '' : ' <span style="color:#475569;">(in R2 — too large to email)</span>';
+        return `<tr><td style="padding:4px 8px;font-size:13px;color:#94a3b8;border-bottom:1px solid #1e293b;">${a.filename}${note}</td><td style="padding:4px 8px;font-size:13px;color:#64748b;border-bottom:1px solid #1e293b;">${sizeKb} KB</td></tr>`;
       }).join('')
     : '';
 
+  // Inline preview for image attachments that were embedded (contentId set).
+  // Referenced by cid so they render in the email body — "visible", not just
+  // listed. Non-image files ride along as downloadable attachments.
+  const inlineImages = data.attachments
+    .filter(a => a.contentId && a.contentType.startsWith('image/'))
+    .map(a => `<div style="margin-bottom:12px;"><img src="cid:${a.contentId}" alt="${a.filename}" style="max-width:100%;border:1px solid #334155;border-radius:12px;display:block;" /></div>`)
+    .join('');
+
+  // Only files small enough to embed become email attachments; the rest stay
+  // in R2. Images carry their contentId so Resend renders them inline.
+  const emailAttachments: EmailAttachment[] = data.attachments
+    .filter(a => !!a.content)
+    .map(a => ({
+      filename: a.filename,
+      content: a.content as string,
+      contentType: a.contentType,
+      ...(a.contentId && a.contentType.startsWith('image/') ? { contentId: a.contentId } : {}),
+    }));
+
   return {
     to: '',
+    attachments: emailAttachments,
     subject: `[HVAC DesignPro] ${data.type} from ${data.userName} (${data.orgName})`,
     html: `
 <!DOCTYPE html>
@@ -183,10 +240,11 @@ export function buildFeedbackEmail(data: FeedbackEmailData): EmailPayload & { su
             ${data.attachments.length > 0 ? `
             <!-- Attachments -->
             <p style="margin:0 0 8px;font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Attachments (${data.attachments.length})</p>
-            <table width="100%" style="margin-bottom:24px;border:1px solid #334155;border-radius:12px;overflow:hidden;background-color:#0f172a;">
+            <table width="100%" style="margin-bottom:16px;border:1px solid #334155;border-radius:12px;overflow:hidden;background-color:#0f172a;">
               ${attachmentRows}
             </table>
-            <p style="margin:0 0 24px;font-size:11px;color:#475569;">Files stored in R2 bucket under feedback/${data.feedbackId}/</p>
+            ${inlineImages}
+            <p style="margin:0 0 24px;font-size:11px;color:#475569;">Files also archived in R2 under ${data.feedbackId}/</p>
             ` : ''}
 
             <!-- Metadata -->
