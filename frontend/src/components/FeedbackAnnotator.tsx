@@ -80,8 +80,20 @@ export default function FeedbackAnnotator({ imageDataUrl, onDone, onCancel }: Pr
       });
       canvasRef.current = canvas;
 
-      const bg = new fabric.FabricImage(imgEl, {
-        selectable: false, evented: false, scaleX: scale, scaleY: scale,
+      // Pre-scale the capture to the fit size on an offscreen 2D canvas so the
+      // Fabric background is EXACTLY canvas-sized. Relying on Fabric's
+      // backgroundImage scaleX/scaleY left large captures (scale < 1 — i.e.
+      // every real full-screen grab) rendering at native size, so only the
+      // top-left crop was visible. Drawing to size sidesteps that entirely.
+      let bgEl: HTMLImageElement | HTMLCanvasElement = imgEl;
+      if (scale < 1) {
+        const off = document.createElement('canvas');
+        off.width = w; off.height = h;
+        off.getContext('2d')?.drawImage(imgEl, 0, 0, w, h);
+        bgEl = off;
+      }
+      const bg = new fabric.FabricImage(bgEl, {
+        selectable: false, evented: false, left: 0, top: 0, originX: 'left', originY: 'top',
       });
       canvas.backgroundImage = bg;
       canvas.renderAll();
