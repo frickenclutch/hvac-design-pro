@@ -5,6 +5,7 @@ import { useCadStore } from '../features/cad/store/useCadStore';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { api } from '../lib/api';
 import { scopedKey } from '../utils/storage';
+import FeedbackAnnotator from './FeedbackAnnotator';
 
 // ── Mason — your AI HVAC engineering assistant ───────────────────────────────
 // Named after the masons who've built the world's buildings, brick by brick.
@@ -1610,6 +1611,8 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const [feedbackSending, setFeedbackSending] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  // When set, the annotation editor is open with this captured image (dataURL).
+  const [annotatorImage, setAnnotatorImage] = useState<string | null>(null);
   const feedbackFileRef = useRef<HTMLInputElement>(null);
   const feedbackFormRef = useRef<HTMLDivElement>(null);
   const { user, organisation } = useAuthStore();
@@ -1662,11 +1665,9 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('no canvas context');
       ctx.drawImage(video, 0, 0, w, h);
-      const blob: Blob | null = await new Promise((res) => canvas.toBlob(res, 'image/png'));
-      if (blob) {
-        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        addFeedbackFiles([new File([blob], `screenshot-${ts}.png`, { type: 'image/png' })]);
-      }
+      // Hand the capture to the annotation editor (arrows/boxes/text/redact)
+      // rather than attaching it raw — the editor exports the final PNG.
+      setAnnotatorImage(canvas.toDataURL('image/png'));
     } catch (err) {
       // NotAllowedError = the user cancelled the picker — silent. Anything
       // else is a real failure worth surfacing.
@@ -2031,6 +2032,15 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
                 if (e.target.files) addFeedbackFiles(e.target.files);
                 e.target.value = '';
               }} />
+
+              {/* Screenshot annotation editor — opens on Capture Screen */}
+              {annotatorImage && (
+                <FeedbackAnnotator
+                  imageDataUrl={annotatorImage}
+                  onDone={(file) => { addFeedbackFiles([file]); setAnnotatorImage(null); }}
+                  onCancel={() => setAnnotatorImage(null)}
+                />
+              )}
 
               {/* Drag-drop hint when dragging */}
               {isDragging && (
