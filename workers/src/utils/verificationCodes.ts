@@ -5,6 +5,7 @@
  */
 
 import { generateId } from './id';
+import { nowIso } from './time';
 
 type CodePurpose = 'email_verification' | 'password_reset' | 'mfa_verification';
 
@@ -77,16 +78,17 @@ export async function validateVerificationCode(
 ): Promise<{ valid: boolean; userId?: string; error?: string }> {
   const normalizedEmail = email.toLowerCase().trim();
 
-  // Fetch the most recent unused, unexpired code for this email + purpose
+  // Fetch the most recent unused, unexpired code for this email + purpose.
+  // expires_at is ISO — compare against a bound ISO now (utils/time.ts).
   const row = await db
     .prepare(
       `SELECT id, user_id, code, attempts
        FROM verification_codes
-       WHERE email = ? AND purpose = ? AND used_at IS NULL AND expires_at > datetime('now')
+       WHERE email = ? AND purpose = ? AND used_at IS NULL AND expires_at > ?
        ORDER BY created_at DESC
        LIMIT 1`,
     )
-    .bind(normalizedEmail, purpose)
+    .bind(normalizedEmail, purpose, nowIso())
     .first<{ id: string; user_id: string; code: string; attempts: number }>();
 
   if (!row) {
