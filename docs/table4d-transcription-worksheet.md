@@ -124,8 +124,42 @@ To fix (engine 1.3.0 unit):
    interpolation rule (CLAUDE.md §3 rule 1) likely REQUIRES interpolation
    between the 5°F HTD columns at low PTDH magnitudes — unlike the CLTD
    round-up convention. Confirm against the book's floor-table notes.
-4. Pages 376+ (Constructions 20 radiant / 21 basement floors / 22 slabs)
-   complete the floor story — not yet photographed.
+4. Pages 376-383 photographed 2026-07-15 (final batch) — see inventory below.
+
+## Photo coverage inventory — COMPLETE Table 4 series (except p. 354)
+
+pp. 345-353 (Table 4A: doors ✓verified, frame/block/alt walls, basement start)
+· pp. 355-361 (basement wall variants) · pp. 362-370 (ceilings 16A-16F
+✓encoded, 17A-17C, 18A-18C) · pp. 371-377 (Construction 19 floor PTD tables:
+19A none / 19B R-4 / 19C R-11 / 19D R-19 exposed-wall tiers, sealed + vented
+— too dense in full-page shots; close-ups needed for the 1.3.0 unit)
+· pp. 378-381 (Constructions 20/21/22 + Notes for Table 4A) · pp. 383-387
+(Table 4B ✓verified + notes + 4C/4D/4E). **Only p. 354 was never shot.**
+
+### Construction 20 (p. 378) — floor over OPEN crawl space / garage
+
+Heating: HTM = U × HTD directly (exposed to outdoor air — NO PTD table;
+radiant: U × (HTD+25)). Cooling CLTD row (legible, transcribed, NOT encoded —
+no 20-series registry variant):
+
+```
+20P/20R exposed floor: 10/L 9.0  10/M 5.0 | 15/L 14.0  15/M 10.0  15/H 5.0 |
+20/L 19.0  20/M 15.0  20/H 10.0 | 25/M 20.0  25/H 15.0 | 30/H 20.0 | 35/H 25.0
+```
+
+### Constructions 21/22 — registry anchors VERIFIED against source (2026-07-15)
+
+- `21A-32` U 0.020 = book p.379 (21A, 32-ft shortest side) ✓
+- `22B-5ph` F 0.589 = book p.380 (22B vertical R-5, heavy moist soil) ✓
+- `22D-5rl` F 0.287 = book p.381 (22D R-5, light dry soil) ✓
+
+### Notes for Table 4A (p. 381) — methodology provenance
+
+- Note 12: Construction 15 HTM values are listed in 2-ft increments;
+  "intermediate values can be determined by interpolation" (explicit license).
+- Note 16: radiant-floor HTMs (Constructions 19, 20, 22) assume a 95°F slab.
+- Metal-stud cavity correction factors: R-11→0.50 (eff 5.50), R-13→0.46
+  (5.98), R-15→0.43 (6.45), R-19→0.37 (7.03), R-21→0.35 (7.35).
 
 ## Where the values go
 
