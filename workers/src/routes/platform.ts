@@ -316,11 +316,14 @@ platformRoutes.get('/qa-benchmarks', async (c) => {
   //
   // 1.2.x (2026-07-15): ceiling CLTD family rows 16B/16C/16D (1.2.0, pp.
   // 362-363) and 16F (1.2.1, p. 364) transcribed from the physical book.
-  // The 184/184 reference checks still pass (CI-enforced; anchors embedded
-  // unchanged); the ACCA submission itself was filed against 1.1.0 —
-  // recorded under `submission.filedEngineVersion`.
+  // 1.3.0 (2026-07-15): Construction 19 floor PTD tables — climate-
+  // dependent PTDH/PTDC (19B sealed/passive block, pp. 371-377) with the
+  // printed-column-first / 5%-rule lookup convention; adapter now maps
+  // floorRValue to the matching row. The 184/184 reference checks still
+  // pass (CI-enforced; Smith bit-identical); the ACCA submission itself
+  // was filed against 1.1.0 — recorded under `submission.filedEngineVersion`.
   const certification = {
-    engineVersion: 'manualJ8-ts-1.2.1',
+    engineVersion: 'manualJ8-ts-1.3.0',
     standard: 'ACCA Manual J 8th Ed v2.50',
     suiteTolerance: 0.005,
     tests: [
@@ -329,7 +332,7 @@ platformRoutes.get('/qa-benchmarks', async (c) => {
       { name: 'Cobb Residence',   passed: 42, total: 42, maxDriftPct: 0.0001 },
     ],
     aggregate: { passed: 184, total: 184 },
-    frontendUnitTests: { passed: 90, total: 90, framework: 'vitest' },
+    frontendUnitTests: { passed: 123, total: 123, framework: 'vitest' },
     submission: {
       filed: true,
       filedAt: '2026-05-01',
