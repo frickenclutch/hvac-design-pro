@@ -529,6 +529,92 @@ export function buildInviteEmail(data: InviteEmailData): EmailPayload & { subjec
   };
 }
 
+// ── Reparent (account transfer) Email ────────────────────────────────────────
+
+interface ReparentEmailData {
+  orgName: string;
+  inviterName: string;
+  inviterEmail: string;
+  invitedRole: string;
+  /** Where the user reviews the request — the app itself, NOT a token link.
+   *  Consent happens in-app behind their own login (GET /api/auth/transfers),
+   *  so this email carries no redeemable credential. */
+  appUrl: string;
+  expiresAt: string;
+}
+
+export function buildReparentEmail(data: ReparentEmailData): EmailPayload & { subject: string; html: string } {
+  const expiresPretty = new Date(data.expiresAt).toLocaleDateString('en-US', {
+    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
+  });
+  const roleLabel = data.invitedRole.charAt(0).toUpperCase() + data.invitedRole.slice(1);
+
+  return {
+    to: '',
+    subject: `${data.orgName} wants to bring your HVAC DesignPro account into their team`,
+    html: `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0;padding:0;background-color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0f172a;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background-color:#1e293b;border-radius:16px;border:1px solid #334155;overflow:hidden;">
+        <!-- Header -->
+        <tr>
+          <td style="padding:32px 40px 24px;border-bottom:1px solid #334155;">
+            <span style="font-size:24px;font-weight:800;color:#34d399;letter-spacing:-0.5px;">HVAC DesignPro</span>
+          </td>
+        </tr>
+        <!-- Body -->
+        <tr>
+          <td style="padding:32px 40px;">
+            <h1 style="margin:0 0 16px;font-size:24px;font-weight:800;color:#f1f5f9;line-height:1.3;">
+              Join <span style="color:#34d399;">${data.orgName}</span> with your existing account
+            </h1>
+            <p style="margin:0 0 24px;font-size:16px;color:#94a3b8;line-height:1.6;">
+              <strong style="color:#e2e8f0;">${data.inviterName}</strong> asked to move your
+              HVAC DesignPro account into the <strong style="color:#e2e8f0;">${data.orgName}</strong>
+              workspace as a <strong style="color:#e2e8f0;">${roleLabel}</strong>.
+              Nothing happens without your say-so &mdash; sign in and you'll see the request
+              waiting for you to accept or decline.
+            </p>
+            <!-- CTA -->
+            <table cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+              <tr>
+                <td style="background-color:#10b981;border-radius:12px;padding:14px 32px;">
+                  <a href="${data.appUrl}" style="color:#0f172a;font-size:16px;font-weight:700;text-decoration:none;display:inline-block;">
+                    Review the request
+                  </a>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:0 0 24px;font-size:13px;color:#64748b;line-height:1.6;">
+              Heads up: accepting moves your ACCOUNT, not your projects &mdash; existing
+              project data stays in your current workspace. This request expires on
+              <strong style="color:#94a3b8;">${expiresPretty}</strong>.
+              If you weren't expecting this email, you can safely ignore it.
+            </p>
+          </td>
+        </tr>
+        <!-- Footer -->
+        <tr>
+          <td style="padding:20px 40px;border-top:1px solid #334155;background-color:#0f172a;">
+            <p style="margin:0;font-size:11px;color:#475569;line-height:1.6;">
+              C4 Technologies — HVAC DesignPro<br>
+              Requested by <a href="mailto:${data.inviterEmail}" style="color:#475569;text-decoration:none;">${data.inviterEmail}</a> ·
+              <a href="https://hvac-design-pro.pages.dev" style="color:#475569;text-decoration:none;">hvac-design-pro.pages.dev</a>
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`,
+  };
+}
+
 // ── Welcome Email ─────────────────────────────────────────────────────────────
 
 export function buildWelcomeEmail(firstName: string): EmailPayload & { subject: string; html: string } {

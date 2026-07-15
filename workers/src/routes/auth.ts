@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { generateId, uniqueOrgSlug } from '../utils/id';
 import { hashPassword, verifyPassword, isLegacyHash, hashToken } from '../utils/crypto';
 import { mintTokenPair } from '../utils/session';
+import { nowIso } from '../utils/time';
 import { sendEmail, buildWelcomeEmail, buildVerificationEmail, buildPasswordResetEmail, buildMfaEmailCode } from '../utils/email';
 import { createVerificationCode, validateVerificationCode } from '../utils/verificationCodes';
 import { checkRateLimit, recordRateLimitEvent, cleanupRateLimitEvents } from '../utils/rateLimit';
@@ -80,11 +81,12 @@ async function loadMfaChallenge(
   purpose: 'login' | 'enroll',
 ): Promise<ChallengeRow | null> {
   const hash = await hashToken(rawToken);
+  // Bound ISO now, not datetime('now') — expires_at is ISO (utils/time.ts).
   const row = await db.prepare(
     `SELECT id, user_id, org_id FROM mfa_challenges
      WHERE token_hash = ? AND purpose = ?
-       AND consumed_at IS NULL AND expires_at > datetime('now')`,
-  ).bind(hash, purpose).first<ChallengeRow>();
+       AND consumed_at IS NULL AND expires_at > ?`,
+  ).bind(hash, purpose, nowIso()).first<ChallengeRow>();
   return row ?? null;
 }
 
@@ -925,7 +927,7 @@ authRoutes.get('/invite/:token', async (c) => {
   const db = c.env.DB;
 
   const invite = await db.prepare(
-    `SELECT i.id, i.invited_email, i.invited_role, i.status, i.expires_at,
+    `SELECT i.id, i.invited_email, i.invited_role, i.status, i.expires_at, i.kind,
             o.name AS org_name, o.org_type, o.slug,
             u.first_name AS inviter_first_name, u.last_name AS inviter_last_name,
             u.email AS inviter_email
@@ -936,6 +938,14 @@ authRoutes.get('/invite/:token', async (c) => {
   ).bind(token).first();
 
   if (!invite) return c.json({ error: 'Invitation not found' }, 404);
+  // Reparent requests are consented to IN-APP by the existing account owner
+  // (GET /api/auth/transfers) — the token is never a signup credential.
+  if (invite.kind === 'reparent') {
+    return c.json({
+      error: 'This is an account-transfer request. Sign in to your existing account to review it.',
+      alreadyRegistered: true,
+    }, 409);
+  }
   if (invite.status !== 'pending') {
     return c.json({ error: `This invitation has already been ${invite.status}.` }, 410);
   }
@@ -1001,11 +1011,18 @@ authRoutes.post('/invite/:token/redeem', async (c) => {
 
   const db = c.env.DB;
   const invite = await db.prepare(
-    `SELECT id, org_id, invited_email, invited_role, status, expires_at
+    `SELECT id, org_id, invited_email, invited_role, status, expires_at, kind
      FROM org_invites WHERE token = ?`
   ).bind(token).first();
 
   if (!invite) return c.json({ error: 'Invitation not found' }, 404);
+  // Reparent requests never create accounts — in-app consent only.
+  if (invite.kind === 'reparent') {
+    return c.json({
+      error: 'This is an account-transfer request. Sign in to your existing account to review it.',
+      alreadyRegistered: true,
+    }, 409);
+  }
   if (invite.status !== 'pending') {
     return c.json({ error: `This invitation has already been ${invite.status}.` }, 410);
   }
@@ -1087,6 +1104,170 @@ authRoutes.post('/invite/:token/redeem', async (c) => {
       slug: userData!.slug, regionCode: userData!.region_code,
     },
   });
+});
+
+// ── Account transfers (reparent consent) ────────────────────────────────────
+//
+// The receiving side of POST /api/org/reparent. A tenant admin creates a
+// kind='reparent' org_invites row; the TARGET user reviews it here, behind
+// their own login. Per-route authMiddleware (same pattern as /mfa/*) —
+// these live under the public /api/auth mount, so the global middleware
+// chain doesn't cover them.
+//
+// Identity binding: rows are matched on invited_email = the SESSION user's
+// email. The invite id alone grants nothing to anyone else.
+authRoutes.use('/transfers', authMiddleware);
+authRoutes.use('/transfers/*', authMiddleware);
+
+// GET /api/auth/transfers — pending transfer requests addressed to me.
+authRoutes.get('/transfers', async (c) => {
+  const user = c.get('user') as AuthUser;
+  const db = c.env.DB;
+
+  const { results } = await db.prepare(
+    `SELECT i.id, i.invited_role, i.expires_at, i.created_at,
+            o.name AS org_name, o.org_type,
+            u.first_name AS inviter_first_name, u.last_name AS inviter_last_name,
+            u.email AS inviter_email
+     FROM org_invites i
+     LEFT JOIN organisations o ON o.id = i.org_id
+     LEFT JOIN users u ON u.id = i.invited_by
+     WHERE i.invited_email = ? AND i.kind = 'reparent'
+       AND i.status = 'pending' AND i.expires_at > ?
+     ORDER BY i.created_at DESC`
+  ).bind(user.email.toLowerCase(), nowIso()).all();
+
+  return c.json({ transfers: results });
+});
+
+/** Load + validate a pending reparent invite addressed to the session user. */
+async function loadMyTransfer(
+  db: D1Database, inviteId: string, userEmail: string,
+): Promise<{ ok: true; invite: Record<string, unknown> } | { ok: false; error: string; code: 404 | 410 }> {
+  const invite = await db.prepare(
+    `SELECT id, org_id, invited_email, invited_role, status, expires_at
+     FROM org_invites WHERE id = ? AND kind = 'reparent'`
+  ).bind(inviteId).first();
+  // Same 404 for "not found" and "not addressed to you" — don't leak the
+  // existence of other users' transfer requests.
+  if (!invite || (invite.invited_email as string) !== userEmail.toLowerCase()) {
+    return { ok: false, error: 'Transfer request not found', code: 404 };
+  }
+  if (invite.status !== 'pending') {
+    return { ok: false, error: `This transfer request has already been ${invite.status}.`, code: 410 };
+  }
+  if (new Date(invite.expires_at as string).getTime() < Date.now()) {
+    return { ok: false, error: 'This transfer request has expired.', code: 410 };
+  }
+  return { ok: true, invite: invite as Record<string, unknown> };
+}
+
+// POST /api/auth/transfers/:id/accept — move my account into the requesting
+// org. Moves the PERSON, not their data: projects/calcs stay in the old org.
+// All old sessions + refresh tokens die (org context changed everywhere);
+// a fresh pair for the new org is returned so this client stays signed in.
+authRoutes.post('/transfers/:id/accept', async (c) => {
+  const user = c.get('user') as AuthUser;
+  if (user.isImpersonating) {
+    return c.json({ error: 'Not available during impersonation' }, 403);
+  }
+  const db = c.env.DB;
+
+  const loaded = await loadMyTransfer(db, c.req.param('id'), user.email);
+  if (!loaded.ok) return c.json({ error: loaded.error }, loaded.code);
+  const invite = loaded.invite;
+
+  const fromOrgId = user.orgId;
+
+  // Continuity guards on the org being left behind:
+  //  • configured permit authority → moving its only member strands live
+  //    submissions pointed at it; needs platform support instead.
+  //  • grew past solo since the request → no longer a fragmented user;
+  //    the multi-member rule from the request side applies here too.
+  const oldOrg = await db.prepare(
+    `SELECT authority_type FROM organisations WHERE id = ?`
+  ).bind(fromOrgId).first();
+  if (oldOrg?.authority_type) {
+    return c.json({
+      error: 'Your organisation is a configured permit authority. Contact platform support to transfer this account.',
+    }, 409);
+  }
+  const peers = await db.prepare(
+    `SELECT COUNT(*) AS n FROM users WHERE org_id = ? AND status = 'active'`
+  ).bind(fromOrgId).first();
+  if (Number(peers?.n ?? 0) > 1) {
+    return c.json({
+      error: 'Your organisation has other active members. Contact platform support to transfer this account.',
+    }, 409);
+  }
+
+  // Atomic claim — rows-affected guard kills double-accept races.
+  const claim = await db.prepare(
+    `UPDATE org_invites
+       SET status = 'accepted', accepted_by = ?, accepted_at = datetime('now')
+     WHERE id = ? AND status = 'pending'`
+  ).bind(user.id, invite.id).run();
+  if (!claim.meta.changes) {
+    return c.json({ error: 'This transfer request is no longer pending.' }, 409);
+  }
+
+  await db.prepare(
+    `UPDATE users SET org_id = ?, role = ? WHERE id = ?`
+  ).bind(invite.org_id, invite.invited_role, user.id).run();
+
+  // Old org context is dead everywhere: purge sessions, revoke refresh chain.
+  await db.prepare(`DELETE FROM sessions WHERE user_id = ?`).bind(user.id).run();
+  await db.prepare(
+    `UPDATE refresh_tokens SET revoked_at = datetime('now') WHERE user_id = ? AND revoked_at IS NULL`
+  ).bind(user.id).run();
+
+  // Fresh pair + login-shaped body for the NEW org.
+  const session = await buildSessionResponse(db, user.id);
+  if (!session) return c.json({ error: 'Account is not active' }, 401);
+
+  await writeAuthAudit(c, {
+    action: 'auth.reparent_accepted', status: 200,
+    userId: user.id, orgId: invite.org_id as string,
+    actorRole: invite.invited_role as string, entityId: user.id,
+    entityLabel: user.email,
+    detail: {
+      fromOrgId,
+      toOrgId: invite.org_id,
+      invitedRole: invite.invited_role,
+      orphanedOrgId: fromOrgId,
+    },
+  });
+
+  return c.json({ token: session.token, refreshToken: session.refreshToken, ...session.body });
+});
+
+// POST /api/auth/transfers/:id/decline — refuse the request. Reuses the
+// 'revoked' status (the CHECK constraint predates 'declined'); the audit
+// row records who said no.
+authRoutes.post('/transfers/:id/decline', async (c) => {
+  const user = c.get('user') as AuthUser;
+  const db = c.env.DB;
+
+  const loaded = await loadMyTransfer(db, c.req.param('id'), user.email);
+  if (!loaded.ok) return c.json({ error: loaded.error }, loaded.code);
+  const invite = loaded.invite;
+
+  const r = await db.prepare(
+    `UPDATE org_invites SET status = 'revoked' WHERE id = ? AND status = 'pending'`
+  ).bind(invite.id).run();
+  if (!r.meta.changes) {
+    return c.json({ error: 'This transfer request is no longer pending.' }, 409);
+  }
+
+  await writeAuthAudit(c, {
+    action: 'auth.reparent_declined', status: 200,
+    userId: user.id, orgId: user.orgId,
+    actorRole: user.role, entityId: invite.id as string,
+    entityLabel: user.email,
+    detail: { requestingOrgId: invite.org_id, declinedByUser: true },
+  });
+
+  return c.json({ ok: true });
 });
 
 // ── Logout ───────────────────────────────────────────────────────────────────
@@ -1221,15 +1402,17 @@ authRoutes.get('/me', async (c) => {
   const token = authHeader.slice(7);
   const db = c.env.DB;
 
+  // Bound ISO now, not datetime('now') — see utils/time.ts for why.
   const result = await db.prepare(
-    `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.is_platform_admin, u.is_permit_authority, u.org_id,
+    `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.is_platform_admin, u.is_permit_authority,
+            s.org_id, s.is_impersonation,
             o.name as org_name, o.org_type, o.slug, o.region_code
      FROM sessions s
      JOIN users u ON u.id = s.user_id
      JOIN organisations o ON o.id = s.org_id
-     WHERE s.token = ? AND s.expires_at > datetime('now')
+     WHERE s.token = ? AND s.expires_at > ?
        AND u.status = 'active'`
-  ).bind(await hashToken(token)).first();
+  ).bind(await hashToken(token), nowIso()).first();
 
   if (!result) return c.json({ error: 'Session expired' }, 401);
 
@@ -1241,9 +1424,11 @@ authRoutes.get('/me', async (c) => {
       isPermitAuthority: Number(result.is_permit_authority ?? 0) === 1,
     },
     organisation: {
+      // Session-scoped org: during impersonation this is the TARGET tenant.
       id: result.org_id, name: result.org_name, type: result.org_type,
       slug: result.slug, regionCode: result.region_code
-    }
+    },
+    impersonating: Number(result.is_impersonation ?? 0) === 1,
   });
 });
 

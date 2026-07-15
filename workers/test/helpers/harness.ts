@@ -79,6 +79,9 @@ export async function applyMigrations(db: D1Database): Promise<void> {
 async function reconcileOutOfBandColumns(db: D1Database): Promise<void> {
   const fixes = [
     `ALTER TABLE organisations ADD COLUMN billing_status TEXT NOT NULL DEFAULT 'free_beta'`,
+    // Read/written by GET/PUT /api/org; codified into 0001 on 2026-07-15
+    // (tenancy-actions suite exposed it). Backstop kept, same as above.
+    `ALTER TABLE organisations ADD COLUMN default_standard TEXT`,
   ];
   for (const sql of fixes) {
     try {

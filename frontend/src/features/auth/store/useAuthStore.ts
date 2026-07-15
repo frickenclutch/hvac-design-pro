@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { registerAuthGetter } from '../../../utils/storage';
 import { api } from '../../../lib/api';
+import { toast } from '../../../stores/useToastStore';
 
 export type UserRole = 'admin' | 'engineer' | 'tech' | 'viewer';
 export type OrgType = 'individual' | 'company' | 'municipality';
@@ -54,6 +55,28 @@ const TOKEN_KEY = 'hvac_session_token';
 const REFRESH_KEY = 'hvac_refresh_token';
 const USER_KEY = 'hvac_session_user';
 const ORG_KEY = 'hvac_session_org';
+// While an L0 admin impersonates a tenant, their REAL credential set +
+// user/org snapshot live here; the impersonation token occupies the normal
+// keys so every existing request path works unchanged. Exit (or the
+// impersonation token's 30-min death) restores from this stash.
+const IMPERSONATION_STASH_KEY = 'hvac_impersonation_stash';
+// Project list cache — cleared on any org-context switch so one org's
+// projects never bleed into another's UI.
+const PROJECTS_CACHE_KEY = 'hvac_projects';
+
+interface ImpersonationStash {
+  token: string;
+  refreshToken: string | null;
+  user: User;
+  org: Organisation;
+}
+
+function readStash(): ImpersonationStash | null {
+  try {
+    const raw = localStorage.getItem(IMPERSONATION_STASH_KEY);
+    return raw ? JSON.parse(raw) as ImpersonationStash : null;
+  } catch { return null; }
+}
 
 function persistSession(token: string, user: User, org: Organisation, refreshToken?: string) {
   try {
@@ -163,6 +186,26 @@ interface AuthState {
   // The recipient is marked verified on creation (the email link itself
   // is proof of email ownership, so no second OTP loop).
   redeemInvite: (token: string, data: { firstName: string; lastName: string; password: string }) => Promise<void>;
+
+  // ── L0 org impersonation ───────────────────────────────────────────────
+  // True while the active session is a read-only impersonation of another
+  // tenant. The admin's real credentials are stashed and restored on exit
+  // or when the impersonation token dies at its 30-minute TTL.
+  impersonating: boolean;
+  /** Swap into a read-only session for the target org. Returns true on
+   *  success — the caller should then hard-navigate so every store
+   *  re-initializes under the new org context. */
+  enterImpersonation: (orgId: string) => Promise<boolean>;
+  /** Kill the impersonation session and restore the stashed real session. */
+  exitImpersonation: () => Promise<void>;
+
+  // Reparent consent — adopt the fresh session returned by
+  // api.authTransferAccept (my account just moved orgs; all old tokens are
+  // dead). Caller hard-navigates afterwards for a clean store reset.
+  adoptTransferredSession: (resp: {
+    token: string; refreshToken: string;
+    user: User; organisation: Organisation;
+  }) => void;
 }
 
 // Hydrate from persisted session on creation
@@ -183,6 +226,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   mfaMethods: [],
   enrollmentRequired: false,
   mfaEnrollToken: null,
+  // A surviving stash means the persisted session IS an impersonation.
+  impersonating: !!readStash(),
 
   login: async (email, password) => {
     set({ authLoading: true, authError: null });
@@ -573,7 +618,72 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     }
     clearPersistedSession();
-    set({ user: null, organisation: null, token: null, isAuthenticated: false, isOnboarding: false, authError: null, pendingVerification: false, pendingEmail: null, mfaRequired: false, mfaChallengeToken: null, mfaMethods: [], enrollmentRequired: false, mfaEnrollToken: null });
+    // Deliberate full logout also abandons any impersonation stash — the
+    // user asked to sign out, not to fall back to the stashed session.
+    localStorage.removeItem(IMPERSONATION_STASH_KEY);
+    set({ user: null, organisation: null, token: null, isAuthenticated: false, isOnboarding: false, authError: null, pendingVerification: false, pendingEmail: null, mfaRequired: false, mfaChallengeToken: null, mfaMethods: [], enrollmentRequired: false, mfaEnrollToken: null, impersonating: false });
+  },
+
+  enterImpersonation: async (orgId) => {
+    const { user, organisation, token } = get();
+    if (!user?.isPlatformAdmin || !token || !organisation) return false;
+    if (get().impersonating) return false;
+
+    let resp: Awaited<ReturnType<typeof api.platformImpersonateOrg>>;
+    try {
+      resp = await api.platformImpersonateOrg(orgId);
+    } catch {
+      return false; // api.ts already toasted the server error
+    }
+
+    // Stash the REAL credential set + identity snapshot, then remove the
+    // refresh token from the live keys — a silent refresh mid-impersonation
+    // would mint an ADMIN-org access token and silently break the view.
+    const stash: ImpersonationStash = {
+      token,
+      refreshToken: localStorage.getItem(REFRESH_KEY),
+      user,
+      org: organisation,
+    };
+    try { localStorage.setItem(IMPERSONATION_STASH_KEY, JSON.stringify(stash)); } catch { return false; }
+    localStorage.removeItem(REFRESH_KEY);
+    localStorage.removeItem(PROJECTS_CACHE_KEY);
+
+    const targetOrg: Organisation = {
+      id: resp.organisation.id,
+      name: resp.organisation.name,
+      type: resp.organisation.type as OrgType,
+      slug: resp.organisation.slug,
+      regionCode: resp.organisation.regionCode as RegionCode,
+    };
+    api.setToken(resp.token);
+    persistSession(resp.token, user, targetOrg);
+    set({ token: resp.token, organisation: targetOrg, impersonating: true });
+    return true;
+  },
+
+  exitImpersonation: async () => {
+    // Kill the impersonation session server-side FIRST — this needs the
+    // impersonation bearer, which is still in the live keys. Best-effort:
+    // an already-expired token just means the row is gone anyway.
+    try { await api.platformExitImpersonation(); } catch { /* expired/dead */ }
+    restoreStashedSession();
+    localStorage.removeItem(PROJECTS_CACHE_KEY);
+    await get().restoreSession();
+  },
+
+  adoptTransferredSession: (resp) => {
+    api.setTokens(resp.token, resp.refreshToken);
+    persistSession(resp.token, resp.user, resp.organisation, resp.refreshToken);
+    // Old org's cached project list must not bleed into the new org.
+    localStorage.removeItem(PROJECTS_CACHE_KEY);
+    set({
+      user: resp.user,
+      organisation: resp.organisation,
+      token: resp.token,
+      isAuthenticated: true,
+      authError: null,
+    });
   },
 
   setAuthenticated: (isAuthenticated) => set({ isAuthenticated }),
@@ -622,11 +732,50 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 // Register user getter for scoped localStorage keys
 registerAuthGetter(() => useAuthStore.getState().user);
 
+/**
+ * Restore the admin's real session from the impersonation stash. Returns
+ * true if a stash existed and was restored. Shared by the explicit exit
+ * action and the terminal-401 handler (the impersonation token hard-dies
+ * at its 30-minute TTL with no refresh token — that 401 must fall back to
+ * the stashed session, not log the admin out).
+ */
+function restoreStashedSession(): boolean {
+  const stash = readStash();
+  if (!stash) return false;
+  localStorage.removeItem(IMPERSONATION_STASH_KEY);
+  if (stash.refreshToken) {
+    api.setTokens(stash.token, stash.refreshToken);
+  } else {
+    api.setToken(stash.token);
+  }
+  persistSession(stash.token, stash.user, stash.org, stash.refreshToken ?? undefined);
+  useAuthStore.setState({
+    user: stash.user,
+    organisation: stash.org,
+    token: stash.token,
+    isAuthenticated: true,
+    impersonating: false,
+  });
+  return true;
+}
+
 // Terminal 401 (refresh definitively rejected): flip the app to logged-out
 // exactly once so the route guard redirects to the login surface. Without
 // this the auth store kept isAuthenticated=true after api.ts dropped the
 // tokens, leaving a zombie UI where every click re-toasted "Session expired".
+//
+// Impersonation exception: the impersonation token has NO refresh token, so
+// its 30-minute death lands here. Fall back to the admin's stashed real
+// session instead of logging out, then hard-navigate so every store
+// re-initializes under the admin's own org context.
 api.onSessionExpired(() => {
+  if (restoreStashedSession()) {
+    localStorage.removeItem(PROJECTS_CACHE_KEY);
+    toast.info('Impersonation session ended — you are back in your own workspace.');
+    void useAuthStore.getState().restoreSession();
+    window.location.assign('/admin');
+    return;
+  }
   clearPersistedSession();
   useAuthStore.setState({
     user: null, organisation: null, token: null, isAuthenticated: false,

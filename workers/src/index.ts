@@ -85,6 +85,24 @@ app.use('/api/*', authMiddleware);
 // Audit middleware runs AFTER auth so user context is on c — every mutation
 // gets logged with HTTP envelope; handlers add semantic detail via setAudit.
 app.use('/api/*', auditMiddleware());
+// Impersonation sessions are READ-ONLY. An L0 admin viewing a tenant may
+// look at everything the tenant's admin can, but every mutation is blocked
+// at this single choke point — no per-route opt-in to forget. The one
+// exception is the explicit exit endpoint, which deletes only the
+// impersonation session row. Runs INSIDE auditMiddleware so blocked
+// attempts still land in the audit log as 403s.
+app.use('/api/*', async (c, next) => {
+  const user = c.get('user');
+  const method = c.req.method;
+  if (
+    user?.isImpersonating &&
+    method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS' &&
+    new URL(c.req.url).pathname !== '/api/platform/impersonation/exit'
+  ) {
+    return c.json({ error: 'Impersonation sessions are read-only. Exit impersonation to make changes.' }, 403);
+  }
+  await next();
+});
 app.route('/api/org', orgRoutes);
 app.route('/api/projects', projectRoutes);
 app.route('/api/catalog', catalogRoutes);

@@ -8,9 +8,11 @@
  *
  * Sections:
  *  - Metrics: org / user / project / signup totals + last-30d activity
- *  - Organisations: full table with drill-down panel
+ *  - Organisations: full table with drill-down panel (incl. read-only
+ *    "View as tenant" impersonation — 30-min access-only session)
  *  - Audit: recent cross-org events
- *  - Action Lab: empty placeholder — Unit 3+ endpoints land here as buttons
+ *  - Action Lab: all planned units shipped — now a where-things-live index;
+ *    future endpoint smoke-test buttons land here again as needed
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -708,8 +710,28 @@ function OrgDetailPanel({ id, onClose }: { id: string; onClose: () => void }) {
   const [info, setInfo] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [impersonating, setImpersonating] = useState(false);
 
   const callerId = useAuthStore((s) => s.user?.id) ?? null;
+  const callerOrgId = useAuthStore((s) => s.organisation?.id) ?? null;
+  const enterImpersonation = useAuthStore((s) => s.enterImpersonation);
+
+  const handleImpersonate = async () => {
+    if (!confirm(
+      'Open a read-only view of this tenant as their admin?\n\n' +
+      'The session lasts 30 minutes, blocks all changes, and is fully audited.'
+    )) return;
+    setImpersonating(true);
+    const ok = await enterImpersonation(id);
+    if (ok) {
+      // Hard navigation so every store re-initializes under the tenant's
+      // org context (project list, access policy, preferences scope).
+      window.location.assign('/dashboard');
+      return;
+    }
+    setImpersonating(false);
+    setErr('Could not start impersonation — see the toast for details.');
+  };
 
   const wrap = async (userId: string, fn: () => Promise<string>) => {
     setErr(null);
@@ -733,6 +755,17 @@ function OrgDetailPanel({ id, onClose }: { id: string; onClose: () => void }) {
           <Users className="w-4 h-4" /> Org detail
         </h4>
         <div className="flex items-center gap-2">
+          {id !== callerOrgId && (
+            <button
+              onClick={handleImpersonate}
+              disabled={impersonating}
+              className="flex items-center gap-1.5 text-xs font-bold text-amber-300 hover:text-white bg-amber-500/10 hover:bg-amber-500/30 border border-amber-500/30 px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50"
+              title="Read-only 30-minute session as this tenant's admin — fully audited"
+            >
+              <Eye className="w-3 h-3" />
+              {impersonating ? 'Starting…' : 'View as tenant'}
+            </button>
+          )}
           <button
             onClick={refresh}
             className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded-lg hover:bg-slate-800/60"
@@ -893,44 +926,34 @@ function AuditSection() {
 }
 
 // ── Action Lab ───────────────────────────────────────────────────────────────
+// All planned units have shipped to their real surfaces — this section now
+// documents where each one lives instead of holding placeholders. New
+// endpoint smoke-test buttons land here again when a future unit needs one.
 function ActionLabSection() {
+  const shipped: Array<{ name: string; where: string }> = [
+    { name: 'Domain claim', where: 'Team page → Domain card (PUT /api/org/domain)' },
+    { name: 'Issue invite', where: 'Team page → Invite card (email delivery via Resend)' },
+    { name: 'Submit for review', where: 'Permits rail → SubmitForReviewModal (lifecycle v2)' },
+    { name: 'Subdivision tree', where: 'Team page → Subdivisions card (/api/org/subdivisions)' },
+    { name: 'Reparent user', where: 'Team page → Transfer card + in-app consent banner' },
+    { name: 'Impersonate org', where: 'Org detail drawer above → "View as tenant" (read-only, 30 min)' },
+  ];
   return (
     <SectionShell
       icon={<FlaskConical className="w-4 h-4" />}
       title="Action lab"
-      subtitle="Smoke-test surface for new endpoints — Unit 3+ buttons land here"
+      subtitle="All planned units shipped — smoke-test buttons for future endpoints land here"
     >
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <ActionPlaceholder
-          name="Domain claim"
-          unit="Unit 3"
-          desc="Claim @yourdomain.com via TXT proof or email loop"
-        />
-        <ActionPlaceholder
-          name="Subdivision tree"
-          unit="Unit 3"
-          desc="Declare child orgs (DBAs, subsidiaries) under parent tenant"
-        />
-        <ActionPlaceholder
-          name="Reparent user"
-          unit="Unit 3"
-          desc="Tenant owner pulls a fragmented user into their tenant"
-        />
-        <ActionPlaceholder
-          name="Issue invite"
-          unit="Unit 5"
-          desc="Send role-bound invite + email magic link"
-        />
-        <ActionPlaceholder
-          name="Submit for review"
-          unit="Unit 8"
-          desc="Push project to a code-enforcer authority inbox"
-        />
-        <ActionPlaceholder
-          name="Impersonate org"
-          unit="Unit 11"
-          desc="Issue scoped token to view a tenant as their admin"
-        />
+        {shipped.map((s) => (
+          <div key={s.name} className="rounded-xl bg-slate-900/40 border border-slate-800/40 p-3">
+            <div className="flex items-center justify-between mb-1">
+              <span className="font-bold text-sm text-slate-300">{s.name}</span>
+              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">Shipped</span>
+            </div>
+            <p className="text-[11px] text-slate-500">{s.where}</p>
+          </div>
+        ))}
       </div>
     </SectionShell>
   );
@@ -1028,18 +1051,6 @@ function ErrorBlock({ message }: { message: string }) {
     <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-400">
       <AlertTriangle className="w-4 h-4 flex-shrink-0" />
       {message}
-    </div>
-  );
-}
-
-function ActionPlaceholder({ name, unit, desc }: { name: string; unit: string; desc: string }) {
-  return (
-    <div className="rounded-xl bg-slate-900/40 border border-slate-800/40 border-dashed p-3 opacity-60">
-      <div className="flex items-center justify-between mb-1">
-        <span className="font-bold text-sm text-slate-300">{name}</span>
-        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-800/60 text-slate-500">{unit}</span>
-      </div>
-      <p className="text-[11px] text-slate-500">{desc}</p>
     </div>
   );
 }

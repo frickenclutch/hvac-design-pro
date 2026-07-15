@@ -16,6 +16,8 @@ const MfaEnrollPage = lazy(() => import('./pages/MfaEnrollPage'));
 import UserAvatarMenu from './components/UserAvatarMenu';
 import ErrorBoundary from './components/ErrorBoundary';
 import ToastContainer from './components/ToastContainer';
+import ImpersonationBanner from './components/ImpersonationBanner';
+import TransferRequestNotice from './components/TransferRequestNotice';
 
 // Lazy-load heavy pages (Three.js, jsPDF, Fabric.js stay out of initial bundle)
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -265,6 +267,12 @@ function AppLayout() {
       {/* Spotlight Search — Global Cmd+K */}
       {isAuthenticated && <SpotlightSearch />}
       {isAuthenticated && !isCadRoute && <SpotlightTrigger />}
+
+      {/* Global notices — L0 impersonation state + pending account-transfer
+          (reparent) consent. Both fixed-position; mutually exclusive in
+          practice (impersonating admins don't receive transfer requests). */}
+      <ImpersonationBanner />
+      <TransferRequestNotice />
 
       {/* Main Content Area */}
       <main id="main-content" role="main" className={`flex-1 relative overflow-y-auto ${isPublicScrollPage ? '' : 'md:overflow-hidden'} bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black`}>

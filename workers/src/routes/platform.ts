@@ -8,14 +8,17 @@
  *   - never reflect raw SQL errors to the caller
  *   - audit every destructive action (future: audit_log writes)
  *
- * This file ships READ endpoints only. Impersonation, plan overrides, and
- * billing-status changes land in a follow-up unit so they get dedicated
- * audit + undo paths.
+ * Started read-only; now also carries the L0 write surface that has grown
+ * dedicated audit paths: cross-tenant user management, access-policy
+ * overrides, and read-only org impersonation. Plan overrides and
+ * billing-status changes remain future units.
  */
 
 import { Hono } from 'hono';
 import { requirePlatformAdmin, type AuthUser } from '../middleware/auth';
 import { setAudit } from '../middleware/audit';
+import { hashToken } from '../utils/crypto';
+import { mintImpersonationSession } from '../utils/session';
 import {
   resolveAccessPolicy,
   sanitizeAccessPolicyPatch,
@@ -602,6 +605,82 @@ platformRoutes.put('/orgs/:orgId/access-policy', async (c) => {
   });
 
   return c.json({ orgId, policy: next });
+});
+
+// ── Org impersonation ───────────────────────────────────────────────────────
+//
+// POST /api/platform/orgs/:orgId/impersonate
+// Mints a 30-minute, ACCESS-ONLY, READ-ONLY session scoped to the target
+// tenant (sessions.org_id = target, user_id = the L0 admin). No refresh
+// token exists for it, so it cannot outlive its TTL. The read-only guard
+// in index.ts blocks every mutation made under it. The client stashes the
+// admin's real token pair and swaps back on exit / expiry.
+platformRoutes.post('/orgs/:orgId/impersonate', async (c) => {
+  const caller = c.get('user') as AuthUser;
+  const orgId = c.req.param('orgId');
+
+  // No chaining — an impersonation session cannot mint another one.
+  // (Defense in depth: the index.ts guard already 403s this POST.)
+  if (caller.isImpersonating) {
+    return c.json({ error: 'Already impersonating a tenant. Exit first.' }, 400);
+  }
+  if (orgId === caller.orgId) {
+    return c.json({ error: 'You are already a member of this organisation.' }, 400);
+  }
+
+  const org = await c.env.DB.prepare(
+    `SELECT id, name, org_type, slug, region_code FROM organisations WHERE id = ?`
+  ).bind(orgId).first();
+  if (!org) return c.json({ error: 'Organisation not found' }, 404);
+
+  const { accessToken, expiresAt } = await mintImpersonationSession(c.env.DB, caller.id, orgId);
+
+  setAudit(c, {
+    action: 'platform.org.impersonate',
+    entityType: 'organisation',
+    entityId: orgId,
+    entityLabel: org.name as string,
+    targetOrgId: orgId,
+    isPlatformAction: true,
+    detail: { expiresAt, readOnly: true },
+  });
+
+  return c.json({
+    token: accessToken,
+    expiresAt,
+    organisation: {
+      id: org.id, name: org.name, type: org.org_type,
+      slug: org.slug, regionCode: org.region_code,
+    },
+  });
+});
+
+// POST /api/platform/impersonation/exit
+// Deletes ONLY the current impersonation session row. Deliberately NOT
+// /api/auth/logout — logout revokes ALL of the user's refresh tokens,
+// which would kill the admin's real (stashed) session too. This is the
+// single mutation the index.ts read-only guard allowlists.
+platformRoutes.post('/impersonation/exit', async (c) => {
+  const caller = c.get('user') as AuthUser;
+  if (!caller.isImpersonating) {
+    return c.json({ error: 'Not an impersonation session' }, 400);
+  }
+
+  const authHeader = c.req.header('Authorization');
+  const token = authHeader!.slice(7); // authMiddleware already validated shape
+  await c.env.DB.prepare(
+    `DELETE FROM sessions WHERE token = ? AND is_impersonation = 1`
+  ).bind(await hashToken(token)).run();
+
+  setAudit(c, {
+    action: 'platform.org.impersonate_exit',
+    entityType: 'organisation',
+    entityId: caller.orgId,
+    targetOrgId: caller.orgId,
+    isPlatformAction: true,
+  });
+
+  return c.json({ ok: true });
 });
 
 // ── GET /api/platform/me ────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ import { Link } from 'react-router-dom';
 import {
   Users, UserPlus, Globe, Mail, Trash2, Shield, RefreshCw,
   AlertTriangle, CheckCircle2, Copy, Crown, ShieldCheck, Activity, RotateCcw,
+  Building2, ArrowRightLeft,
 } from 'lucide-react';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { api } from '../lib/api';
@@ -47,7 +48,12 @@ interface Invite {
    *  Returned by GET /api/org/team; the row `id` deliberately is NOT usable
    *  in the link (redeem matches WHERE token = ?). */
   token: string;
+  /** 'new_user' = classic signup invite; 'reparent' = account-transfer
+   *  request the target user accepts/declines in-app (no redeem link). */
+  kind: 'new_user' | 'reparent';
 }
+
+type Subdivision = Awaited<ReturnType<typeof api.teamSubdivisions>>['subdivisions'][number];
 
 const ROLES: Role[] = ['admin', 'engineer', 'tech', 'viewer'];
 
@@ -58,6 +64,8 @@ export default function TeamPage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
   const [domain, setDomain] = useState<{ claimed: string | null; verifiedAt: string | null }>({ claimed: null, verifiedAt: null });
+  const [subdivisions, setSubdivisions] = useState<Subdivision[]>([]);
+  const [parentOrg, setParentOrg] = useState<{ id: string; name: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -119,10 +127,17 @@ export default function TeamPage() {
     setLoading(true);
     setErr(null);
     try {
-      const data = await api.teamList();
+      const [data, subs] = await Promise.all([
+        api.teamList(),
+        api.teamSubdivisions().catch(() => null), // tolerate pre-migration worker
+      ]);
       setMembers(data.members);
       setInvites(data.invites);
       setDomain(data.domain);
+      if (subs) {
+        setSubdivisions(subs.subdivisions);
+        setParentOrg(subs.parent);
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -144,6 +159,9 @@ export default function TeamPage() {
               <h2 className="text-3xl font-bold text-white">Team</h2>
               <p className="text-slate-400 text-sm">
                 {orgName ? `${orgName} · ` : ''}members of your organisation
+                {parentOrg && (
+                  <span className="text-slate-500"> · subdivision of <span className="text-slate-300">{parentOrg.name}</span></span>
+                )}
               </p>
             </div>
             <Link
@@ -191,9 +209,10 @@ export default function TeamPage() {
           {isAdmin && (
             <InviteCard
               defaultDomain={domain.claimed}
-              onInvite={async (email, role) => {
+              subdivisions={subdivisions}
+              onInvite={async (email, role, subdivisionId) => {
                 try {
-                  const r = await api.teamInvite(email, role);
+                  const r = await api.teamInvite(email, role, subdivisionId);
                   // Surface email delivery status — a green message means
                   // the recipient should already see the invitation in
                   // their inbox; a yellow message means delivery failed
@@ -205,6 +224,52 @@ export default function TeamPage() {
                       `Invite created for ${email}, but email delivery failed${r.emailError ? ` (${r.emailError})` : ''}. Use the copy button below to share the link manually.`
                     );
                   }
+                  refresh();
+                } catch (e) {
+                  setErr(e instanceof Error ? e.message : String(e));
+                }
+              }}
+            />
+          )}
+
+          {isAdmin && (
+            <TransferCard
+              onRequest={async (email, role) => {
+                try {
+                  const r = await api.teamReparent(email, role);
+                  setInfo(
+                    r.emailSent
+                      ? `Transfer request sent to ${email} — they'll see it in-app and by email.`
+                      : `Transfer request created for ${email}. Email delivery failed — they'll still see it in-app on their next sign-in.`
+                  );
+                  refresh();
+                } catch (e) {
+                  setErr(e instanceof Error ? e.message : String(e));
+                }
+              }}
+            />
+          )}
+
+          {/* Subdivisions — hidden for orgs that are themselves a subdivision
+              (single-level tree) */}
+          {!parentOrg && (
+            <SubdivisionsCard
+              subdivisions={subdivisions}
+              isAdmin={isAdmin}
+              onCreate={async (name) => {
+                try {
+                  await api.teamCreateSubdivision(name);
+                  setInfo(`Subdivision "${name}" created. Invite its first admin from the invite card above.`);
+                  refresh();
+                } catch (e) {
+                  setErr(e instanceof Error ? e.message : String(e));
+                }
+              }}
+              onDelete={async (sub) => {
+                if (!confirm(`Remove the empty subdivision "${sub.name}"?`)) return;
+                try {
+                  await api.teamDeleteSubdivision(sub.id);
+                  setInfo(`Subdivision "${sub.name}" removed.`);
                   refresh();
                 } catch (e) {
                   setErr(e instanceof Error ? e.message : String(e));
@@ -467,9 +532,16 @@ function DomainCard({ domain, isAdmin, onUpdate }: { domain: { claimed: string |
   );
 }
 
-function InviteCard({ defaultDomain, onInvite }: { defaultDomain: string | null; onInvite: (email: string, role: Role) => void }) {
+function InviteCard({ defaultDomain, subdivisions, onInvite }: {
+  defaultDomain: string | null;
+  subdivisions: Subdivision[];
+  onInvite: (email: string, role: Role, subdivisionId?: string) => void;
+}) {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<Role>('tech');
+  // '' = this org; otherwise a child org id. Only rendered when the tenant
+  // has declared subdivisions.
+  const [target, setTarget] = useState('');
 
   return (
     <Section
@@ -492,10 +564,21 @@ function InviteCard({ defaultDomain, onInvite }: { defaultDomain: string | null;
         >
           {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
+        {subdivisions.length > 0 && (
+          <select
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            className="bg-slate-900/60 border border-slate-700/50 rounded-xl py-2 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+            title="Which organisation the member joins"
+          >
+            <option value="">This organisation</option>
+            {subdivisions.map((s) => <option key={s.id} value={s.id}>↳ {s.name}</option>)}
+          </select>
+        )}
         <button
           onClick={() => {
             if (!email.trim()) return;
-            onInvite(email.trim(), role);
+            onInvite(email.trim(), role, target || undefined);
             setEmail('');
           }}
           className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-emerald-500/20 transition-all flex items-center gap-1.5"
@@ -505,6 +588,120 @@ function InviteCard({ defaultDomain, onInvite }: { defaultDomain: string | null;
       </div>
       <p className="text-[11px] text-slate-500 mt-3">
         The invited address gets an email with a one-click acceptance link. If delivery fails (corporate filter, typo'd domain) use the copy button in the pending list to share the link manually.
+        {subdivisions.length > 0 && ' A subdivision’s first member must be an admin.'}
+      </p>
+    </Section>
+  );
+}
+
+function TransferCard({ onRequest }: { onRequest: (email: string, role: Role) => void }) {
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState<Role>('tech');
+
+  return (
+    <Section
+      icon={<ArrowRightLeft className="w-4 h-4" />}
+      title="Bring in an existing account"
+      subtitle="For someone who already registered solo — moves their account here with their consent"
+    >
+      <div className="flex flex-col md:flex-row gap-2">
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="their-registered@email.com"
+          className="flex-1 bg-slate-900/60 border border-slate-700/50 rounded-xl py-2 px-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+        />
+        <select
+          value={role}
+          onChange={(e) => setRole(e.target.value as Role)}
+          className="bg-slate-900/60 border border-slate-700/50 rounded-xl py-2 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+        >
+          {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+        <button
+          onClick={() => {
+            if (!email.trim()) return;
+            onRequest(email.trim(), role);
+            setEmail('');
+          }}
+          className="bg-sky-500/10 text-sky-400 border border-sky-500/30 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-sky-500/20 transition-all flex items-center gap-1.5"
+        >
+          <ArrowRightLeft className="w-3.5 h-3.5" /> Request transfer
+        </button>
+      </div>
+      <p className="text-[11px] text-slate-500 mt-3">
+        Nothing moves until they accept in-app. Their account transfers; their existing projects stay in their old workspace. Only accounts that are the sole member of their own organisation can be transferred — anything else goes through platform support.
+      </p>
+    </Section>
+  );
+}
+
+function SubdivisionsCard({ subdivisions, isAdmin, onCreate, onDelete }: {
+  subdivisions: Subdivision[];
+  isAdmin: boolean;
+  onCreate: (name: string) => void;
+  onDelete: (sub: Subdivision) => void;
+}) {
+  const [name, setName] = useState('');
+
+  return (
+    <Section
+      icon={<Building2 className="w-4 h-4" />}
+      title={`Subdivisions (${subdivisions.length})`}
+      subtitle="Child organisations — DBAs, subsidiaries, branch offices — under this tenant"
+    >
+      {subdivisions.length === 0 ? (
+        <p className="text-xs text-slate-500 italic mb-3">No subdivisions declared.</p>
+      ) : (
+        <div className="space-y-2 mb-3">
+          {subdivisions.map((s) => (
+            <div key={s.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-900/40 border border-slate-800/40 text-sm flex-wrap">
+              <Building2 className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
+              <span className="font-bold text-slate-200 flex-1 truncate">{s.name}</span>
+              <span className="text-[10px] text-slate-500 font-mono">{s.user_count} member{s.user_count === 1 ? '' : 's'}</span>
+              <span className="text-[10px] text-slate-500 font-mono">{s.project_count} project{s.project_count === 1 ? '' : 's'}</span>
+              {s.pending_invite_count > 0 && (
+                <span className="text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-400">
+                  {s.pending_invite_count} invite{s.pending_invite_count === 1 ? '' : 's'} pending
+                </span>
+              )}
+              {isAdmin && s.user_count === 0 && s.project_count === 0 && (
+                <button
+                  onClick={() => onDelete(s)}
+                  className="text-slate-400 hover:text-red-400 text-xs font-bold flex items-center gap-1"
+                  title="Remove empty subdivision"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {isAdmin && (
+        <div className="flex flex-col md:flex-row gap-2">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Subdivision name — e.g. Howland Pump — Potsdam"
+            className="flex-1 bg-slate-900/60 border border-slate-700/50 rounded-xl py-2 px-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+          />
+          <button
+            onClick={() => {
+              const n = name.trim();
+              if (n.length < 2) return;
+              onCreate(n);
+              setName('');
+            }}
+            className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-emerald-500/20 transition-all"
+          >
+            Declare subdivision
+          </button>
+        </div>
+      )}
+      <p className="text-[11px] text-slate-500 mt-3">
+        Each subdivision is a full workspace with its own members and projects. Staff it via the invite card above (choose the subdivision as the destination); its first member must be an admin. Only empty subdivisions can be removed.
       </p>
     </Section>
   );
@@ -520,17 +717,24 @@ function PendingInvitesCard({ invites, isAdmin, onRevoke, onCopy }: { invites: I
           {invites.map((inv) => (
             <div key={inv.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-900/40 border border-slate-800/40 text-sm flex-wrap">
               <span className="font-mono text-slate-200 flex-1 truncate">{inv.invited_email}</span>
+              {inv.kind === 'reparent' && (
+                <span className="text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-400" title="Account-transfer request — the user accepts or declines in-app">
+                  Transfer
+                </span>
+              )}
               <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold px-2 py-0.5 rounded bg-slate-800/60">{inv.invited_role}</span>
               <span className="text-[10px] text-slate-600 font-mono">expires {new Date(inv.expires_at).toLocaleDateString()}</span>
               {isAdmin && (
                 <>
-                  <button
-                    onClick={() => onCopy(inv.token)}
-                    className="text-slate-400 hover:text-emerald-400 text-xs font-bold flex items-center gap-1"
-                    title="Copy redemption link"
-                  >
-                    <Copy className="w-3 h-3" />
-                  </button>
+                  {inv.kind !== 'reparent' && (
+                    <button
+                      onClick={() => onCopy(inv.token)}
+                      className="text-slate-400 hover:text-emerald-400 text-xs font-bold flex items-center gap-1"
+                      title="Copy redemption link"
+                    >
+                      <Copy className="w-3 h-3" />
+                    </button>
+                  )}
                   <button
                     onClick={() => onRevoke(inv.id)}
                     className="text-slate-400 hover:text-red-400 text-xs font-bold flex items-center gap-1"

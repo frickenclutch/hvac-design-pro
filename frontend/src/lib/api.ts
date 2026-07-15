@@ -766,6 +766,25 @@ class ApiClient {
     );
   }
 
+  // ── L0 org impersonation ────────────────────────────────────────────────
+  // Mints a 30-minute, access-only, READ-ONLY session scoped to the target
+  // tenant. The auth store stashes the admin's real pair and swaps this
+  // token in; exit (or TTL expiry) swaps back.
+  async platformImpersonateOrg(orgId: string) {
+    return this.request<{
+      token: string;
+      expiresAt: string;
+      organisation: { id: string; name: string; type: string; slug: string; regionCode: string };
+    }>(`/api/platform/orgs/${encodeURIComponent(orgId)}/impersonate`, { method: 'POST' });
+  }
+
+  /** Kills ONLY the current impersonation session row server-side.
+   *  Deliberately not /api/auth/logout — that revokes the admin's whole
+   *  refresh chain, including the stashed real session. */
+  async platformExitImpersonation() {
+    return this.request<{ ok: true }>('/api/platform/impersonation/exit', { method: 'POST' });
+  }
+
   // ── Audit log ────────────────────────────────────────────────────────────
   // Tenant scope: admins see org-wide feed (own + target_org_id), non-admins
   // see only their own. Pass scope='platform' to get the cross-tenant view
@@ -882,6 +901,9 @@ class ApiClient {
         status: string; invited_by: string;
         expires_at: string; created_at: string;
         token: string;
+        // 'new_user' = classic signup invite; 'reparent' = account-transfer
+        // request awaiting the target user's in-app consent.
+        kind: 'new_user' | 'reparent';
       }>;
       domain: { claimed: string | null; verifiedAt: string | null };
     }>('/api/org/team');
@@ -894,7 +916,7 @@ class ApiClient {
     );
   }
 
-  async teamInvite(email: string, role: 'admin' | 'engineer' | 'tech' | 'viewer' = 'tech') {
+  async teamInvite(email: string, role: 'admin' | 'engineer' | 'tech' | 'viewer' = 'tech', subdivisionId?: string) {
     return this.request<{
       id: string;
       invitedEmail: string;
@@ -907,7 +929,7 @@ class ApiClient {
       emailError: string | null;
     }>('/api/org/invite', {
       method: 'POST',
-      body: JSON.stringify({ email, role }),
+      body: JSON.stringify(subdivisionId ? { email, role, subdivisionId } : { email, role }),
     });
   }
 
@@ -955,6 +977,78 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ role: proposedRole }),
     });
+  }
+
+  // ── Subdivisions (child orgs — DBAs, subsidiaries) ──────────────────────
+  async teamSubdivisions() {
+    return this.request<{
+      parent: { id: string; name: string } | null;
+      subdivisions: Array<{
+        id: string; name: string; slug: string; org_type: string;
+        created_at: string;
+        user_count: number; project_count: number; pending_invite_count: number;
+      }>;
+    }>('/api/org/subdivisions');
+  }
+
+  async teamCreateSubdivision(name: string, orgType: 'company' | 'municipality' | 'individual' = 'company') {
+    return this.request<{
+      subdivision: { id: string; name: string; slug: string; orgType: string; userCount: number; projectCount: number };
+    }>('/api/org/subdivisions', {
+      method: 'POST',
+      body: JSON.stringify({ name, orgType }),
+    });
+  }
+
+  async teamDeleteSubdivision(id: string) {
+    return this.request<{ ok: true }>(`/api/org/subdivisions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  // ── Reparent (account transfer) ─────────────────────────────────────────
+  // Admin side: request to pull a fragmented (solo-org) user in. The move
+  // happens only when the target user accepts via authTransferAccept.
+  async teamReparent(email: string, role: 'admin' | 'engineer' | 'tech' | 'viewer' = 'tech') {
+    return this.request<{
+      id: string;
+      invitedEmail: string;
+      invitedRole: string;
+      expiresAt: string;
+      emailSent: boolean;
+      emailError: string | null;
+    }>('/api/org/reparent', {
+      method: 'POST',
+      body: JSON.stringify({ email, role }),
+    });
+  }
+
+  // Target-user side: pending transfer requests addressed to my email.
+  async authTransfers() {
+    return this.request<{
+      transfers: Array<{
+        id: string; invited_role: string; expires_at: string; created_at: string;
+        org_name: string | null; org_type: string | null;
+        inviter_first_name: string | null; inviter_last_name: string | null;
+        inviter_email: string | null;
+      }>;
+    }>('/api/auth/transfers');
+  }
+
+  /** Accept a transfer: my account moves into the requesting org. Returns a
+   *  fresh login-shaped session for the NEW org (all old tokens are dead). */
+  async authTransferAccept(id: string) {
+    return this.request<{
+      token: string;
+      refreshToken: string;
+      user: {
+        id: string; email: string; firstName: string | null; lastName: string | null;
+        role: string; isVerified: boolean; isPlatformAdmin: boolean; isPermitAuthority: boolean;
+      };
+      organisation: { id: string; name: string; type: string; slug: string; regionCode: string };
+    }>(`/api/auth/transfers/${encodeURIComponent(id)}/accept`, { method: 'POST' });
+  }
+
+  async authTransferDecline(id: string) {
+    return this.request<{ ok: true }>(`/api/auth/transfers/${encodeURIComponent(id)}/decline`, { method: 'POST' });
   }
 
   // ── Community / forum ───────────────────────────────────────────────────
