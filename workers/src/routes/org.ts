@@ -1,7 +1,9 @@
 import { Hono } from 'hono';
 import { setAudit } from '../middleware/audit';
-import { sendEmail, buildInviteEmail } from '../utils/email';
+import { sendEmail, buildInviteEmail, buildReparentEmail } from '../utils/email';
 import { computeRoleChangePlan } from '../utils/roleChange';
+import { uniqueOrgSlug } from '../utils/id';
+import { nowIso } from '../utils/time';
 import {
   resolveAccessPolicy,
   sanitizeAccessPolicyPatch,
@@ -378,13 +380,13 @@ orgRoutes.get('/team', async (c) => {
   // trust level as the POST /invite response, which already returns it to
   // the same admin audience.
   const { results: invites } = await db.prepare(
-    `SELECT id, invited_email, invited_role, status,
+    `SELECT id, invited_email, invited_role, status, kind,
             invited_by, expires_at, created_at, token
      FROM org_invites
      WHERE org_id = ? AND status = 'pending'
-       AND expires_at > datetime('now')
+       AND expires_at > ?
      ORDER BY created_at DESC`
-  ).bind(user.orgId).all();
+  ).bind(user.orgId, nowIso()).all();
 
   const org = await db.prepare(
     `SELECT claimed_domain, domain_verified_at
@@ -470,12 +472,37 @@ orgRoutes.post('/invite', async (c) => {
   const body = await c.req.json();
   const email = (body.email ?? '').toString().toLowerCase().trim();
   const role = (body.role ?? 'tech').toString();
+  // Optional: invite into one of the caller org's subdivisions instead of
+  // the caller org itself. Validated below — the target MUST be a child of
+  // the caller's org (never a client-trusted arbitrary org id).
+  const subdivisionId = body.subdivisionId ? String(body.subdivisionId) : null;
 
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return c.json({ error: 'Valid email required' }, 400);
   }
   if (!['admin', 'engineer', 'tech', 'viewer'].includes(role)) {
     return c.json({ error: 'Invalid role' }, 400);
+  }
+
+  let targetOrgId = user.orgId;
+  if (subdivisionId) {
+    const child = await c.env.DB.prepare(
+      `SELECT id FROM organisations WHERE id = ? AND parent_org_id = ?`
+    ).bind(subdivisionId, user.orgId).first();
+    if (!child) {
+      return c.json({ error: 'Subdivision not found under your organisation.' }, 404);
+    }
+    // A subdivision's first member must be an admin — an org with no
+    // reachable admin is stranded (same continuity principle as the
+    // role-change consequence engine).
+    const admins = await c.env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM users
+       WHERE org_id = ? AND role = 'admin' AND status = 'active'`
+    ).bind(subdivisionId).first();
+    if (Number(admins?.n ?? 0) === 0 && role !== 'admin') {
+      return c.json({ error: 'The first member of a subdivision must be an admin.' }, 400);
+    }
+    targetOrgId = subdivisionId;
   }
 
   // Reject if email already belongs to a user (anywhere on the platform —
@@ -485,7 +512,7 @@ orgRoutes.post('/invite', async (c) => {
   ).bind(email).first();
   if (existing) {
     return c.json({
-      error: existing.org_id === user.orgId
+      error: existing.org_id === targetOrgId
         ? 'This user is already a member of your organisation.'
         : 'This email is already registered with another organisation.',
     }, 409);
@@ -496,8 +523,8 @@ orgRoutes.post('/invite', async (c) => {
   const dup = await c.env.DB.prepare(
     `SELECT id FROM org_invites
      WHERE org_id = ? AND invited_email = ? AND status = 'pending'
-       AND expires_at > datetime('now')`
-  ).bind(user.orgId, email).first();
+       AND expires_at > ?`
+  ).bind(targetOrgId, email, nowIso()).first();
   if (dup) {
     return c.json({ error: 'An invite is already pending for this email.' }, 409);
   }
@@ -511,14 +538,15 @@ orgRoutes.post('/invite', async (c) => {
     `INSERT INTO org_invites
        (id, org_id, invited_email, invited_role, invited_by, token, expires_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).bind(id, user.orgId, email, role, user.id, token, expiresAt).run();
+  ).bind(id, targetOrgId, email, role, user.id, token, expiresAt).run();
 
   // Pull org name + inviter name for the email body. Both are denormalized
   // into the email so the recipient can verify the invite is from someone
-  // they expect before clicking through.
+  // they expect before clicking through. For subdivision invites the email
+  // carries the SUBDIVISION's name — that's the org they're joining.
   const orgRow = await c.env.DB.prepare(
     `SELECT name FROM organisations WHERE id = ?`
-  ).bind(user.orgId).first();
+  ).bind(targetOrgId).first();
   const inviterRow = await c.env.DB.prepare(
     `SELECT first_name, last_name, email FROM users WHERE id = ?`
   ).bind(user.id).first();
@@ -568,6 +596,7 @@ orgRoutes.post('/invite', async (c) => {
     detail: {
       invitedEmail: email,
       invitedRole: role,
+      subdivisionId: subdivisionId ?? undefined,
       expiresAt,
       emailSent: emailResult?.ok === true,
       emailStatus: emailResult?.status ?? null,
@@ -618,6 +647,271 @@ orgRoutes.delete('/invites/:id', async (c) => {
   });
 
   return c.json({ ok: true });
+});
+
+// ── Subdivision tree ────────────────────────────────────────────────────────
+//
+// A tenant can declare child organisations (DBAs, subsidiaries) under
+// itself. Children are FULL organisations rows — every org_id-scoped
+// query, invite, project, and calc works against them unchanged. The tree
+// is single-level: an org with a parent cannot itself parent children
+// (keeps cycles impossible and the mental model simple).
+
+// GET /api/org/subdivisions — list children + parent context. Any member.
+orgRoutes.get('/subdivisions', async (c) => {
+  const user = c.get('user');
+  const db = c.env.DB;
+
+  // If the caller's org is itself a subdivision, surface the parent for
+  // the UI breadcrumb ("part of Howland Mechanical Group").
+  const self = await db.prepare(
+    `SELECT parent_org_id FROM organisations WHERE id = ?`
+  ).bind(user.orgId).first();
+  let parent: { id: string; name: string } | null = null;
+  if (self?.parent_org_id) {
+    const p = await db.prepare(
+      `SELECT id, name FROM organisations WHERE id = ?`
+    ).bind(self.parent_org_id).first();
+    if (p) parent = { id: p.id as string, name: p.name as string };
+  }
+
+  const { results: subdivisions } = await db.prepare(
+    `SELECT o.id, o.name, o.slug, o.org_type, o.created_at,
+       (SELECT COUNT(*) FROM users u WHERE u.org_id = o.id AND u.status = 'active') AS user_count,
+       (SELECT COUNT(*) FROM projects p WHERE p.org_id = o.id) AS project_count,
+       (SELECT COUNT(*) FROM org_invites i WHERE i.org_id = o.id AND i.status = 'pending' AND i.expires_at > ?) AS pending_invite_count
+     FROM organisations o
+     WHERE o.parent_org_id = ?
+     ORDER BY o.created_at ASC`
+  ).bind(nowIso(), user.orgId).all();
+
+  return c.json({ parent, subdivisions });
+});
+
+// POST /api/org/subdivisions — declare a child org (admin-only).
+orgRoutes.post('/subdivisions', async (c) => {
+  const user = c.get('user');
+  if (user.role !== 'admin') {
+    return c.json({ error: 'Only admins can create subdivisions' }, 403);
+  }
+
+  const body = await c.req.json();
+  const name = (body.name ?? '').toString().trim().slice(0, 120);
+  const orgType = (body.orgType ?? 'company').toString();
+  if (name.length < 2) {
+    return c.json({ error: 'Subdivision name must be at least 2 characters' }, 400);
+  }
+  if (!['company', 'municipality', 'individual'].includes(orgType)) {
+    return c.json({ error: 'Invalid organisation type' }, 400);
+  }
+
+  // Single-level tree: a subdivision cannot parent further subdivisions.
+  const self = await c.env.DB.prepare(
+    `SELECT parent_org_id, region_code FROM organisations WHERE id = ?`
+  ).bind(user.orgId).first();
+  if (self?.parent_org_id) {
+    return c.json({ error: 'A subdivision cannot have its own subdivisions.' }, 400);
+  }
+
+  const id = crypto.randomUUID();
+  const slug = await uniqueOrgSlug(c.env.DB, name);
+  await c.env.DB.prepare(
+    `INSERT INTO organisations (id, slug, name, org_type, region_code, parent_org_id)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).bind(id, slug, name, orgType, (self?.region_code as string) || 'NA_ASHRAE', user.orgId).run();
+
+  setAudit(c, {
+    action: 'org.subdivision.create',
+    entityType: 'organisation',
+    entityId: id,
+    entityLabel: name,
+    targetOrgId: id,
+    afterValue: { name, org_type: orgType, parent_org_id: user.orgId },
+  });
+
+  return c.json({
+    subdivision: { id, name, slug, orgType, userCount: 0, projectCount: 0 },
+  }, 201);
+});
+
+// DELETE /api/org/subdivisions/:id — remove an EMPTY child org (admin-only).
+// Only containers with zero users (any status) and zero projects can be
+// removed — anything with attribution history stays, per the never-orphan
+// principle. Pending invites into the child are revoked.
+orgRoutes.delete('/subdivisions/:id', async (c) => {
+  const user = c.get('user');
+  if (user.role !== 'admin') {
+    return c.json({ error: 'Only admins can remove subdivisions' }, 403);
+  }
+  const id = c.req.param('id');
+
+  const child = await c.env.DB.prepare(
+    `SELECT id, name FROM organisations WHERE id = ? AND parent_org_id = ?`
+  ).bind(id, user.orgId).first();
+  if (!child) return c.json({ error: 'Subdivision not found under your organisation.' }, 404);
+
+  const counts = await c.env.DB.prepare(
+    `SELECT
+       (SELECT COUNT(*) FROM users WHERE org_id = ?) AS users,
+       (SELECT COUNT(*) FROM projects WHERE org_id = ?) AS projects`
+  ).bind(id, id).first();
+  if (Number(counts?.users ?? 0) > 0 || Number(counts?.projects ?? 0) > 0) {
+    return c.json({
+      error: 'Only empty subdivisions can be removed. This one has members or projects.',
+    }, 409);
+  }
+
+  await c.env.DB.prepare(
+    `UPDATE org_invites SET status = 'revoked' WHERE org_id = ? AND status = 'pending'`
+  ).bind(id).run();
+  await c.env.DB.prepare(`DELETE FROM organisations WHERE id = ?`).bind(id).run();
+
+  setAudit(c, {
+    action: 'org.subdivision.remove',
+    entityType: 'organisation',
+    entityId: id,
+    entityLabel: child.name as string,
+    targetOrgId: id,
+    beforeValue: { name: child.name, parent_org_id: user.orgId },
+  });
+
+  return c.json({ ok: true });
+});
+
+// ── POST /api/org/reparent — request to pull a fragmented user in ───────────
+//
+// "Fragmented user" = someone who registered standalone into their own
+// solo org (the default self-signup path) who should really be inside
+// this tenant. This creates a CONSENT-BASED transfer request:
+//   1. admin here names the email (+ role they'd get)
+//   2. an org_invites row with kind='reparent' is created
+//   3. the target user sees it in-app (GET /api/auth/transfers) and on
+//      email, and explicitly accepts or declines
+// Nothing moves without the target's acceptance. Users in multi-member
+// orgs canNOT be pulled — that's a poaching vector, not fragmentation;
+// those cases go through platform support (L0).
+//
+// NOTE: the user's PROJECTS DO NOT MOVE — they stay in the old org. v1
+// moves the person, not the data (append-only calc history and project
+// attribution stay intact in the abandoned org, visible to L0).
+orgRoutes.post('/reparent', async (c) => {
+  const user = c.get('user');
+  if (user.role !== 'admin') {
+    return c.json({ error: 'Only admins can request a user transfer' }, 403);
+  }
+
+  const body = await c.req.json();
+  const email = (body.email ?? '').toString().toLowerCase().trim();
+  const role = (body.role ?? 'tech').toString();
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return c.json({ error: 'Valid email required' }, 400);
+  }
+  if (!['admin', 'engineer', 'tech', 'viewer'].includes(role)) {
+    return c.json({ error: 'Invalid role' }, 400);
+  }
+
+  const target = await c.env.DB.prepare(
+    `SELECT id, org_id, status FROM users WHERE email = ?`
+  ).bind(email).first();
+  if (!target) {
+    return c.json({
+      error: 'No account exists with that email. Send a regular invite instead.',
+    }, 404);
+  }
+  if (target.org_id === user.orgId) {
+    return c.json({ error: 'This user is already a member of your organisation.' }, 409);
+  }
+  if (target.status !== 'active') {
+    return c.json({ error: 'This account is not active.' }, 409);
+  }
+
+  // Fragmentation check: only sole active members of their org can be
+  // pulled. Anything else needs platform support.
+  const peers = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM users WHERE org_id = ? AND status = 'active'`
+  ).bind(target.org_id).first();
+  if (Number(peers?.n ?? 0) > 1) {
+    return c.json({
+      error: 'This user belongs to a multi-member organisation and cannot be transferred from here. Contact platform support.',
+    }, 409);
+  }
+
+  const dup = await c.env.DB.prepare(
+    `SELECT id FROM org_invites
+     WHERE org_id = ? AND invited_email = ? AND kind = 'reparent'
+       AND status = 'pending' AND expires_at > ?`
+  ).bind(user.orgId, email, nowIso()).first();
+  if (dup) {
+    return c.json({ error: 'A transfer request is already pending for this user.' }, 409);
+  }
+
+  const id = crypto.randomUUID();
+  const token = inviteToken();
+  const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+
+  await c.env.DB.prepare(
+    `INSERT INTO org_invites
+       (id, org_id, invited_email, invited_role, invited_by, token, expires_at, kind)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'reparent')`
+  ).bind(id, user.orgId, email, role, user.id, token, expiresAt).run();
+
+  const orgRow = await c.env.DB.prepare(
+    `SELECT name FROM organisations WHERE id = ?`
+  ).bind(user.orgId).first();
+  const inviterRow = await c.env.DB.prepare(
+    `SELECT first_name, last_name, email FROM users WHERE id = ?`
+  ).bind(user.id).first();
+  const inviterName = [
+    inviterRow?.first_name as string | undefined,
+    inviterRow?.last_name as string | undefined,
+  ].filter(Boolean).join(' ').trim() || (inviterRow?.email as string) || 'An administrator';
+
+  // The consent step is IN-APP (authenticated /api/auth/transfers), so the
+  // email just points the user at the app — no token in the link.
+  const frontendBase = c.env.FRONTEND_BASE_URL || 'https://hvac-design-pro.pages.dev';
+  const reparentEmail = buildReparentEmail({
+    orgName: (orgRow?.name as string) || 'their workspace',
+    inviterName,
+    inviterEmail: (inviterRow?.email as string) || '',
+    invitedRole: role,
+    appUrl: `${frontendBase}/dashboard`,
+    expiresAt,
+  });
+  reparentEmail.to = email;
+  const fromAddress = c.env.INVITE_FROM_ADDRESS || c.env.FEEDBACK_FROM_ADDRESS;
+  if (fromAddress) reparentEmail.from = fromAddress;
+
+  let emailResult: Awaited<ReturnType<typeof sendEmail>> | null = null;
+  try {
+    emailResult = await sendEmail(c.env.RESEND_API_KEY, reparentEmail);
+  } catch (err) {
+    console.error('[org.reparent] email send threw:', err);
+  }
+
+  setAudit(c, {
+    action: 'org.reparent.request',
+    entityType: 'org_invite',
+    entityId: id,
+    entityLabel: email,
+    detail: {
+      invitedEmail: email,
+      invitedRole: role,
+      targetUserId: target.id as string,
+      fromOrgId: target.org_id as string,
+      expiresAt,
+      emailSent: emailResult?.ok === true,
+    },
+  });
+
+  return c.json({
+    id,
+    invitedEmail: email,
+    invitedRole: role,
+    expiresAt,
+    emailSent: emailResult?.ok === true,
+    emailError: emailResult?.ok ? null : (emailResult?.error ?? 'Email delivery is not configured'),
+  }, 201);
 });
 
 // ── POST /api/org/users/:id/role-change/preflight ───────────────────────────

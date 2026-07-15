@@ -1,5 +1,6 @@
 import { Context, Next } from 'hono';
 import { hashToken } from '../utils/crypto';
+import { nowIso } from '../utils/time';
 
 export interface AuthUser {
   id: string;
@@ -11,6 +12,11 @@ export interface AuthUser {
    *  When true, the user can act on permit submissions sent to their org
    *  (claim, approve, deny, request changes, post internal comments). */
   isPermitAuthority: boolean;
+  /** True when this session is an L0 impersonation of another tenant
+   *  (sessions.is_impersonation = 1). orgId is the TARGET org; id/email
+   *  remain the L0 admin. The index.ts guard blocks all mutations on
+   *  impersonation sessions except the explicit exit endpoint. */
+  isImpersonating: boolean;
 }
 
 declare module 'hono' {
@@ -32,14 +38,18 @@ export async function authMiddleware(c: Context, next: Next) {
   // working immediately, not linger until its 30-day expiry. Deactivation
   // also purges their sessions, but this WHERE is the authoritative
   // backstop on the hot path for every authed request.
+  // expires_at is written as a JS ISO string; compare against a bound ISO
+  // "now", never datetime('now') — the formats differ at the 'T' and the
+  // string comparison silently extends every expiry to UTC midnight (see
+  // utils/time.ts).
   const session = await db.prepare(
-    `SELECT s.user_id, s.org_id, u.email, u.role,
+    `SELECT s.user_id, s.org_id, s.is_impersonation, u.email, u.role,
             u.is_platform_admin, u.is_permit_authority
      FROM sessions s
      JOIN users u ON u.id = s.user_id
-     WHERE s.token = ? AND s.expires_at > datetime('now')
+     WHERE s.token = ? AND s.expires_at > ?
        AND u.status = 'active'`
-  ).bind(await hashToken(token)).first();
+  ).bind(await hashToken(token), nowIso()).first();
 
   if (!session) {
     return c.json({ error: 'Invalid or expired session' }, 401);
@@ -52,6 +62,7 @@ export async function authMiddleware(c: Context, next: Next) {
     role: session.role as string,
     isPlatformAdmin: Number(session.is_platform_admin ?? 0) === 1,
     isPermitAuthority: Number(session.is_permit_authority ?? 0) === 1,
+    isImpersonating: Number(session.is_impersonation ?? 0) === 1,
   });
 
   // Update last_seen

@@ -61,3 +61,30 @@ export async function mintTokenPair(
 
   return { accessToken, refreshToken };
 }
+
+/**
+ * Issue an IMPERSONATION session — L0 platform admin viewing a tenant as
+ * its admin. Deliberately different from mintTokenPair:
+ *   • ACCESS-ONLY — no refresh token row, so the session cannot be renewed;
+ *     it hard-dies at the 30-minute TTL and the client falls back to the
+ *     admin's stashed real session.
+ *   • is_impersonation = 1 rides the session row so authMiddleware flags
+ *     every request and the index.ts mutation guard enforces read-only.
+ * The org_id is the TARGET tenant while user_id stays the L0 admin — the
+ * same session-carries-org-context seam every login path already uses.
+ */
+export async function mintImpersonationSession(
+  db: D1Database,
+  userId: string,
+  targetOrgId: string,
+): Promise<{ accessToken: string; expiresAt: string }> {
+  const accessToken = newToken();
+  const expiresAt = new Date(Date.now() + ACCESS_TTL_MS).toISOString();
+
+  await db
+    .prepare('INSERT INTO sessions (id, user_id, org_id, token, expires_at, is_impersonation) VALUES (?, ?, ?, ?, ?, 1)')
+    .bind(generateId(), userId, targetOrgId, await hashToken(accessToken), expiresAt)
+    .run();
+
+  return { accessToken, expiresAt };
+}
