@@ -91,12 +91,41 @@ complete book row — no ceiling data gaps remain. Engine: manualJ8-ts-1.2.1.
 
 ### Also photographed, available for future work (not needed today)
 
-- **p. 365 — Construction 17 (Ceiling on Exposed Beams, 17A dark)**: full
-  CLTD matrix varying by deck construction / U-value tier. No 17-series
-  variant exists in the registry; transcribe from the photo if one is added.
+- **pp. 365-367 — Construction 17 (Ceiling on Exposed Beams)**: 17A dark
+  (p.365), 17B medium (p.366), 17C white (p.367) — full CLTD matrices
+  varying by deck construction / U-value tier. No 17-series variant exists
+  in the registry; transcribe from the photos if one is added.
+- **pp. 368-370 — Construction 18 (Ceiling Below Roof Joists)**: 18A dark,
+  18B medium, 18C white CLTD matrices. No 18-series registry variant yet.
 - **pp. 345-353, 355-361** — Table 4A constructions 11/12/13/14/15 (doors,
   frame/block/alt/basement walls): source material for a full registry-vs-
   book verification sweep (doors + Table 4B already verified cell-for-cell).
+
+## ⚠ NEXT ENGINE GAP — Construction 19 floor PTD tables (pp. 371-375)
+
+Discovered 2026-07-15 from the pp. 371-375 photos: the book publishes floor
+PTDH as a FULL TABLE varying with HTD (columns 30..95) and PTDC varying with
+(CTD, DR), per exposed-wall insulation tier (19A = none, 19B = R-4, 19C =
+R-11) × floor insulation × floor cover (tile / carpet-hardwood) × sealed /
+vented. The engine currently pins floors to FIXED point values
+(`ptdh: 6.6, ptdc: 1.3` on 19B-osp — worksheets/opaque.ts applies them
+regardless of climate). Unlike the ceiling gap this CANNOT throw — an
+off-reference climate silently gets the reference-point value, understating
+floor heating loss in colder-than-reference climates. (The legacy engine
+scales with HTD × 0.67, so this divergence IS visible in drift telemetry.)
+
+To fix (engine 1.3.0 unit):
+1. Crisp CLOSE-UP photos of each PTDH/PTDC table block on pp. 371-375 —
+   the full-page shots are too dense to transcribe reliably.
+2. Map registry `19B-osp` to its exact book row — the transcription must
+   reproduce the cert-anchored 6.6 / 1.3 at Smith's design conditions
+   before anything is encoded (same anchor discipline as the ceilings).
+3. Implement ptdh(htd) / ptdc(ctd, dr) lookups. NOTE: the ACCA 5%
+   interpolation rule (CLAUDE.md §3 rule 1) likely REQUIRES interpolation
+   between the 5°F HTD columns at low PTDH magnitudes — unlike the CLTD
+   round-up convention. Confirm against the book's floor-table notes.
+4. Pages 376+ (Constructions 20 radiant / 21 basement floors / 22 slabs)
+   complete the floor story — not yet photographed.
 
 ## Where the values go
 
