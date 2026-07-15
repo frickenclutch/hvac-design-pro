@@ -32,6 +32,13 @@ CREATE TABLE IF NOT EXISTS organisations (
     -- out-of-band ALTER) is left untouched. A fresh rebuild now gets the
     -- column from 0001.
     billing_status TEXT NOT NULL DEFAULT 'free_beta',
+    -- Org-level default calculation standard, read/written by GET/PUT
+    -- /api/org. Same out-of-band-drift class as billing_status above:
+    -- present in production via a hand ALTER, absent from every migration
+    -- until codified here 2026-07-15 (surfaced by the tenancy-actions
+    -- integration suite 500ing on a fresh rebuild). CREATE TABLE IF NOT
+    -- EXISTS makes this a no-op against production.
+    default_standard TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
