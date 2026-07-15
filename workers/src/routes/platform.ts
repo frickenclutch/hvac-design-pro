@@ -313,8 +313,14 @@ platformRoutes.get('/qa-benchmarks', async (c) => {
   // These are the published ACCA reference test results for the engine
   // version currently shipped. See docs/acca-validation-report.md for the
   // per-line-item breakdown. Bump these in lockstep with engine releases.
+  //
+  // 1.2.0 (2026-07-15): ceiling CLTD family rows 16B/16C/16D transcribed
+  // from the physical book (Table 4A pp. 362-363). The 184/184 reference
+  // checks still pass on 1.2.0 (CI-enforced; anchors embedded unchanged);
+  // the ACCA submission itself was filed against 1.1.0 — recorded under
+  // `submission.filedEngineVersion`.
   const certification = {
-    engineVersion: 'manualJ8-ts-1.1.0',
+    engineVersion: 'manualJ8-ts-1.2.0',
     standard: 'ACCA Manual J 8th Ed v2.50',
     suiteTolerance: 0.005,
     tests: [
@@ -323,10 +329,11 @@ platformRoutes.get('/qa-benchmarks', async (c) => {
       { name: 'Cobb Residence',   passed: 42, total: 42, maxDriftPct: 0.0001 },
     ],
     aggregate: { passed: 184, total: 184 },
-    frontendUnitTests: { passed: 30, total: 30, framework: 'vitest' },
+    frontendUnitTests: { passed: 77, total: 77, framework: 'vitest' },
     submission: {
       filed: true,
       filedAt: '2026-05-01',
+      filedEngineVersion: 'manualJ8-ts-1.1.0',
       contact: 'Glenn Hourahan <glenn.hourahan@acca.org>',
       status: 'awaiting_review',
       slaMonths: 4,
