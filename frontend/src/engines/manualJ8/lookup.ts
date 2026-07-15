@@ -94,6 +94,78 @@ export function lookupPartitionCLTD(
   return lookupInMatrix(groupData.partition, ctd, dr);
 }
 
+/**
+ * Construction 19 floor PTD lookup — printed-column-first, interpolate
+ * only when the ACCA 5% rule demands it.
+ *
+ * Convention, anchored to the book's own worked Smith example: the Smith
+ * Form J1 runs at HTD 76 yet uses the PRINTED 75-column value (6.6, not
+ * the interpolated 6.7) — permitted because the deviation (~1.5%) is
+ * within Manual J's 5% threshold. Rule 1 MANDATES interpolation only when
+ * rounding to a printed cell deviates >5% from the fully interpolated
+ * value. So:
+ *   · exact column hit → the printed value
+ *   · between columns  → the NEAREST printed column's value when it
+ *     deviates ≤5% from the linear interpolation (the book's own usage);
+ *     otherwise the interpolated value (rule-1 mandate — bites at low TD,
+ *     e.g. HTD 22 where the 20-column would deviate ~8%)
+ *   · below the lowest printed column → CLAMP to that column's value
+ *     (conservative: the true linear value would be lower, so clamping
+ *     overstates the load rather than fabricating an unprinted cell)
+ *   · above the highest printed column → THROW attributably (outside the
+ *     book's design envelope; do not extrapolate)
+ */
+export function lookupFloorPTD(
+  table: Partial<Record<number, number>>,
+  td: number,
+  source: string,
+): number {
+  if (!Number.isFinite(td)) {
+    throw new Error(
+      `${source}: design TD is not a finite number (${td}) — upstream ` +
+      `design-condition input is missing or invalid.`,
+    );
+  }
+  const cols = Object.keys(table)
+    .map(Number)
+    .filter((k) => table[k] !== undefined)
+    .sort((a, b) => a - b);
+  if (cols.length === 0) {
+    throw new Error(`${source}: PTD table is empty — registry data error.`);
+  }
+
+  const min = cols[0];
+  const max = cols[cols.length - 1];
+  if (td <= min) return table[min]!;
+  if (td > max) {
+    throw new Error(
+      `${source}: design TD=${td} exceeds the highest printed column ` +
+      `(${max}) in the Table 4A floor PTD row. Climate is outside the ` +
+      `encoded design envelope. Do NOT extrapolate; consult the source table.`,
+    );
+  }
+
+  // Exact hit
+  if (table[td] !== undefined) return table[td]!;
+
+  // Bracketing columns (cols is sorted ascending; min < td < max here)
+  let lower = min;
+  for (const col of cols) {
+    if (col < td) lower = col;
+    else break;
+  }
+  const upper = cols[cols.indexOf(lower) + 1];
+  const lo = table[lower]!;
+  const hi = table[upper]!;
+  const interp = lo + ((hi - lo) * (td - lower)) / (upper - lower);
+
+  // Printed-column-first (see header): nearest column wins when within the
+  // 5% threshold — this reproduces the ACCA worked examples bit-for-bit.
+  const nearestVal = td - lower <= upper - td ? lo : hi;
+  if (Math.abs(nearestVal - interp) / interp <= 0.05) return nearestVal;
+  return interp;
+}
+
 /** Look up a door direct CLTD from Construction 11 (no Group letter).
  *  Doors' CLTD matrix is printed directly in Table 4A p. 345 (source-verified
  *  2026-07-15) — attribute any data-gap throw there, not to the 4B default. */

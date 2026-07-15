@@ -656,7 +656,7 @@ const sections: GuideSection[] = [
     ),
     advancedContent: (
       <div className="space-y-3">
-        <p>Engine: <code className="text-emerald-400/70">frontend/src/engines/manualJ8/</code>, version stamp <code>manualJ8-ts-1.2.1</code> (1.1.0 + ceiling CLTD family rows 16B/16C/16D/16F transcribed from the physical ACCA book, Table 4A pp. 362-364). Validated against ACCA reference test cases (Smith / Walker / Cobb) at 184/184 line items within 0.5% tolerance, enforced in CI by the vitest cert suite.</p>
+        <p>Engine: <code className="text-emerald-400/70">frontend/src/engines/manualJ8/</code>, version stamp <code>manualJ8-ts-1.3.0</code> (1.1.0 + ceiling CLTD family rows and climate-dependent Construction 19 floor PTD tables, all transcribed from the physical ACCA book, Table 4A pp. 362-377). Validated against ACCA reference test cases (Smith / Walker / Cobb) at 184/184 line items within 0.5% tolerance, enforced in CI by the vitest cert suite.</p>
         <p>Adapter shim: <code className="text-emerald-400/70">manualJ8/adapters/legacy.ts → roomInputsToFormJ1Input()</code> aggregates per-room legacy <code>RoomInput[]</code> data into the whole-house <code>FormJ1Input</code>.</p>
         <p>Pipeline: <code className="text-emerald-400/70">runCalculation()</code> in <code>pages/ManualJCalculator.tsx</code> calls legacy first (display), then if <code>shadowRunManualJ8 === true</code> also calls the cert engine and console-logs <code>[engine drift]</code> with heat / sens / latent percentages.</p>
         <p>Phase 2 trigger criteria documented in <code>docs/option-e-ui-migration-plan.md</code>: ≥10 production projects driven through the calculator + drift on those projects ≤ 5% on every total + ACCA cert review approved.</p>

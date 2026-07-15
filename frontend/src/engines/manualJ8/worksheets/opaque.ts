@@ -20,6 +20,7 @@ import type {
 import { getConstruction, basementWallUAtDepth } from '../tables/constructions';
 import {
   lookupDoorCLTD, lookupWallCLTD, lookupPartitionCLTD, lookupDirectCLTD,
+  lookupFloorPTD,
 } from '../lookup';
 
 /** Look up the cooling temp differential to apply for a given construction
@@ -46,6 +47,16 @@ function coolingDelta(
     return lookupDirectCLTD(
       c.directCLTD, ctd, dr,
       `Manual J Table 4A (${c.kind} "${c.id}")`,
+    );
+  }
+  // Construction 19 floors: climate-dependent PTDC row (Table 4A pp.
+  // 371-377; a function of CTD only — the printed cells span the DR
+  // sub-columns). Applies to the floor itself AND when it serves as the
+  // partition reference. Supersedes the fixed reference-point ptdc.
+  if (c.ptdcByCtd) {
+    return lookupFloorPTD(
+      c.ptdcByCtd, ctd,
+      `Manual J Table 4A (${c.kind} "${c.id}" PTDC)`,
     );
   }
   // Partition path (use PTDC)
@@ -84,6 +95,16 @@ function heatingDelta(
   // Explicit override takes precedence (e.g. Smith partition referencing
   // Construction 19B-osp's PTDH per Worksheet D Note 4)
   if (asPartition && ptdhOverride !== undefined) return ptdhOverride;
+  // Construction 19 floors: climate-dependent PTDH row (Table 4A pp.
+  // 371-377), linearly interpolated at the design HTD. Supersedes the
+  // fixed reference-point ptdh, which was only book-true at the cert
+  // reference climate (Smith: HTD 75 → 6.6).
+  if (c.ptdhByHtd) {
+    return lookupFloorPTD(
+      c.ptdhByHtd, htd,
+      `Manual J Table 4A (${c.kind} "${c.id}" PTDH)`,
+    );
+  }
   if (asPartition && c.ptdh !== undefined) return c.ptdh;
   if (c.kind === 'floor' && c.ptdh !== undefined) return c.ptdh;  // floor over crawl
   if (c.radiant) return htd + 25;

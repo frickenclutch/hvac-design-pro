@@ -107,6 +107,25 @@ const DUCT_LOC_LEGACY_TO_J8: Record<LegacyDuctLocation, DuctInput['location']> =
   basement_uncond: 'other',
 };
 
+// ── Crawl-space floor mapping by legacy floorRValue ───────────────────
+// Selects the Construction 19B (sealed crawl, R-4 exposed walls, passive)
+// row whose printed floor-insulation band contains the room's R-value.
+// Book rows exist for None / R-2..4 / R-5..10 / R-11 or 15 / R-19 or 21 /
+// R-30 / R-38 — for R-values printed in NO band (e.g. R-16..18, R-22..29)
+// we take the next LOWER band, which yields the HIGHER HTM (conservative,
+// never understates the load). Previously every crawl floor mapped to the
+// uninsulated 19B-osp row regardless of insulation — a large fidelity gap
+// for insulated floors (fixed in engine 1.3.0).
+export function crawlFloorConstruction(floorRValue: number): string {
+  if (floorRValue >= 38) return '19B-38sp';
+  if (floorRValue >= 30) return '19B-30sp';
+  if (floorRValue >= 19) return '19B-19sp';
+  if (floorRValue >= 11) return '19B-11sp';
+  if (floorRValue >= 5) return '19B-5sp';
+  if (floorRValue >= 2) return '19B-2sp';
+  return '19B-osp';
+}
+
 // ── ACH defaults by legacy `constructionQuality` (mirrors manualJ.ts) ─
 const ACH_BY_QUALITY: Record<'tight' | 'average' | 'leaky', number> = {
   tight: 0.25,
@@ -298,15 +317,17 @@ export function roomInputsToFormJ1Input(
   // ── Floors: bucket by floor type ──────────────────────────────────
   const passiveFloors: OpaqueInput[] = [];
   const partitionFloors: OpaqueInput[] = [];
-  let crawlArea = 0;
+  const crawlAreaByConstruction = new Map<string, number>();
   let basementArea = 0;
   let slabPerimeter = 0;
   for (const r of rooms) {
     const fp = roomFootprint(r);
     switch (r.floorType) {
-      case 'crawlspace':
-        crawlArea += fp;
+      case 'crawlspace': {
+        const cid = crawlFloorConstruction(r.floorRValue);
+        crawlAreaByConstruction.set(cid, (crawlAreaByConstruction.get(cid) ?? 0) + fp);
         break;
+      }
       case 'basement':
         basementArea += fp;
         break;
@@ -319,12 +340,14 @@ export function roomInputsToFormJ1Input(
         break;
     }
   }
-  if (crawlArea > 0) {
+  let crawlIdx = 0;
+  for (const [cid, area] of crawlAreaByConstruction) {
+    crawlIdx += 1;
     partitionFloors.push({
-      id: '11-cs',
-      label: 'Floor over crawl',
-      constructionId: '19B-osp',
-      area: crawlArea,
+      id: crawlAreaByConstruction.size === 1 ? '11-cs' : `11-cs${crawlIdx}`,
+      label: `Floor over crawl (${cid})`,
+      constructionId: cid,
+      area,
     });
   }
   if (basementArea > 0) {

@@ -21,7 +21,7 @@
  * can scan from the source page to the code one row at a time.
  */
 
-import type { ConstructionVariant, WallGroup, CTDBin, CLTDCell } from '../types';
+import type { ConstructionVariant, WallGroup, CTDBin, CLTDCell, HTDColumn } from '../types';
 import { DOORS } from './doors';
 
 // ============================================================================
@@ -678,16 +678,100 @@ const CEILINGS: ConstructionVariant[] = [
 // Construction 19 / 20 / 21 — Floors
 // ============================================================================
 
+// ┌─ CONSTRUCTION 19 FLOOR PTD PROVENANCE (Table 4A pp. 371-377) ───────────┐
+// │ The book publishes floor PTDH as a row per variant over HTD columns     │
+// │ 20..95 (5°F steps) and PTDC over CTD 10..35 (CTD-only — the printed     │
+// │ cells span the daily-range sub-columns). Rows below are the SEALED,     │
+// │ PASSIVE block of family 19B (R-4 insulation on exposed walls,           │
+// │ U_wall = 0.143) — transcribed 2026-07-15 by Claude from Nathan          │
+// │ Griffith's close-up photograph of the 19B(s) page.                      │
+// │                                                                          │
+// │ Verification: (1) the pre-existing Smith cert anchor maps EXACTLY —     │
+// │ 19B-0sp @ HTD 75 → 6.6 and @ CTD 15 → 1.3, the values validated by     │
+// │ Smith Form J1 (Des Moines: HTD 75 / CTD 15); (2) every row is linear    │
+// │ through the origin (PTD = k × TD, same k both sides), the book's        │
+// │ printed structure; (3) HTM = U × PTD decreases monotonically with       │
+// │ floor R as expected. One edge cell (19B-2sp @ HTD 85 = 12.5) was        │
+// │ page-curl-partial in the photo and is structure-confirmed — flagged     │
+// │ in docs/table4d-transcription-worksheet.md for an eyeball re-check.     │
+// │                                                                          │
+// │ NOT encoded (photos archived, legible): 19A (no wall insulation),       │
+// │ 19B vented, 19C sealed/vented (R-11 walls), radiant blocks; 19D         │
+// │ (R-19 walls) exists only as full-page shots. The legacy adapter can     │
+// │ only select the sealed/passive R-4-wall tier today, so only that        │
+// │ block ships. Lookup: lookupFloorPTD — LINEAR INTERPOLATION between      │
+// │ columns per the ACCA 5% rule (rows are linear; round-up would break     │
+// │ the 5% threshold at low PTD magnitudes).                                 │
+// └──────────────────────────────────────────────────────────────────────────┘
+
+const HTD_COLS: HTDColumn[] = [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95];
+const CTD_COLS: CTDBin[] = [10, 15, 20, 25, 30, 35];
+
+/** Zip a printed PTD row (in column order) into the typed record. A short
+ *  or long array would silently shift the lookup envelope, so the length
+ *  is asserted — a transcription must supply every printed column. */
+function ptdhRow(values: number[]): Partial<Record<HTDColumn, number>> {
+  if (values.length !== HTD_COLS.length) {
+    throw new Error(`ptdhRow: expected ${HTD_COLS.length} PTDH cells, got ${values.length}`);
+  }
+  const out: Partial<Record<HTDColumn, number>> = {};
+  HTD_COLS.forEach((c, i) => { out[c] = values[i]; });
+  return out;
+}
+function ptdcRow(values: number[]): Partial<Record<CTDBin, number>> {
+  if (values.length !== CTD_COLS.length) {
+    throw new Error(`ptdcRow: expected ${CTD_COLS.length} PTDC cells, got ${values.length}`);
+  }
+  const out: Partial<Record<CTDBin, number>> = {};
+  CTD_COLS.forEach((c, i) => { out[c] = values[i]; });
+  return out;
+}
+
+/** One sealed/passive 19B floor variant straight off the printed row. */
+function floor19B(
+  id: string, description: string, uValue: number,
+  ptdh16: number[], ptdc6: number[],
+): ConstructionVariant {
+  return {
+    id, description, kind: 'floor', referenceArea: 'gross_floor_area',
+    uValue,
+    ptdhByHtd: ptdhRow(ptdh16),
+    ptdcByCtd: ptdcRow(ptdc6),
+  };
+}
+
 const FLOORS: ConstructionVariant[] = [
   {
-    id: '19B-osp',
-    description: 'Floor over open sealed crawl space, no insulation, hardwood over subfloor',
+    id: '19B-osp', // book row 19B-0sp — id kept for registry compat
+    description: 'Floor over sealed crawl space (R-4 exposed walls), no floor insulation',
     kind: 'floor',
     referenceArea: 'gross_floor_area',
     uValue: 0.368,
+    // Reference-point values kept for provenance/fallback (Smith: HTD 75 /
+    // CTD 15). The full rows below supersede them at runtime.
     ptdh: 6.6,
     ptdc: 1.3,
+    ptdhByHtd: ptdhRow([1.8, 2.2, 2.7, 3.1, 3.5, 4.0, 4.4, 4.9, 5.3, 5.8, 6.2, 6.6, 7.1, 7.5, 8.0, 8.4]),
+    ptdcByCtd: ptdcRow([0.9, 1.3, 1.8, 2.2, 2.7, 3.1]),
   },
+  floor19B('19B-2sp', 'Floor over sealed crawl space (R-4 exposed walls), R-2 to R-4 board', 0.206,
+    [3.0, 3.7, 4.4, 5.2, 5.9, 6.6, 7.4, 8.1, 8.9, 9.6, 10.3, 11.1, 11.8, 12.5, 13.3, 14.0],
+    [1.5, 2.2, 3.0, 3.7, 4.4, 5.2]),
+  floor19B('19B-5sp', 'Floor over sealed crawl space (R-4 exposed walls), R-5 to R-10 board', 0.125,
+    [4.4, 5.6, 6.7, 7.8, 8.9, 10.0, 11.1, 12.2, 13.3, 14.4, 15.6, 16.7, 17.8, 18.9, 20.0, 21.1],
+    [2.2, 3.3, 4.4, 5.6, 6.7, 7.8]),
+  floor19B('19B-11sp', 'Floor over sealed crawl space (R-4 exposed walls), R-11 or R-15 blanket', 0.073,
+    [6.6, 8.2, 9.8, 11.5, 13.1, 14.7, 16.4, 18.0, 19.7, 21.3, 22.9, 24.6, 26.2, 27.8, 29.5, 31.1],
+    [3.3, 4.9, 6.6, 8.2, 9.8, 11.5]),
+  floor19B('19B-19sp', 'Floor over sealed crawl space (R-4 exposed walls), R-19 or R-21 blanket', 0.049,
+    [8.5, 10.6, 12.7, 14.8, 17.0, 19.1, 21.2, 23.3, 25.4, 27.6, 29.7, 31.8, 33.9, 36.0, 38.2, 40.3],
+    [4.2, 6.4, 8.5, 10.6, 12.7, 14.8]),
+  floor19B('19B-30sp', 'Floor over sealed crawl space (R-4 exposed walls), R-30 blanket', 0.034,
+    [10.2, 12.7, 15.3, 17.8, 20.4, 22.9, 25.5, 28.0, 30.6, 33.1, 35.7, 38.2, 40.8, 43.3, 45.9, 48.4],
+    [5.1, 7.6, 10.2, 12.7, 15.3, 17.8]),
+  floor19B('19B-38sp', 'Floor over sealed crawl space (R-4 exposed walls), R-38 blanket', 0.029,
+    [11.1, 13.8, 16.6, 19.4, 22.1, 24.9, 27.6, 30.4, 33.2, 35.9, 38.7, 41.5, 44.2, 47.0, 49.8, 52.5],
+    [5.5, 8.3, 11.1, 13.8, 16.6, 19.4]),
   {
     id: '21A-32',
     description: 'Floor exposed (heat-only basement floor)',

@@ -101,7 +101,51 @@ complete book row — no ceiling data gaps remain. Engine: manualJ8-ts-1.2.1.
   frame/block/alt/basement walls): source material for a full registry-vs-
   book verification sweep (doors + Table 4B already verified cell-for-cell).
 
-## ⚠ NEXT ENGINE GAP — Construction 19 floor PTD tables (pp. 371-375)
+## ✅ ENCODED (engine 1.3.0, 2026-07-15) — 19B sealed/passive block
+
+Close-up photos delivered. **Anchor mapping resolved:** registry `19B-osp` =
+book row **19B-0sp**; PTDH column 75 = **6.6** and PTDC column 15 = **1.3** —
+the Smith-validated values. NOTE: Smith's fixture actually runs at **HTD 76**
+(Des Moines: 70 − (−6)), and the book's worked Form J1 uses the printed
+75-column value there (deviation from interpolated ~1.5%, within the 5% rule)
+— which is why the lookup convention is printed-column-first (see below),
+keeping Smith bit-identical.
+
+Transcribed + encoded (constructions.ts FLOORS; golden tests in
+`__tests__/floorPtd.test.ts`) — the full sealed/passive 19B block
+(R-4 exposed walls, U_wall 0.143), HTD columns 20..95 / PTDC columns 10..35:
+
+```
+19B-0sp  U .368: PTDH 1.8 2.2 2.7 3.1 3.5 4.0 4.4 4.9 5.3 5.8 6.2 [6.6✓] 7.1 7.5 8.0 8.4 · PTDC 0.9 [1.3✓] 1.8 2.2 2.7 3.1
+19B-2sp  U .206: PTDH 3.0 3.7 4.4 5.2 5.9 6.6 7.4 8.1 8.9 9.6 10.3 11.1 11.8 12.5* 13.3 14.0 · PTDC 1.5 2.2 3.0 3.7 4.4 5.2
+19B-5sp  U .125: PTDH 4.4 5.6 6.7 7.8 8.9 10.0 11.1 12.2 13.3 14.4 15.6 16.7 17.8 18.9 20.0 21.1 · PTDC 2.2 3.3 4.4 5.6 6.7 7.8
+19B-11sp U .073: PTDH 6.6 8.2 9.8 11.5 13.1 14.7 16.4 18.0 19.7 21.3 22.9 24.6 26.2 27.8 29.5 31.1 · PTDC 3.3 4.9 6.6 8.2 9.8 11.5
+19B-19sp U .049: PTDH 8.5 10.6 12.7 14.8 17.0 19.1 21.2 23.3 25.4 27.6 29.7 31.8 33.9 36.0 38.2 40.3 · PTDC 4.2 6.4 8.5 10.6 12.7 14.8
+19B-30sp U .034: PTDH 10.2 12.7 15.3 17.8 20.4 22.9 25.5 28.0 30.6 33.1 35.7 38.2 40.8 43.3 45.9 48.4 · PTDC 5.1 7.6 10.2 12.7 15.3 17.8
+19B-38sp U .029: PTDH 11.1 13.8 16.6 19.4 22.1 24.9 27.6 30.4 33.2 35.9 38.7 41.5 44.2 47.0 49.8 52.5 · PTDC 5.5 8.3 11.1 13.8 16.6 19.4
+```
+
+`*` = 19B-2sp @ HTD 85 (12.5) was page-curl-partial in the photo; the read is
+confirmed by the row's printed linear structure (k=14.0/95 → 85×k=12.53) and
+the 0.7/0.8 step pattern — **please eyeball this one cell when next at the
+book.** Every row verified linear through the origin (PTD = k×TD, same k both
+sides); PTDC is a function of CTD only (printed cells span the DR sub-columns).
+
+Lookup: `lookupFloorPTD` — PRINTED-COLUMN-FIRST per the book's own worked
+Smith example: nearest printed column when within 5% of the linear
+interpolation (e.g. HTD 76 → column 75 = 6.6), interpolated only when the
+5% rule mandates it (low TD, e.g. HTD 22 → 1.96, where the 20-column would
+deviate ~8%); clamp below column 20 (conservative), throw above 95, throw on
+non-finite TD. The legacy adapter now maps `floorRValue` to the matching row
+(unprinted bands take the next LOWER insulation row — higher HTM, conservative);
+previously every crawl floor ran as uninsulated.
+
+**Photographed, legible, NOT encoded** (no adapter path can select them yet —
+tables archived in photos): 19A sealed+vented (no wall insulation), 19B vented,
+19C sealed + vented (R-11 walls), all radiant blocks. **19D (R-19 walls,
+pp. 376-377) exists only as full-page shots.**
+
+## ~~NEXT ENGINE GAP~~ (RESOLVED ABOVE) — Construction 19 floor PTD tables (pp. 371-375)
 
 Discovered 2026-07-15 from the pp. 371-375 photos: the book publishes floor
 PTDH as a FULL TABLE varying with HTD (columns 30..95) and PTDC varying with

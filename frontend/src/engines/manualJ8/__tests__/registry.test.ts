@@ -79,6 +79,6 @@ describe('Construction registry', () => {
   });
 
   it('engine version is current', () => {
-    expect(MANUAL_J8_ENGINE_VERSION).toBe('manualJ8-ts-1.2.1');
+    expect(MANUAL_J8_ENGINE_VERSION).toBe('manualJ8-ts-1.3.0');
   });
 });

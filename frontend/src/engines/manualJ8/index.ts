@@ -80,6 +80,7 @@ export {
   lookupPartitionCLTD,
   lookupDoorCLTD,
   lookupDirectCLTD,
+  lookupFloorPTD,
 } from './lookup';
 
 // Adjustments
@@ -169,5 +170,23 @@ export { buildFormJ1 } from './formJ1';
  * through the empty bin 10 into the anchor (19), now resolves to the
  * printed bin-10 cell (14). All four registry ceilings now carry complete
  * book rows; cert anchors unchanged, 184/184 unaffected.
+ *
+ * 1.3.0 (2026-07-15): Construction 19 floor PTD tables — climate-dependent.
+ * The 19B sealed/passive block (Table 4A, R-4 exposed walls) transcribed
+ * from the book; floors now look PTDH up by design HTD and PTDC by CTD,
+ * replacing the FIXED reference-point values that were book-true only at
+ * Smith's design conditions. Lookup convention is PRINTED-COLUMN-FIRST:
+ * the nearest printed column's value when within the ACCA 5% threshold of
+ * the linear interpolation, interpolated only beyond it (rule-1 mandate,
+ * bites at low TD). This is anchored to the book's own worked Smith
+ * example — Smith runs at HTD 76 and the Form J1 uses the printed
+ * 75-column value 6.6 (deviation ~1.5% ≤ 5%), so Smith resolves
+ * BIT-IDENTICALLY to the fixed-value era and the 184/184 reference checks
+ * are unchanged. OUTPUT CORRECTION for crawl-floor calcs whose design
+ * conditions differ from Smith's: mild climates go down (HTD 40: 6.6 →
+ * 3.5), cold climates go up (HTD 85: 6.6 → 7.5). The legacy adapter also
+ * now maps floorRValue to the matching 19B row (19B-2sp..38sp) instead of
+ * treating every crawl floor as uninsulated — insulated-floor homes see a
+ * large book-correcting HTM reduction.
  */
-export const MANUAL_J8_ENGINE_VERSION = 'manualJ8-ts-1.2.1';
+export const MANUAL_J8_ENGINE_VERSION = 'manualJ8-ts-1.3.0';

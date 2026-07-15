@@ -68,6 +68,14 @@ export type WallGroup = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J
  *  Manual J design conservatism (NOT linear interpolation). */
 export type CTDBin = 10 | 15 | 20 | 25 | 30 | 35;
 
+/** HTD columns printed in the Construction 19 floor PTD tables (Table 4A
+ *  pp. 371-377). Unlike the CLTD round-up convention, floor PTD lookups
+ *  INTERPOLATE between columns — the printed rows are linear in TD, and
+ *  rounding a 5°F step at low PTD magnitudes exceeds the ACCA 5% rule. */
+export type HTDColumn =
+  | 20 | 25 | 30 | 35 | 40 | 45 | 50 | 55
+  | 60 | 65 | 70 | 75 | 80 | 85 | 90 | 95;
+
 /** Table 4B is sparse — not every (CTD, DR) cell is populated. Cells where
  *  the climate combination is unrealistic are omitted (e.g. CTD=10 with H,
  *  CTD=35 with L). The lookup function handles missing cells gracefully. */
@@ -129,10 +137,23 @@ export interface ConstructionVariant {
   /** Below-grade U-value by basement floor depth (ft) for Construction 15. */
   belowGradeUByDepth?: { depthFt: number; uValue: number }[];
   /** Partition temperature difference for heating. Used when this
-   *  construction sits between conditioned space and a buffer space. */
+   *  construction sits between conditioned space and a buffer space.
+   *  For Construction 19 floors this is a single REFERENCE-POINT value
+   *  (kept for provenance/fallback) — prefer `ptdhByHtd`, the full
+   *  climate-dependent row from Table 4A pp. 371-377. */
   ptdh?: number;
-  /** Partition temperature difference for cooling. */
+  /** Partition temperature difference for cooling. Reference point;
+   *  prefer `ptdcByCtd` where present. */
   ptdc?: number;
+  /** Construction 19 floor PTDH row — PTDH by heating design temperature
+   *  difference (Table 4A pp. 371-377, columns HTD 20..95 in 5°F steps).
+   *  Looked up via lookupFloorPTD with LINEAR INTERPOLATION between
+   *  columns (ACCA 5% interpolation rule — the printed rows are linear). */
+  ptdhByHtd?: Partial<Record<HTDColumn, number>>;
+  /** Construction 19 floor PTDC row — PTDC by cooling design temperature
+   *  difference. NOTE: the book publishes PTDC as a function of CTD ONLY
+   *  (the printed cells span all daily-range sub-columns). */
+  ptdcByCtd?: Partial<Record<CTDBin, number>>;
   /** Used for radiant floors/slabs: HTM = F × (HTD + 25). */
   radiant?: boolean;
   /** Source page in Manual J 8th Ed v2.50 for traceability. */
