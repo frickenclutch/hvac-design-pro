@@ -1,9 +1,25 @@
-# Table 4D Transcription Worksheet — Unblock Phase-2 Cutover
+# Ceiling CLTD Transcription Worksheet — Unblock Phase-2 Cutover
 
-**Status:** awaiting transcription from the physical book (Dan has ACCA Manual J 8th Ed v2.50).
+**Status:** awaiting source photos of the ceiling CLTD pages (book in hand — Nathan
+photographing; Dan also has a copy).
 **Blocks:** Phase-2 cutover readiness — 100% of shadow-run failures (24/24 all-time,
 19 in the last 30 days) trace to missing ceiling CLTD cells. Zero drift samples can
 be collected until these land.
+
+> **SOURCE CORRECTION (2026-07-15, verified against book photos of pp. 383–387):**
+> This worksheet (and the engine's TABLE-4D-GAP charter / error messages) originally
+> cited "Table 4D" for ceiling CLTDs. **That citation is wrong.** In the actual
+> v2.50 book the Table 4 series is: 4B = wall/partition CLTD (p.383, now verified
+> cell-for-cell against the encoded table4B.ts, incl. the quirky Group D 15/M=19.4),
+> 4B Notes (p.384), 4C = closed-garage ambient temp (p.385), **4D = isolated-sunroom
+> ambient temp (p.386)**, 4E = encapsulated-attic ambient temp (p.387). The ceiling
+> CLTD matrix is NOT in Table 4D. Candidate real locations, in likelihood order:
+> (1) the Table 4A Construction 16/17/18 ceiling pages (p.355 onward, after basement
+> walls end at 354); (2) Appendix 12 — p.384 note 3 cites "Figure A12-8 CLTD values"
+> for walls, so the roof/ceiling equivalent likely sits nearby in A12. The cert-
+> anchored VALUES already encoded (16B-30ad 15/M=50 etc.) are unaffected — only the
+> table name was misattributed. Engine error-message wording and constructions.ts
+> comments will be corrected in the same commit that lands the transcribed cells.
 
 ---
 
@@ -29,8 +45,9 @@ the problem.)
 
 ## Transcription rules (non-negotiable — from the TABLE-4D-GAP charter)
 
-1. Values come **only** from ACCA Manual J 8th Edition v2.50, **Table 4D**
-   (ceiling/roof CLTD). Record the **page number** you read them from.
+1. Values come **only** from ACCA Manual J 8th Edition v2.50, from wherever the
+   book actually publishes the **ceiling/roof CLTD matrix** (see SOURCE CORRECTION
+   above — not Table 4D). Record the **page number** you read them from.
 2. **NO value may be interpolated, extrapolated from wall Table 4B, or derived
    from the legacy `getCeilingCLTD()` formula.** If a (CTD, DR) cell is not
    printed in the book, leave it absent — the engine's round-up lookup and
