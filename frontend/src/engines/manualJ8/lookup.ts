@@ -25,9 +25,11 @@ const CTD_BINS: CTDBin[] = [10, 15, 20, 25, 30, 35];
  *
  *  `source` names the reference table for the error message so a thrown
  *  data-gap is attributable to the exact table the reviewer must consult
- *  (Table 4B for walls/partitions, Table 4A for doors, Table 4D for
- *  ceilings). We round CTD up to the nearest bin first, so the message
- *  reports the bin that was actually demanded, not the raw CTD. */
+ *  (Table 4B for walls/partitions; Table 4A for doors AND ceilings — the
+ *  ceiling family CLTD rows are printed directly in Table 4A pp. 362-364,
+ *  verified against the physical book 2026-07-15). We round CTD up to the
+ *  nearest bin first, so the message reports the bin that was actually
+ *  demanded, not the raw CTD. */
 function lookupInMatrix(
   matrix: Partial<Record<CTDBin, CLTDCell>>,
   ctd: number,
@@ -92,26 +94,29 @@ export function lookupPartitionCLTD(
   return lookupInMatrix(groupData.partition, ctd, dr);
 }
 
-/** Look up a door direct CLTD from Construction 11 (no Group letter). */
+/** Look up a door direct CLTD from Construction 11 (no Group letter).
+ *  Doors' CLTD matrix is printed directly in Table 4A p. 345 (source-verified
+ *  2026-07-15) — attribute any data-gap throw there, not to the 4B default. */
 export function lookupDoorCLTD(ctd: number, dr: DailyRange): number {
-  return lookupInMatrix(DOOR_DIRECT_CLTD, ctd, dr);
+  return lookupInMatrix(DOOR_DIRECT_CLTD, ctd, dr, 'Manual J Table 4A (door, Construction 11)');
 }
 
 /** Look up a direct CLTD from a construction-specific matrix (used by
- *  ceilings under attic — Construction 16/17/18, whose CLTDs come from
- *  Manual J Table 4D, not Table 4B).
+ *  ceilings under attic — Construction 16 series, whose family CLTD rows
+ *  are printed directly in Manual J Table 4A pp. 362-364, keyed by attic
+ *  temperature — NOT in "Table 4D", which is sunroom ambient temps; the
+ *  old citation here was corrected 2026-07-15 against the physical book).
  *
  *  `source` lets the caller attribute a data-gap throw to the right table
- *  and element (e.g. `Manual J Table 4D (ceiling "16B-30ad")`). The
- *  ceiling registry currently captures only the CTD=15 cells validated by
- *  the Smith/Walker reference cases; other bins THROW attributably until
- *  the full Table 4D matrix is encoded (see tables/constructions.ts
- *  TABLE-4D-GAP notes and __tests__/ceilingCltd.test.ts). */
+ *  and element (e.g. `Manual J Table 4A (ceiling "16F-38tw")`). The 16B/
+ *  16C/16D family rows are fully encoded; 16E/16F await transcription of
+ *  p. 364 and THROW attributably beyond their anchor cells (see tables/
+ *  constructions.ts provenance block and __tests__/ceilingCltd.test.ts). */
 export function lookupDirectCLTD(
   matrix: Partial<Record<CTDBin, CLTDCell>>,
   ctd: number,
   dr: DailyRange,
-  source = 'Manual J Table 4A/4D (direct CLTD)',
+  source = 'Manual J Table 4A (direct CLTD)',
 ): number {
   return lookupInMatrix(matrix, ctd, dr, source);
 }

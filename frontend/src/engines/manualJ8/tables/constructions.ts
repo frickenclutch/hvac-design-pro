@@ -538,33 +538,74 @@ const BASEMENT_WALLS: ConstructionVariant[] = [
 // ============================================================================
 // Construction 16 / 17 / 18 — Ceilings
 // ============================================================================
-// Ceilings use a direct CLTD (no Group letter) per Worksheet D. The ceiling
-// CLTD-by-(CTD,DR) matrix is published in Manual J 8th Ed v2.50 **Table 4D**
-// (NOT Table 4B, which covers walls/partitions). See docs/manual-j-
-// methodology.md §6, which cites "Tables 4A, 4B, 4C, 4D, 4E".
+// Ceilings use a direct CLTD (no Group letter) per Worksheet D.
 //
-// ┌─ TABLE-4D-GAP ─────────────────────────────────────────────────────────┐
-// │ Each ceiling below carries only the SINGLE Table 4D cell that the       │
-// │ Smith/Walker ACCA reference cases exercised (CTD=15, one DR each).      │
-// │ The cert reference pages (docs/acca-validation-report.md) publish a     │
-// │ point value per construction at CTD=15 — they do NOT reproduce the      │
-// │ full Table 4D matrix, and the matrix is not present anywhere in this    │
-// │ repo (table4B.ts is walls only; calc-service Manual J tables are empty).│
+// ┌─ CEILING CLTD PROVENANCE (Table 4A family rows) ────────────────────────┐
+// │ SOURCE CORRECTION (2026-07-15): ceiling CLTDs are published directly in │
+// │ **Table 4A** (pp. 362-364 in v2.50) as one CLTD-by-(CTD, DR) row per    │
+// │ ceiling FAMILY (16A/16B/16C/16D/16E/16F, keyed by attic temperature),   │
+// │ shared by every R-value variant in that family. They are NOT in "Table  │
+// │ 4D" (that's sunroom ambient temps) — the old TABLE-4D-GAP note here     │
+// │ inferred that citation without the book.                                 │
 // │                                                                          │
-// │ Consequence: a ceiling evaluated in any climate whose rounded-up CTD    │
-// │ bin or DR is not the captured cell THROWS an attributable error from    │
-// │ lookup.ts (naming the element + the missing (bin, DR) cell), rather     │
-// │ than silently returning a wrong number. A silently-wrong CLTD on a      │
-// │ permit-bound calc is worse than a loud failure.                         │
+// │ The matrices below were transcribed 2026-07-15 by Claude from Nathan    │
+// │ Griffith's photographs of the physical ACCA Manual J 8th Ed v2.50:      │
+// │   · 16B family row — p. 362 (attic temp 130°F @ 95°F outdoor)           │
+// │   · 16C family row — p. 363 (attic temp 120°F)                          │
+// │   · 16D family row — p. 363 (attic temp 110°F; covers 16DR/16DF)        │
+// │ Triple verification: (1) every previously-encoded cert anchor matches   │
+// │ its family row exactly (16B 15/M=50 Smith; 16C 15/L=44 and 16D 15/L=34  │
+// │ Walker §13); (2) rows carry the book's arithmetic structure (+5 per CTD │
+// │ bin step, −10 per attic-temp tier); (3) the sparse (CTD, DR) layout     │
+// │ matches Table 4B's exactly. Golden tests: __tests__/ceilingCltd.test.ts │
 // │                                                                          │
-// │ TO CLOSE THIS GAP: transcribe the ACCA Manual J 8th Ed v2.50 Table 4D   │
-// │ ceiling/roof CLTD rows (by roof construction × CTD bin 10/15/20/25/30/  │
-// │ 35 × DR L/M/H) from the book into each entry's `directCLTD`. NO VALUE   │
-// │ MAY BE INTERPOLATED, EXTRAPOLATED FROM WALL TABLE 4B, OR DERIVED FROM   │
-// │ THE LEGACY engines/manualJ.ts getCeilingCLTD() formula — those are not  │
-// │ Table 4D and would be fabricated. The round-up lookup in lookup.ts      │
-// │ already covers the additional bins the moment they are populated.       │
+// │ STILL PENDING: the 16E/16F family rows (p. 364) — awaiting the next     │
+// │ photo batch. 16F-38tw keeps its single Walker anchor cell (15/L=19)     │
+// │ until then; its other cells THROW attributably (correct behavior).      │
+// │ Transcription rules unchanged: values come from the book only — NO      │
+// │ interpolation, no extrapolation from Table 4B, no legacy-formula        │
+// │ derivation. The round-up lookup in lookup.ts covers new bins the        │
+// │ moment they are populated.                                               │
 // └──────────────────────────────────────────────────────────────────────────┘
+
+// 16B family CLTD row — Table 4A p. 362 (FHA vented attic, no radiant
+// barrier; dark asphalt shingles / dark metal / tar+gravel / membrane;
+// attic temp 130°F @ 95°F outdoor). Anchor cross-check: 15/M = 50 =
+// Smith line 10-a.
+const CLTD_16B: Partial<Record<CTDBin, CLTDCell>> = {
+  10: { L: 49, M: 45 },
+  15: { L: 54, M: 50, H: 45 },
+  20: { L: 59, M: 55, H: 50 },
+  25: { M: 60, H: 55 },
+  30: { H: 60 },
+  35: { H: 65 },
+};
+
+// 16C family CLTD row — Table 4A p. 363 (FHA vented attic, no radiant
+// barrier; white/light shingles, any wood shake, light metal, tar+gravel
+// or membrane; attic temp 120°F). Anchor cross-check: 15/L = 44 =
+// Walker §13 option 16C-38aw.
+const CLTD_16C: Partial<Record<CTDBin, CLTDCell>> = {
+  10: { L: 39, M: 35 },
+  15: { L: 44, M: 40, H: 35 },
+  20: { L: 49, M: 45, H: 40 },
+  25: { M: 50, H: 45 },
+  30: { H: 50 },
+  35: { H: 55 },
+};
+
+// 16D family CLTD row — Table 4A p. 363 (attic temp 110°F; 16D = vented,
+// no RB, dark tile/slate/concrete; 16DR = vented WITH radiant barrier,
+// white/light shingles etc.; 16DF = light roof + attic fan). Anchor
+// cross-check: 15/L = 34 = Walker §13 option 16DR-38aw.
+const CLTD_16D: Partial<Record<CTDBin, CLTDCell>> = {
+  10: { L: 29, M: 25 },
+  15: { L: 34, M: 30, H: 25 },
+  20: { L: 39, M: 35, H: 30 },
+  25: { M: 40, H: 35 },
+  30: { H: 40 },
+  35: { H: 45 },
+};
 
 const CEILINGS: ConstructionVariant[] = [
   // Smith — R-30, attic, dark shingle roof
@@ -573,12 +614,10 @@ const CEILINGS: ConstructionVariant[] = [
     description: 'Ceiling under attic, R-30 insulation, dark shingle roof, no radiant barrier',
     kind: 'ceiling',
     referenceArea: 'net_ceiling_area',
-    uValue: 0.032,
-    // TABLE-4D-GAP: only the Smith reference cell is captured.
-    // Source: Smith Form J1, line 10-a (docs/acca-validation-report.md L166)
-    // — HTM_c 1.60 = U 0.032 × CLTD 50, at CTD=15 / DR=M (Iowa). Other
-    // (CTD,DR) cells require the ACCA Manual J Table 4D matrix (not in repo).
-    directCLTD: { 15: { M: 50 } } as Partial<Record<CTDBin, CLTDCell>>,
+    uValue: 0.032, // Table 4A p.362: 16B-30, R-30 → U 0.032 (verified vs source)
+    // Full 16B family row (Table 4A p.362) — anchor 15/M = 50 also cited by
+    // Smith Form J1 line 10-a (HTM_c 1.60 = U 0.032 × CLTD 50, Iowa).
+    directCLTD: CLTD_16B,
   },
   // Walker — R-38, white tile roof, no RB
   {
@@ -587,10 +626,10 @@ const CEILINGS: ConstructionVariant[] = [
     kind: 'ceiling',
     referenceArea: 'net_ceiling_area',
     uValue: 0.026,
-    // TABLE-4D-GAP: only the Walker reference cell is captured.
-    // Source: Walker Form J1, line 10-a — selected ceiling 16F-38tw at
-    // CTD=15 / DR=L (Florida). CLTD 19 (white tile roof, R-38, no radiant
-    // barrier). Other (CTD,DR) cells require ACCA Manual J Table 4D.
+    // PENDING: 16F family row lives on Table 4A p.364 — not yet photographed.
+    // Only the Walker reference cell is captured (Walker Form J1 line 10-a,
+    // CTD=15 / DR=L, Florida — CLTD 19). Other cells THROW attributably
+    // until the p.364 row is transcribed. Do NOT derive from other families.
     directCLTD: { 15: { L: 19 } } as Partial<Record<CTDBin, CLTDCell>>,
   },
   // Walker comparison options (not selected)
@@ -600,11 +639,10 @@ const CEILINGS: ConstructionVariant[] = [
     kind: 'ceiling',
     referenceArea: 'net_ceiling_area',
     uValue: 0.026,
-    // TABLE-4D-GAP: only the Walker reference cell is captured.
-    // Source: Walker §13 ceiling comparison options — 16DR-38aw (white
-    // shingle roof, R-38, WITH radiant barrier) at CTD=15 / DR=L. CLTD 34.
-    // Other (CTD,DR) cells require ACCA Manual J Table 4D.
-    directCLTD: { 15: { L: 34 } } as Partial<Record<CTDBin, CLTDCell>>,
+    // Full 16D family row (Table 4A p.363; 16DR = vented attic WITH radiant
+    // barrier, white/light shingles) — anchor 15/L = 34 also cited by
+    // Walker §13 ceiling comparison options.
+    directCLTD: CLTD_16D,
   },
   {
     id: '16C-38aw',
@@ -612,11 +650,9 @@ const CEILINGS: ConstructionVariant[] = [
     kind: 'ceiling',
     referenceArea: 'net_ceiling_area',
     uValue: 0.026,
-    // TABLE-4D-GAP: only the Walker reference cell is captured.
-    // Source: Walker §13 ceiling comparison options — 16C-38aw (white
-    // shingle roof, R-38, NO radiant barrier) at CTD=15 / DR=L. CLTD 44.
-    // Other (CTD,DR) cells require ACCA Manual J Table 4D.
-    directCLTD: { 15: { L: 44 } } as Partial<Record<CTDBin, CLTDCell>>,
+    // Full 16C family row (Table 4A p.363) — anchor 15/L = 44 also cited by
+    // Walker §13 ceiling comparison options.
+    directCLTD: CLTD_16C,
   },
 ];
 

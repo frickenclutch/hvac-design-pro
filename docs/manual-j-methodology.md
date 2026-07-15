@@ -1,6 +1,9 @@
 # HVAC Design Pro — Manual J 8th Edition Methodology
 
-**Engine version:** `manualJ8-ts-1.1.0`
+**Engine version:** `manualJ8-ts-1.1.0` (as filed; current shipped engine is
+`manualJ8-ts-1.2.0` — 1.1.0 plus ceiling CLTD family rows 16B/16C/16D
+transcribed from Table 4A pp. 362-363 of the physical book on 2026-07-15;
+all 184/184 reference checks unchanged and CI-enforced on the current engine)
 **Reference standard:** ACCA Manual J 8th Edition, v2.50
 **Document status:** Submission package for ACCA software certification
 
@@ -84,7 +87,8 @@ findings, not failures, and are tracked separately from drift data.
 
 Every calculation result is stamped with `MANUAL_J8_ENGINE_VERSION` for
 audit traceability, persisted in the `calculations.engine_version`
-column of the D1 database. Current version: **`manualJ8-ts-1.1.0`**.
+column of the D1 database. Current version: **`manualJ8-ts-1.2.0`**
+(this document was filed under 1.1.0; see the header note).
 The platform L0 admin panel (`/admin`) shows the distribution of
 engine versions across all persisted calculations under "Q/A
 benchmarks" → "Engine versions in production".
@@ -542,7 +546,7 @@ Manual J §13. The engine respects this distinction.
 Every calculation result carries the engine version stamp:
 
 ```typescript
-export const MANUAL_J8_ENGINE_VERSION = 'manualJ8-ts-1.1.0';
+export const MANUAL_J8_ENGINE_VERSION = 'manualJ8-ts-1.2.0';
 ```
 
 This value is persisted in the D1 `calculations.engine_version` column

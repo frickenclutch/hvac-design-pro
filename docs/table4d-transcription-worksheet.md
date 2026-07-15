@@ -55,42 +55,34 @@ the problem.)
 3. Transcribe the value exactly as printed (including decimals).
 4. Note the transcriber + date at the top of each matrix.
 
-## Cells needed
+## Cells needed — TRANSCRIBED 2026-07-15 (16B/16C/16D) from source photos
 
-### Priority 1 — unblocks every observed production failure (2 cells)
-
-Construction **16B-30ad** (ceiling under attic, R-30, dark shingle roof, no RB):
-
-```
-Table 4D row for 16B-30ad, page ____ , transcribed by ________ on ________
-
-  CTD bin 15, DR H  →  ____      ← unblocks 5+ projects (CTD=11 climates)
-  CTD bin 20, DR M  →  ____      ← unblocks 3+ projects (CTD=20 climates)
-```
-
-### Priority 2 — full rows for the four encoded ceilings (future-proof)
-
-While the book is open, transcribe every **printed** cell of the Table 4D row for
-each construction below (bins 10/15/20/25/30/35 × DR L/M/H; skip unprinted combos).
-Known cert-anchored cells shown for cross-checking — if the book disagrees with an
-anchor, STOP and flag it (the anchor came from the ACCA reference-case validation):
-
-| Construction | Description | Anchor (already encoded) |
-|---|---|---|
-| `16B-30ad` | R-30, dark shingle, no RB | 15/M = **50** |
-| `16F-38tw` | R-38, white tile, no RB | 15/L = **19** |
-| `16DR-38aw` | R-38, white shingle, WITH RB | 15/L = **34** |
-| `16C-38aw` | R-38, white shingle, no RB | 15/L = **44** |
+Ceiling CLTDs are printed in **Table 4A** as one row per FAMILY (16A..16F, keyed
+by attic temperature), shared by every R-value variant. Transcribed by Claude from
+Nathan Griffith's photographs of the physical book; encoded in
+`frontend/src/engines/manualJ8/tables/constructions.ts` with golden tests in
+`__tests__/ceilingCltd.test.ts`. All three pre-existing cert anchors matched their
+family rows exactly (✓ below), and rows carry the book's arithmetic structure
+(+5 per CTD bin step, −10 per attic-temp tier).
 
 ```
-16B-30ad  (page ____):  10/L __  10/M __  15/L __  15/M 50✓  15/H __  20/L __  20/M __  20/H __  25/M __  25/H __  30/H __  35/H __
-16F-38tw  (page ____):  10/L __  10/M __  15/L 19✓ 15/M __  15/H __  20/L __  20/M __  20/H __  25/M __  25/H __  30/H __  35/H __
-16DR-38aw (page ____):  10/L __  10/M __  15/L 34✓ 15/M __  15/H __  20/L __  20/M __  20/H __  25/M __  25/H __  30/H __  35/H __
-16C-38aw  (page ____):  10/L __  10/M __  15/L 44✓ 15/M __  15/H __  20/L __  20/M __  20/H __  25/M __  25/H __  30/H __  35/H __
+Column order: 10/L 10/M | 15/L 15/M 15/H | 20/L 20/M 20/H | 25/M 25/H | 30/H | 35/H
+
+16A (p.362, attic 150°F): 69 65 | 74  70  65 | 79 75 70 | 80 75 | 80 | 85   (transcribed, NOT encoded — no 16A registry variant; RE-VERIFY against the p.362 photo before ever encoding: this row has no cert anchor to cross-check it)
+16B (p.362, attic 130°F): 49 45 | 54 [50✓] 45 | 59 55 50 | 60 55 | 60 | 65  ← ENCODED (16B-30ad; 15/M=50 = Smith anchor)
+16C (p.363, attic 120°F): 39 35 | [44✓] 40 35 | 49 45 40 | 50 45 | 50 | 55  ← ENCODED (16C-38aw; 15/L=44 = Walker anchor)
+16D (p.363, attic 110°F): 29 25 | [34✓] 30 25 | 39 35 30 | 40 35 | 40 | 45  ← ENCODED (16DR-38aw; 15/L=34 = Walker anchor)
 ```
 
-(Blank slots above mirror Table 4B's realistic-climate layout as a GUIDE to which
-cells are probably printed — transcribe what the book actually shows, nothing more.)
+The two production-unblocking cells both live in the 16B row: **15/H = 45**
+(CTD=11 upstate-NY climates) and **20/M = 55**.
+
+### STILL PENDING — 16E/16F family rows (Table 4A p. 364)
+
+Needed for `16F-38tw` (white tile, anchor 15/L = **19** must match the printed
+row) and to future-proof 16E. Photograph p. 364 (and any continuation of the
+ceiling family blocks). Until then 16F cells beyond the anchor THROW attributably
+— correct behavior, do NOT derive from the other families' arithmetic.
 
 ## Where the values go
 
