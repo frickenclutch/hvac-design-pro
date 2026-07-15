@@ -559,9 +559,15 @@ const BASEMENT_WALLS: ConstructionVariant[] = [
 // │ bin step, −10 per attic-temp tier); (3) the sparse (CTD, DR) layout     │
 // │ matches Table 4B's exactly. Golden tests: __tests__/ceilingCltd.test.ts │
 // │                                                                          │
-// │ STILL PENDING: the 16E/16F family rows (p. 364) — awaiting the next     │
-// │ photo batch. 16F-38tw keeps its single Walker anchor cell (15/L=19)     │
-// │ until then; its other cells THROW attributably (correct behavior).      │
+// │ COMPLETE (2026-07-15, second photo batch): the 16F family row (p. 364,  │
+// │ attic temp 95°F — vented, no RB, white tile/metal/membrane) is encoded  │
+// │ below; its 15/L=19 cell matched the Walker cert anchor exactly. The     │
+// │ 16A and 16E rows are transcribed in docs/table4d-transcription-         │
+// │ worksheet.md but NOT encoded (no registry variant uses them yet — they  │
+// │ must be re-verified against the p.362/364 photos before ever encoding). │
+// │ Family rows verify against the book's linear structure: the 10/L cell   │
+// │ equals attic_temp − 81 for every family (150→69, 130→49, 120→39,        │
+// │ 110→29, 105→24, 95→14).                                                  │
 // │ Transcription rules unchanged: values come from the book only — NO      │
 // │ interpolation, no extrapolation from Table 4B, no legacy-formula        │
 // │ derivation. The round-up lookup in lookup.ts covers new bins the        │
@@ -607,6 +613,20 @@ const CLTD_16D: Partial<Record<CTDBin, CLTDCell>> = {
   35: { H: 45 },
 };
 
+// 16F family CLTD row — Table 4A p. 364 (attic temp 95°F @ 95°F outdoor;
+// 16F = vented attic, no RB, white tile/slate/concrete, white metal or
+// white membrane; 16FR = vented WITH radiant barrier, light/white tile
+// etc.). Anchor cross-check: 15/L = 19 = Walker Form J1 line 10-a
+// (selected ceiling 16F-38tw, Florida).
+const CLTD_16F: Partial<Record<CTDBin, CLTDCell>> = {
+  10: { L: 14, M: 10 },
+  15: { L: 19, M: 15, H: 10 },
+  20: { L: 24, M: 20, H: 15 },
+  25: { M: 25, H: 20 },
+  30: { H: 25 },
+  35: { H: 30 },
+};
+
 const CEILINGS: ConstructionVariant[] = [
   // Smith — R-30, attic, dark shingle roof
   {
@@ -626,11 +646,9 @@ const CEILINGS: ConstructionVariant[] = [
     kind: 'ceiling',
     referenceArea: 'net_ceiling_area',
     uValue: 0.026,
-    // PENDING: 16F family row lives on Table 4A p.364 — not yet photographed.
-    // Only the Walker reference cell is captured (Walker Form J1 line 10-a,
-    // CTD=15 / DR=L, Florida — CLTD 19). Other cells THROW attributably
-    // until the p.364 row is transcribed. Do NOT derive from other families.
-    directCLTD: { 15: { L: 19 } } as Partial<Record<CTDBin, CLTDCell>>,
+    // Full 16F family row (Table 4A p.364) — anchor 15/L = 19 also cited by
+    // Walker Form J1 line 10-a (the selected Walker ceiling).
+    directCLTD: CLTD_16F,
   },
   // Walker comparison options (not selected)
   {

@@ -77,12 +77,26 @@ Column order: 10/L 10/M | 15/L 15/M 15/H | 20/L 20/M 20/H | 25/M 25/H | 30/H | 3
 The two production-unblocking cells both live in the 16B row: **15/H = 45**
 (CTD=11 upstate-NY climates) and **20/M = 55**.
 
-### STILL PENDING — 16E/16F family rows (Table 4A p. 364)
+### COMPLETE — 16E/16F rows transcribed from p. 364 (second photo batch)
 
-Needed for `16F-38tw` (white tile, anchor 15/L = **19** must match the printed
-row) and to future-proof 16E. Photograph p. 364 (and any continuation of the
-ceiling family blocks). Until then 16F cells beyond the anchor THROW attributably
-— correct behavior, do NOT derive from the other families' arithmetic.
+```
+16E (p.364, attic 105°F): 24 20 | 29 25 20 | 34 30 25 | 35 30 | 35 | 40   (transcribed, NOT encoded — no 16E registry variant; RE-VERIFY against the p.364 photo before ever encoding: no cert anchor)
+16F (p.364, attic  95°F): 14 10 | [19✓] 15 10 | 24 20 15 | 25 20 | 25 | 30 ← ENCODED (16F-38tw; 15/L=19 = Walker anchor, matched exactly)
+```
+
+Linear structure verified across ALL six families: the 10/L cell equals
+attic_temp − 81 (150→69, 130→49, 120→39, 110→29, 105→24, 95→14). Every
+registry ceiling (16B-30ad, 16C-38aw, 16DR-38aw, 16F-38tw) now carries its
+complete book row — no ceiling data gaps remain. Engine: manualJ8-ts-1.2.1.
+
+### Also photographed, available for future work (not needed today)
+
+- **p. 365 — Construction 17 (Ceiling on Exposed Beams, 17A dark)**: full
+  CLTD matrix varying by deck construction / U-value tier. No 17-series
+  variant exists in the registry; transcribe from the photo if one is added.
+- **pp. 345-353, 355-361** — Table 4A constructions 11/12/13/14/15 (doors,
+  frame/block/alt/basement walls): source material for a full registry-vs-
+  book verification sweep (doors + Table 4B already verified cell-for-cell).
 
 ## Where the values go
 

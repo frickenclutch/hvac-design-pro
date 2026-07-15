@@ -10,18 +10,20 @@
  * table is sunroom ambient temperatures; corrected against the physical
  * book.)
  *
- * The 16B / 16C / 16D family rows below were transcribed from photographs of
- * the physical book (pp. 362-363) on 2026-07-15 and triple-verified:
+ * The 16B / 16C / 16D family rows (pp. 362-363) and the 16F row (p. 364)
+ * were transcribed from photographs of the physical book on 2026-07-15 and
+ * triple-verified:
  *   1. every previously-encoded cert anchor matches its family row exactly
- *      (16B 15/M=50 Smith line 10-a; 16C 15/L=44 and 16D 15/L=34 Walker §13);
- *   2. rows carry the book's arithmetic structure (+5 per CTD bin step,
- *      −10 per attic-temperature tier);
+ *      (16B 15/M=50 Smith line 10-a; 16C 15/L=44 and 16D 15/L=34 Walker §13;
+ *      16F 15/L=19 Walker line 10-a);
+ *   2. rows carry the book's arithmetic structure (+5 per CTD bin step; the
+ *      10/L cell equals attic_temp − 81 for every family);
  *   3. the sparse (CTD, DR) layout matches Table 4B's exactly.
  *
- * STILL OPEN: the 16E/16F family rows (p. 364) are not yet transcribed.
- * 16F-38tw carries only its Walker anchor cell — every other cell must
- * FAIL LOUD AND ATTRIBUTABLY rather than emit a silently-wrong,
- * permit-bound number. Section (3) locks that contract in.
+ * All four registry ceilings now carry complete family rows. Section (3)
+ * locks the FAIL-LOUD contract for future data gaps using a synthetic
+ * sparse matrix — a missing cell must throw attributably rather than emit
+ * a silently-wrong, permit-bound number.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -60,6 +62,8 @@ const FAMILY_ROWS: { id: string; page: number; cells: Cell[] }[] = [
   { id: '16C-38aw', page: 363, cells: row([39, 35, 44, 40, 35, 49, 45, 40, 50, 45, 50, 55]) },
   // 16D family (16DR = vented + radiant barrier, light shingles; 110°F). p. 363.
   { id: '16DR-38aw', page: 363, cells: row([29, 25, 34, 30, 25, 39, 35, 30, 40, 35, 40, 45]) },
+  // 16F — vented attic, no RB, white tile/metal/membrane (attic 95°F). p. 364.
+  { id: '16F-38tw', page: 364, cells: row([14, 10, 19, 15, 10, 24, 20, 15, 25, 20, 25, 30]) },
 ];
 
 describe('Ceiling CLTD — transcribed Table 4A family rows (golden, per book page)', () => {
@@ -86,9 +90,9 @@ describe('Ceiling CLTD — transcribed Table 4A family rows (golden, per book pa
     expect(ceiling('16F-38tw').directCLTD![15]!.L).toBe(19);  // Walker line 10-a
   });
 
-  it('CTD ≤ 10 resolves to the printed bin-10 cells (1.2.0 output correction)', () => {
-    // Under the 1.1.0 single-cell matrices, a CTD ≤ 10 demand fell through
-    // the EMPTY bin 10 into the bin-15 anchor (50/44/34 — sparse-matrix
+  it('CTD ≤ 10 resolves to the printed bin-10 cells (1.2.x output correction)', () => {
+    // Under the single-cell anchor matrices, a CTD ≤ 10 demand fell through
+    // the EMPTY bin 10 into the bin-15 anchor (50/44/34/19 — sparse-matrix
     // fall-through artifacts, 5 too high). With bin 10 populated from the
     // book, these demands land on the printed values. Locks the corrected
     // behavior so it can never silently regress to the artifact.
@@ -96,6 +100,7 @@ describe('Ceiling CLTD — transcribed Table 4A family rows (golden, per book pa
     expect(lookupDirectCLTD(ceiling('16B-30ad').directCLTD!, 10, 'M')).toBe(45);
     expect(lookupDirectCLTD(ceiling('16C-38aw').directCLTD!, 9, 'L')).toBe(39);
     expect(lookupDirectCLTD(ceiling('16DR-38aw').directCLTD!, 10, 'L')).toBe(29);
+    expect(lookupDirectCLTD(ceiling('16F-38tw').directCLTD!, 8, 'L')).toBe(14);
   });
 
   it('family rows follow the book arithmetic (+5 per bin step within a row)', () => {
@@ -140,42 +145,62 @@ describe('Ceiling CLTD — end-to-end HTM_c (U × CLTD)', () => {
   });
 });
 
-// ── (3) Remaining-gap guard — 16E/16F await p. 364; no fabricated values ────
-describe('Ceiling CLTD — 16F gap guard (p. 364 not yet transcribed)', () => {
-  it('off-DR 16F cell (CTD=15/H) THROWS rather than guessing', () => {
-    const c = ceiling('16F-38tw');
-    expect(() => lookupDirectCLTD(c.directCLTD!, 15, 'H')).toThrow();
+// ── (3) Data-gap contract — a missing cell must FAIL LOUD, never guess ──────
+// All four registry ceilings now carry complete family rows, so the guard
+// uses a SYNTHETIC sparse matrix (the exact single-anchor shape 16F had
+// before p. 364 was transcribed). If a future construction ships with a
+// partial matrix, this is the behavior it inherits.
+describe('Ceiling CLTD — data-gap contract (synthetic sparse matrix)', () => {
+  const sparse = { 15: { L: 19 } } as Parameters<typeof lookupDirectCLTD>[0];
+
+  it('off-DR cell (CTD=15/H) THROWS rather than guessing', () => {
+    expect(() => lookupDirectCLTD(sparse, 15, 'H')).toThrow();
   });
 
-  it('off-bin 16F cell (CTD=25/M) THROWS rather than guessing', () => {
-    const c = ceiling('16F-38tw');
-    expect(() => lookupDirectCLTD(c.directCLTD!, 25, 'M')).toThrow();
+  it('off-bin cell (CTD=25/M) THROWS rather than guessing', () => {
+    expect(() => lookupDirectCLTD(sparse, 25, 'M')).toThrow();
   });
 
-  it('the throw is ATTRIBUTABLE — names Table 4A, the element, and the missing cell', () => {
-    const input: OpaqueInput = { id: '10-a', label: '16F-38tw', constructionId: '16F-38tw', area: 1752 };
+  it('the throw is ATTRIBUTABLE — names the source, bin, and DR', () => {
     let msg = '';
     try {
-      calculateOpaque(input, /*ctd*/ 20, /*htd*/ 23, /*dr*/ 'M');
+      lookupDirectCLTD(sparse, 20, 'M', 'Manual J Table 4A (ceiling "synthetic-test")');
     } catch (e) {
       msg = (e as Error).message;
     }
     expect(msg).toMatch(/Table 4A/);
-    expect(msg).toMatch(/16F-38tw/);
+    expect(msg).toMatch(/synthetic-test/);
     expect(msg).toMatch(/bin 20/);
     expect(msg).toMatch(/DR=M/);
   });
 
   it('throwing yields NO number — a silently-wrong CLTD is the prohibited outcome', () => {
-    const c = ceiling('16F-38tw');
     let value: number | undefined;
     let threw = false;
     try {
-      value = lookupDirectCLTD(c.directCLTD!, 30, 'M');
+      value = lookupDirectCLTD(sparse, 30, 'M');
     } catch {
       threw = true;
     }
     expect(threw).toBe(true);
     expect(value).toBeUndefined();
+  });
+
+  it('every registry ceiling resolves across the full realistic climate envelope', () => {
+    // The inverse of the gap guard: no registry ceiling may throw for any
+    // (CTD, DR) demand inside the book's printed envelope. DR-realistic
+    // pairs mirror the printed columns (L/M at low CTD, H at high CTD).
+    const demands: Array<[number, 'L' | 'M' | 'H']> = [
+      [5, 'L'], [10, 'M'], [11, 'H'], [15, 'L'], [18, 'M'], [20, 'H'],
+      [22, 'M'], [25, 'H'], [30, 'H'], [35, 'H'],
+    ];
+    for (const id of ['16B-30ad', '16C-38aw', '16DR-38aw', '16F-38tw']) {
+      for (const [ctd, dr] of demands) {
+        expect(
+          () => lookupDirectCLTD(ceiling(id).directCLTD!, ctd, dr),
+          `${id} must resolve CTD=${ctd}/${dr}`,
+        ).not.toThrow();
+      }
+    }
   });
 });

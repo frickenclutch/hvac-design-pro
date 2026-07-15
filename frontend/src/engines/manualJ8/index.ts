@@ -161,5 +161,13 @@ export { buildFormJ1 } from './formJ1';
  *   · All cert-anchored cells are embedded unchanged; Smith (CTD=15), Walker
  *     (CTD=15) and Cobb (CTD=18) resolve identically — 184/184 unaffected,
  *     so the 1.1.0 ACCA filing remains valid for the reference climates.
+ *
+ * 1.2.1 (2026-07-15): 16F family row transcribed from Table 4A p. 364 —
+ * completes the last registry ceiling (16F-38tw, Walker's white-tile
+ * selection; anchor 15/L=19 matched the printed row exactly). Same
+ * correction class as 1.2.0 for CTD ≤ 10 / DR=L on 16F: previously fell
+ * through the empty bin 10 into the anchor (19), now resolves to the
+ * printed bin-10 cell (14). All four registry ceilings now carry complete
+ * book rows; cert anchors unchanged, 184/184 unaffected.
  */
-export const MANUAL_J8_ENGINE_VERSION = 'manualJ8-ts-1.2.0';
+export const MANUAL_J8_ENGINE_VERSION = 'manualJ8-ts-1.2.1';
