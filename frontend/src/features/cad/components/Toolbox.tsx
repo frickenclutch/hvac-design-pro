@@ -1,8 +1,11 @@
-import React, { useRef, useState, useCallback, useEffect } from 'react';
-import { MousePointer2, Hand, SquarePen, LayoutGrid, DoorOpen, Wind, Ruler, Type, ScanLine, ImagePlus, Package, Thermometer, ChevronLeft, ChevronRight, Cylinder, GitBranch, Diamond, Minus, Plus, GripVertical } from 'lucide-react';
+import React, { useRef, useState, useCallback, useEffect, useLayoutEffect } from 'react';
+import { MousePointer2, Hand, SquarePen, LayoutGrid, DoorOpen, Wind, Ruler, Type, ScanLine, ImagePlus, Crosshair, Sparkles, Package, Thermometer, ChevronLeft, ChevronRight, Cylinder, GitBranch, Diamond, Minus, Plus, GripVertical } from 'lucide-react';
 import { useCadStore } from '../store/useCadStore';
-import type { ToolType, UnderlayImage } from '../store/useCadStore';
+import type { ToolType } from '../store/useCadStore';
+import { importUnderlayFiles } from '../utils/underlayImport';
 import { usePreferencesStore } from '../../../stores/usePreferencesStore';
+import { useGuidanceStore, glimmerClass } from '../../../stores/useGuidanceStore';
+import { toast } from '../../../stores/useToastStore';
 import AssetLibrary from './AssetLibrary';
 import BuildingScience from './BuildingScience';
 
@@ -130,6 +133,49 @@ export default function Toolbox() {
     });
   };
 
+  // ── Viewport auto-fit ─────────────────────────────────────────────────────
+  // The rail can be taller than a short viewport (laptop, 800px-high window),
+  // which leaves the bottom tools unreachable (fixed position — no scroll).
+  // Compute a fit scale from the transform-independent offsetHeight and never
+  // render larger than fits. Non-destructive: the user's saved scale pref is
+  // untouched and wins again on a taller viewport.
+  const [fitScale, setFitScale] = useState(1);
+  useLayoutEffect(() => {
+    const compute = () => {
+      const el = panelRef.current;
+      if (!el || !el.offsetHeight) return;
+      const avail = window.innerHeight - EDGE_MARGIN * 2;
+      setFitScale(Math.min(1.25, avail / el.offsetHeight));
+    };
+    compute();
+    window.addEventListener('resize', compute);
+    return () => window.removeEventListener('resize', compute);
+  }, [panelToolbox, is3DViewOpen]);
+  const effectiveScale = Math.min(toolboxScale, Math.max(0.7, fitScale));
+
+  // ── Guidance glimmer ──────────────────────────────────────────────────────
+  // The next-ideal-tool hint. Selecting any real tool counts as "the user
+  // chose an option", which dismisses the active CAD hint (whether or not it
+  // was the hinted one). Returning to 'select' is not a choice.
+  const guidanceHint = useGuidanceStore(s => s.hint);
+  useEffect(() => {
+    if (activeTool !== 'select') useGuidanceStore.getState().clearHint('cad_');
+  }, [activeTool]);
+
+  // ── AI blueprint extraction ───────────────────────────────────────────────
+  const handleAiExtract = () => {
+    useGuidanceStore.getState().clearHint('cad_');
+    const state = useCadStore.getState();
+    const floor = state.floors.find(f => f.id === state.activeFloorId);
+    const underlays = floor?.underlays ?? [];
+    if (underlays.length === 0) {
+      toast.warning('Import a blueprint first (PDF or image), then run AI takeoff.');
+      return;
+    }
+    const target = underlays[underlays.length - 1];
+    state.setAiExtractRequest({ underlayId: target.id, underlayName: target.name, dataUrl: target.dataUrl });
+  };
+
   // ── Image import ────────────────────────────────────────────────────────
   const handleImportImage = () => {
     fileInputRef.current?.click();
@@ -138,71 +184,8 @@ export default function Toolbox() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
-    for (let i = 0; i < files.length; i++) {
-      processImageFile(files[i]);
-    }
+    importUnderlayFiles(files);
     e.target.value = '';
-  };
-
-  const processImageFile = (file: File) => {
-    const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
-    if (file.size > MAX_IMAGE_SIZE) {
-      alert(`Image too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 10 MB.`);
-      return;
-    }
-    const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/svg+xml'];
-    if (file.type === 'application/pdf') {
-      alert('PDF import is not yet supported. Please convert your PDF to PNG or JPG first.');
-      return;
-    }
-    if (!validTypes.includes(file.type)) return;
-
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      if (!dataUrl) return;
-
-      const img = new Image();
-      img.onload = () => {
-        let w = img.naturalWidth;
-        let h = img.naturalHeight;
-        const maxW = 600;
-        const maxH = 400;
-        if (w > maxW) { const r = maxW / w; w *= r; h *= r; }
-        if (h > maxH) { const r = maxH / h; w *= r; h *= r; }
-
-        const state = useCadStore.getState();
-        const canvas = state.canvas;
-        let cx = 300, cy = 300;
-        if (canvas) {
-          const vpt = canvas.viewportTransform;
-          const zoom = canvas.getZoom();
-          if (vpt) {
-            cx = ((canvas.width ?? 800) / 2 - vpt[4]) / zoom;
-            cy = ((canvas.height ?? 600) / 2 - vpt[5]) / zoom;
-          }
-        }
-
-        const underlayId = `underlay-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        const underlayImg: UnderlayImage = {
-          id: underlayId,
-          name: file.name,
-          dataUrl,
-          x: cx - w / 2,
-          y: cy - h / 2,
-          width: w,
-          height: h,
-          rotation: 0,
-          opacity: 1,
-          locked: false,
-        };
-
-        state.addUnderlay(underlayImg);
-        state.markDirty();
-      };
-      img.src = dataUrl;
-    };
-    reader.readAsDataURL(file);
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -240,7 +223,7 @@ export default function Toolbox() {
       style={{
         left: pos.x,
         top: pos.y,
-        transform: `scale(${toolboxScale})`,
+        transform: `scale(${effectiveScale})`,
         transformOrigin: 'top left',
       }}
     >
@@ -295,6 +278,7 @@ export default function Toolbox() {
             label="Draw Wall (W)"
             active={activeTool === 'draw_wall'}
             onClick={() => setActiveTool('draw_wall')}
+            glimmer={guidanceHint === 'cad_draw_wall'}
           />
 
           <ToolButton
@@ -397,6 +381,7 @@ export default function Toolbox() {
             label="Detect Rooms"
             active={activeTool === 'room_detect'}
             onClick={() => setActiveTool('room_detect')}
+            glimmer={guidanceHint === 'cad_detect_rooms'}
           />
 
           {/* Building Science — thermal interop */}
@@ -417,18 +402,42 @@ export default function Toolbox() {
 
         <div className="w-8 h-px bg-slate-700/60 rounded-full" />
 
-        {/* Import image */}
+        {/* Import blueprint / image + scale calibration */}
         <div className="py-1.5">
           <div className="relative group">
             <button
               onClick={handleImportImage}
               className="p-3 mx-2 rounded-xl transition-all duration-300 group relative text-slate-400 hover:text-slate-100 hover:bg-slate-800/80 border border-transparent"
-              aria-label="Import Image"
+              aria-label="Import Blueprint (PDF or Image)"
             >
               <ImagePlus className="w-5 h-5" />
             </button>
             <div className="absolute left-full top-1/2 -translate-y-1/2 ml-4 px-3 py-1.5 bg-slate-800/90 border border-slate-700 text-slate-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 backdrop-blur-md shadow-xl">
-              Import Image
+              Import Blueprint (PDF / Image)
+              <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-2 bg-slate-800/90 border-l border-b border-slate-700 rotate-45" />
+            </div>
+          </div>
+
+          <ToolButton
+            id="calibrate_scale"
+            icon={<Crosshair className="w-5 h-5" />}
+            label="Calibrate Scale"
+            active={activeTool === 'calibrate_scale'}
+            onClick={() => setActiveTool('calibrate_scale')}
+            glimmer={guidanceHint === 'cad_calibrate_scale'}
+          />
+
+          {/* AI takeoff — Claude-vision room extraction with human review */}
+          <div className="relative group">
+            <button
+              onClick={handleAiExtract}
+              className={`p-3 mx-2 rounded-xl transition-all duration-300 group relative text-slate-400 hover:text-slate-100 hover:bg-slate-800/80 border border-transparent${glimmerClass('cad_ai_extract', guidanceHint)}`}
+              aria-label="AI Extract Rooms (review before import)"
+            >
+              <Sparkles className="w-5 h-5" />
+            </button>
+            <div className="absolute left-full top-1/2 -translate-y-1/2 ml-4 px-3 py-1.5 bg-slate-800/90 border border-slate-700 text-slate-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 backdrop-blur-md shadow-xl">
+              AI Extract Rooms
               <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-2 bg-slate-800/90 border-l border-b border-slate-700 rotate-45" />
             </div>
           </div>
@@ -494,10 +503,12 @@ interface ToolButtonProps {
   active: boolean;
   onClick: () => void;
   primary?: boolean;
+  /** Next-best-action guidance — adds the glimmer animation. */
+  glimmer?: boolean;
 }
 
-function ToolButton({ icon, label, active, onClick, primary }: ToolButtonProps) {
-  const baseClass = "p-3 mx-2 rounded-xl transition-all duration-300 group relative";
+function ToolButton({ icon, label, active, onClick, primary, glimmer }: ToolButtonProps) {
+  const baseClass = `p-3 mx-2 rounded-xl transition-all duration-300 group relative${glimmer ? ' guidance-glimmer' : ''}`;
 
   let stateClass = "text-slate-400 hover:text-slate-100 hover:bg-slate-800/80 border border-transparent";
 

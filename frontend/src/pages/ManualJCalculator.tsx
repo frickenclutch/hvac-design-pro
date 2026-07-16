@@ -29,6 +29,7 @@ import { buildFormJ1, MANUAL_J8_ENGINE_VERSION } from '../engines/manualJ8';
 import { roomInputsToFormJ1Input } from '../engines/manualJ8/adapters/legacy';
 import { syncCalcToD1 } from '../features/calculations/calcStorage';
 import { toast } from '../stores/useToastStore';
+import { useGuidanceStore, glimmerClass } from '../stores/useGuidanceStore';
 
 // ── Display formatting (engine values are full-precision floats) ─────────────
 /** Round to integer and format with locale separators for display */
@@ -77,6 +78,7 @@ export default function ManualJCalculator() {
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const activeProjectName = useProjectStore((s) => s.activeProjectName);
   const displayName = activeProjectName || 'HVAC DesignPro';
+  const guidanceHint = useGuidanceStore((s) => s.hint);
 
   // Project gate: show dialog if no project selected
   const [gateAccepted, setGateAccepted] = useState(!!activeProjectId);
@@ -189,6 +191,8 @@ export default function ManualJCalculator() {
     const converted = convertAllFloorsToManualJ(floorsWithRooms);
     setRooms(converted);
     setWholeHouse(null);
+    // Rooms are in — next ideal action is running the load calc
+    useGuidanceStore.getState().setHint('mj_calculate');
   };
 
   const exportToCad = () => {
@@ -290,6 +294,8 @@ export default function ManualJCalculator() {
       return;
     }
     setWholeHouse(res);
+    // Results in hand — next ideal action is the estimate/supplier funnel
+    useGuidanceStore.getState().setHint('mj_find_retailer');
     // Persist results so Manual D can import them (project-scoped)
     try {
       localStorage.setItem(getResultsKey(activeProjectId), JSON.stringify(res));
@@ -1064,8 +1070,8 @@ export default function ManualJCalculator() {
                 <ArrowRight className="w-3.5 h-3.5" />
                 Sync to CAD
               </button>
-              <button onClick={importFromCad}
-                className="text-sm font-bold text-sky-400 hover:text-sky-300 transition-colors flex items-center gap-1.5"
+              <button onClick={() => { useGuidanceStore.getState().clearHint('mj_'); importFromCad(); }}
+                className={`text-sm font-bold text-sky-400 hover:text-sky-300 transition-colors flex items-center gap-1.5 px-2 py-1${glimmerClass('mj_import_cad', guidanceHint)}`}
                 title="Import detected rooms from all CAD floors">
                 <ArrowRight className="w-3.5 h-3.5 rotate-180" />
                 Import from CAD
@@ -1155,8 +1161,8 @@ export default function ManualJCalculator() {
 
         {/* Action Buttons */}
         <div className="flex flex-col sm:flex-row gap-3 mb-10">
-          <button onClick={runCalculation}
-            className="flex-1 py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold text-base sm:text-lg hover:bg-emerald-400 hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all flex items-center justify-center gap-3 min-h-[48px]">
+          <button onClick={() => { useGuidanceStore.getState().clearHint('mj_'); runCalculation(); }}
+            className={`flex-1 py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold text-base sm:text-lg hover:bg-emerald-400 hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all flex items-center justify-center gap-3 min-h-[48px]${glimmerClass('mj_calculate', guidanceHint)}`}>
             Calculate Loads <ArrowRight className="w-5 h-5" />
           </button>
           <button onClick={resetAll}
@@ -1205,6 +1211,7 @@ export default function ManualJCalculator() {
                 <Printer className="w-4 h-4" /> Print
               </button>
               <button onClick={() => {
+                  useGuidanceStore.getState().clearHint('mj_');
                   // Anchor the retailer finder + estimate to the JOB SITE. Prefer
                   // the ZIP the user auto-filled; else fall back to the active
                   // project's saved address. setProjectLocation must run BEFORE
@@ -1219,7 +1226,7 @@ export default function ManualJCalculator() {
                   useRetailerStore.getState().open();
                   if (wholeHouse) useRetailerStore.getState().generateEstimate(wholeHouse, conditions);
                 }}
-                className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 font-semibold text-sm hover:bg-amber-500/20 hover:border-amber-500/50 transition-all min-h-[44px]">
+                className={`flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 font-semibold text-sm hover:bg-amber-500/20 hover:border-amber-500/50 transition-all min-h-[44px]${glimmerClass('mj_find_retailer', guidanceHint)}`}>
                 <MapPin className="w-4 h-4" /> Find Retailer & Estimate
               </button>
             </div>

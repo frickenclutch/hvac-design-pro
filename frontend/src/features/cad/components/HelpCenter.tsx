@@ -2,7 +2,7 @@ import { useState } from 'react';
 import {
   HelpCircle, X, SquarePen,
   Layers, Building2, Keyboard, ChevronRight,
-  Save, Box, Thermometer, GitBranch, FolderOpen,
+  Save, Box, Thermometer, GitBranch, FolderOpen, FileText,
 } from 'lucide-react';
 
 interface HelpSection {
@@ -29,6 +29,33 @@ const sections: HelpSection[] = [
       {
         title: 'Selecting objects',
         desc: 'Switch to Select (V) to click on walls, openings, or HVAC units. Selected objects show their properties in the right panel where you can edit dimensions, materials, and thermal values.',
+      },
+    ],
+  },
+  {
+    id: 'blueprints',
+    title: 'Blueprints & AI Takeoff',
+    icon: <FileText className="w-4 h-4" />,
+    items: [
+      {
+        title: 'Import a blueprint (PDF or image)',
+        desc: 'Drag a blueprint file onto the canvas, or use the Import Blueprint button in the toolbox. PDFs are rasterized (multi-page PDFs ask which page is the floor plan) and placed on the locked Underlay layer at 30% opacity so you can trace over them. The original file is saved to the active project\'s files.',
+      },
+      {
+        title: 'Calibrate Scale',
+        desc: 'Blueprints import as pixels — calibrate before tracing. Pick the Calibrate Scale tool (crosshair), click both ends of a printed dimension on the plan, and type the real distance (30, 24.5, or 24\' 6" all work). The underlay rescales so traced walls read in real feet. Zoom in first for precision.',
+      },
+      {
+        title: 'AI Extract Rooms',
+        desc: 'The sparkles button sends the blueprint to the AI, which proposes a room schedule (names, dimensions, windows, exposure). Everything lands in a review dialog — edit or uncheck any room, then confirm to add them to Manual J. Nothing is applied without your review; you are the engineer of record.',
+      },
+      {
+        title: 'Glimmer hints',
+        desc: 'After each step, the next ideal tool softly glows — import → Calibrate Scale → Draw Wall → Detect Rooms → Manual J. Click it (or any other tool) and the hint disappears. With reduced motion enabled, the glow is a steady ring.',
+      },
+      {
+        title: 'Commercial plans',
+        desc: 'Manual J is residential-only. Commercial/assembly plans (warehouses, gyms, offices) are flagged during AI takeoff — treat results as budget estimates, not permit-grade calcs, until Manual N ships.',
       },
     ],
   },

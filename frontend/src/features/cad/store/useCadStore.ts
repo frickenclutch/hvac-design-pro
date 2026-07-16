@@ -16,7 +16,8 @@ export type ToolType =
   | 'draw_pipe'
   | 'draw_duct'
   | 'place_fitting'
-  | 'draw_radiant';
+  | 'draw_radiant'
+  | 'calibrate_scale';
 
 // ── Wall ────────────────────────────────────────────────────────────────────────
 export type WallMaterial = 'insulated_stud' | 'cmu' | 'concrete';
@@ -261,6 +262,31 @@ export interface DrawingInfo {
   screenY: number;
 }
 
+// ── Blueprint intake dialogs (ephemeral, never serialized) ──────────────────────
+// Multi-page PDF import pauses mid-rasterization until the user picks a page.
+export interface PdfPageRequest {
+  fileName: string;
+  numPages: number;
+  resolve: (page: number | null) => void;
+}
+
+// Scale calibration: two points clicked on the canvas, awaiting the real-world
+// distance between them. Applying scales the underlay about p1.
+export interface CalibrationRequest {
+  underlayId: string;
+  underlayName: string;
+  distPx: number;
+  p1: { x: number; y: number };
+}
+
+// AI extraction: a blueprint underlay queued for Claude-vision room takeoff.
+// The dialog owns the request → review → confirm lifecycle.
+export interface AiExtractRequest {
+  underlayId: string;
+  underlayName: string;
+  dataUrl: string;
+}
+
 // ── Serialized drawing ────────────────────────────────────────────────────────────
 // The canvas payload that serializeDrawing() emits and loadDrawing() reads —
 // persisted to localStorage and synced to D1 as the drawing's canvas_json.
@@ -395,6 +421,13 @@ interface CadState {
   // ── Live drawing HUD ────────────────────────────────────────────────────────
   drawingInfo: DrawingInfo | null;
   setDrawingInfo: (info: DrawingInfo | null) => void;
+
+  pdfPageRequest: PdfPageRequest | null;
+  setPdfPageRequest: (req: PdfPageRequest | null) => void;
+  calibrationRequest: CalibrationRequest | null;
+  setCalibrationRequest: (req: CalibrationRequest | null) => void;
+  aiExtractRequest: AiExtractRequest | null;
+  setAiExtractRequest: (req: AiExtractRequest | null) => void;
 
   // ── Multi-floor system ──────────────────────────────────────────────────────
   floors: Floor[];
@@ -576,6 +609,13 @@ export const useCadStore = create<CadState>((set, get) => {
     // ── Live drawing HUD ──────────────────────────────────────────────────────
     drawingInfo: null,
     setDrawingInfo: (info) => set({ drawingInfo: info }),
+
+    pdfPageRequest: null,
+    setPdfPageRequest: (req) => set({ pdfPageRequest: req }),
+    calibrationRequest: null,
+    setCalibrationRequest: (req) => set({ calibrationRequest: req }),
+    aiExtractRequest: null,
+    setAiExtractRequest: (req) => set({ aiExtractRequest: req }),
 
     // ── Multi-floor system ────────────────────────────────────────────────────
     floors: [defaultFloor],
@@ -1147,7 +1187,7 @@ try {
   if (saved) {
     const data = JSON.parse(saved) as Partial<SerializedDrawing>;
     const hasGeometry = data.floors?.some(
-      (f) => f.walls?.length > 0 || f.rooms?.length > 0 || f.openings?.length > 0
+      (f) => f.walls?.length > 0 || f.rooms?.length > 0 || f.openings?.length > 0 || (f.underlays?.length ?? 0) > 0
     );
     // Restore geometry if present, or at least restore workspace UI state
     const hasWorkspaceState = data.panelToolbox !== undefined || data.zoom !== undefined;

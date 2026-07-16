@@ -102,6 +102,26 @@ export interface ApiCalculationDetail extends Omit<ApiCalculationRow, 'inputs' |
   outputs: unknown;
 }
 
+// AI blueprint extraction — the structured proposal the Worker's Claude
+// vision endpoint returns. Mirrors workers/src/routes/ai.ts EXTRACTION_SCHEMA.
+export interface AiExtractedRoom {
+  name: string;
+  lengthFt: number;
+  widthFt: number;
+  ceilingHeightFt?: number;
+  windowCount?: number;
+  exposureDirection?: 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
+  confidence: 'high' | 'medium' | 'low';
+  notes?: string;
+}
+
+export interface AiBlueprintExtraction {
+  buildingType: 'residential' | 'commercial' | 'unknown';
+  rooms: AiExtractedRoom[];
+  scaleNote?: string;
+  warnings: string[];
+}
+
 export interface ApiFileRow {
   id: string;
   filename: string;
@@ -552,6 +572,19 @@ class ApiClient {
 
   async getCalculation(id: string) {
     return this.request<ApiCalculationDetail>(`/api/calculations/${id}`);
+  }
+
+  // AI blueprint extraction (Worker → Claude vision). Every result is a
+  // PROPOSAL — the UI requires human review before anything becomes calc input.
+  async extractBlueprint(imageDataUrl: string, projectId?: string, fileName?: string) {
+    return this.request<{
+      extraction: AiBlueprintExtraction;
+      engine: string;
+      usage: { inputTokens: number; outputTokens: number };
+    }>('/api/ai/blueprint-extract', {
+      method: 'POST',
+      body: JSON.stringify({ imageDataUrl, projectId, fileName }),
+    });
   }
 
   // File uploads (R2)

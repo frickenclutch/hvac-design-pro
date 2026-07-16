@@ -1,8 +1,11 @@
 import { useEffect, useRef, useCallback } from 'react';
 import * as fabric from 'fabric';
 import { useCadStore } from '../store/useCadStore';
-import type { WallMaterial, WallSegment, Opening, HvacUnit, PipeMaterial, PipeSegment, Annotation, UnderlayImage, DuctSegment, DuctFitting, DuctShape, DuctMaterial, DuctSide, DuctRole, FittingType } from '../store/useCadStore';
+import type { WallMaterial, WallSegment, Opening, HvacUnit, PipeMaterial, PipeSegment, Annotation, DuctSegment, DuctFitting, DuctShape, DuctMaterial, DuctSide, DuctRole, FittingType } from '../store/useCadStore';
 import { showSnapPulse, showPlacementConfirm, triggerHapticVibration } from '../utils/haptics';
+import { importUnderlayFiles } from '../utils/underlayImport';
+import { toast } from '../../../stores/useToastStore';
+import { useGuidanceStore } from '../../../stores/useGuidanceStore';
 
 // Fabric objects in this app carry a custom `name` tag — the PREFIX-encoded id
 // that maps a canvas object back to its store geometry (wall-, opening-, etc.).
@@ -78,74 +81,18 @@ export default function CadCanvas() {
   const fabricRef = useRef<fabric.Canvas | null>(null);
   const drawingRef = useRef<DrawingState>({ active: false, ghostLine: null, startX: 0, startY: 0 });
   const placementGhostRef = useRef<fabric.Object | null>(null);
+  // Scale-calibration state: first clicked point + visual guides
+  const calibrateRef = useRef<{ active: boolean; startX: number; startY: number; marker: fabric.Circle | null; ghostLine: fabric.Line | null }>(
+    { active: false, startX: 0, startY: 0, marker: null, ghostLine: null }
+  );
+  // Monotonic sync counter — lets async underlay image loads detect that a
+  // newer syncFloorToCanvas pass has run and drop their now-stale add.
+  const syncGenRef = useRef(0);
 
   const { activeTool, setZoom, setPanOffset, setSelectedObject, setCanvas } = useCadStore();
 
   // Label inline edit overlay state
   const labelOverlayRef = useRef<HTMLDivElement | null>(null);
-
-  // Ref to hold syncFloorToCanvas so image handlers can call it without circular deps
-  const syncRef = useRef<((c: fabric.Canvas) => void) | null>(null);
-
-  // ── Process an image file into an underlay ─────────────────────────────────
-  const processImageFile = useCallback((file: File) => {
-    const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/svg+xml'];
-    if (file.type === 'application/pdf') {
-      alert('PDF import is not yet supported. Please convert your PDF to PNG or JPG first.');
-      return;
-    }
-    if (!validTypes.includes(file.type)) return;
-
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      if (!dataUrl) return;
-
-      const img = new Image();
-      img.onload = () => {
-        // Proportional sizing: fit to max 600px width or 400px height
-        let w = img.naturalWidth;
-        let h = img.naturalHeight;
-        const maxW = 600;
-        const maxH = 400;
-        if (w > maxW) { const r = maxW / w; w *= r; h *= r; }
-        if (h > maxH) { const r = maxH / h; w *= r; h *= r; }
-
-        // Center on visible canvas area
-        const canvas = fabricRef.current;
-        let cx = 300, cy = 300;
-        if (canvas) {
-          const vpt = canvas.viewportTransform;
-          const zoom = canvas.getZoom();
-          if (vpt) {
-            cx = ((canvas.width ?? 800) / 2 - vpt[4]) / zoom;
-            cy = ((canvas.height ?? 600) / 2 - vpt[5]) / zoom;
-          }
-        }
-
-        const underlayId = `underlay-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        const underlayImg: UnderlayImage = {
-          id: underlayId,
-          name: file.name,
-          dataUrl,
-          x: cx - w / 2,
-          y: cy - h / 2,
-          width: w,
-          height: h,
-          rotation: 0,
-          opacity: 1,
-          locked: false,
-        };
-
-        const state = useCadStore.getState();
-        state.addUnderlay(underlayImg);
-        state.markDirty();
-        if (fabricRef.current && syncRef.current) syncRef.current(fabricRef.current);
-      };
-      img.src = dataUrl;
-    };
-    reader.readAsDataURL(file);
-  }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -156,11 +103,8 @@ export default function CadCanvas() {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const files = e.dataTransfer.files;
-    for (let i = 0; i < files.length; i++) {
-      processImageFile(files[i]);
-    }
-  }, [processImageFile]);
+    importUnderlayFiles(e.dataTransfer.files);
+  }, []);
 
   // ── Snap helper ────────────────────────────────────────────────────────────
   const lastSnapRef = useRef<{ x: number; y: number }>({ x: -1, y: -1 });
@@ -642,6 +586,7 @@ export default function CadCanvas() {
     const state = useCadStore.getState();
     const floor = state.floors.find(f => f.id === state.activeFloorId);
     if (!floor) return;
+    const syncGen = ++syncGenRef.current;
 
     // Remove all existing CAD objects (keep grid and the active drawing-preview ghost)
     const toRemove = canvas.getObjects().filter(obj => {
@@ -662,27 +607,40 @@ export default function CadCanvas() {
     const annotationsLayer = state.layers.find(l => l.id === 'annotations');
     const underlayLayer = state.layers.find(l => l.id === 'underlay');
 
-    // Underlays (behind everything else)
+    // Underlays (behind everything else). Image decode is async for anything
+    // not already in the decode cache — constructing FabricImage before the
+    // element has loaded bakes in naturalWidth=0 and renders nothing — so the
+    // fabric object is added on load, with a same-name sweep to dedupe
+    // overlapping syncs.
     if (underlayLayer?.visible && floor.underlays) {
       for (const u of floor.underlays) {
+        const objName = `${PREFIX.underlay}${u.id}`;
         const imgEl = new Image();
+        const addUnderlayImage = () => {
+          if (!imgEl.naturalWidth) return;
+          if (syncGen !== syncGenRef.current) return; // a newer sync superseded this pass
+          canvas.getObjects().filter(o => o.name === objName).forEach(o => canvas.remove(o));
+          const fImg = new fabric.FabricImage(imgEl, {
+            left: u.x,
+            top: u.y,
+            scaleX: u.width / imgEl.naturalWidth,
+            scaleY: u.height / imgEl.naturalHeight,
+            angle: u.rotation,
+            opacity: u.opacity * (underlayLayer.opacity ?? 1),
+            selectable: !underlayLayer.locked && !u.locked,
+            evented: !underlayLayer.locked && !u.locked,
+            name: objName,
+            hasControls: !underlayLayer.locked && !u.locked,
+            hasBorders: !underlayLayer.locked && !u.locked,
+            lockRotation: underlayLayer.locked || u.locked,
+          });
+          canvas.add(fImg);
+          canvas.sendObjectToBack(fImg);
+          canvas.requestRenderAll();
+        };
+        imgEl.onload = addUnderlayImage;
         imgEl.src = u.dataUrl;
-        const fImg = new fabric.FabricImage(imgEl, {
-          left: u.x,
-          top: u.y,
-          scaleX: u.width / (imgEl.naturalWidth || u.width || 1),
-          scaleY: u.height / (imgEl.naturalHeight || u.height || 1),
-          angle: u.rotation,
-          opacity: u.opacity * (underlayLayer.opacity ?? 1),
-          selectable: !underlayLayer.locked && !u.locked,
-          evented: !underlayLayer.locked && !u.locked,
-          name: `${PREFIX.underlay}${u.id}`,
-          hasControls: !underlayLayer.locked && !u.locked,
-          hasBorders: !underlayLayer.locked && !u.locked,
-          lockRotation: underlayLayer.locked || u.locked,
-        });
-        canvas.add(fImg);
-        canvas.sendObjectToBack(fImg);
+        if (imgEl.complete) { imgEl.onload = null; addUnderlayImage(); }
       }
     }
 
@@ -835,7 +793,6 @@ export default function CadCanvas() {
   }, [createWallLine, createOpeningShape, createHvacShape, createPipeLine, createDuctLine, createDuctFittingShape, createAnnotationShape]);
 
   // Keep ref in sync for image import handlers
-  syncRef.current = syncFloorToCanvas;
 
   // ── Room detection algorithm ──────────────────────────────────────────────
   const detectRooms = useCallback(() => {
@@ -970,6 +927,9 @@ export default function CadCanvas() {
 
     useCadStore.getState().setDetectedRooms(detectedRooms);
     if (fabricRef.current) syncFloorToCanvas(fabricRef.current);
+
+    // Next ideal action: pull the detected rooms into the Manual J calculator
+    if (detectedRooms.length > 0) useGuidanceStore.getState().setHint('mj_import_cad');
   }, [syncFloorToCanvas]);
 
   // ── Main canvas setup (runs once) ─────────────────────────────────────────
@@ -1172,6 +1132,12 @@ export default function CadCanvas() {
             drawing.startX = endX;
             drawing.startY = endY;
             drawing.ghostLine = createGhostLine(endX, endY);
+
+            // Next ideal action once walls exist and no rooms are detected yet
+            const floorNow = useCadStore.getState().floors.find(f => f.id === state.activeFloorId);
+            if (floorNow && floorNow.rooms.length === 0 && floorNow.walls.length >= 3) {
+              useGuidanceStore.getState().setHint('cad_detect_rooms');
+            }
           } else {
             drawing.active = false;
             state.setDrawingInfo(null);
@@ -1512,6 +1478,63 @@ export default function CadCanvas() {
         return;
       }
 
+      // ─ Scale calibration: two clicks on a known dimension ──────────
+      // Raw pointer coords on purpose — grid snap would corrupt the
+      // measurement (calibration points sit on the underlay image, not
+      // on the not-yet-correct grid).
+      if (tool === 'calibrate_scale' && evt.button === 0) {
+        const cal = calibrateRef.current;
+        if (!cal.active) {
+          cal.active = true;
+          cal.startX = ptr.x;
+          cal.startY = ptr.y;
+          cal.marker = new fabric.Circle({
+            left: ptr.x, top: ptr.y, radius: 5,
+            fill: 'rgba(245,158,11,0.4)', stroke: '#f59e0b', strokeWidth: 2,
+            originX: 'center', originY: 'center',
+            selectable: false, evented: false,
+          });
+          cal.ghostLine = new fabric.Line([ptr.x, ptr.y, ptr.x, ptr.y], {
+            stroke: '#f59e0b', strokeWidth: 2, strokeDashArray: [6, 4],
+            selectable: false, evented: false,
+          });
+          canvas.add(cal.marker);
+          canvas.add(cal.ghostLine);
+          canvas.requestRenderAll();
+        } else {
+          const distPx = Math.sqrt((ptr.x - cal.startX) ** 2 + (ptr.y - cal.startY) ** 2);
+          const p1 = { x: cal.startX, y: cal.startY };
+          if (cal.marker) canvas.remove(cal.marker);
+          if (cal.ghostLine) canvas.remove(cal.ghostLine);
+          cal.marker = null;
+          cal.ghostLine = null;
+          cal.active = false;
+          canvas.requestRenderAll();
+          state.setActiveTool('select');
+
+          if (distPx < 2) {
+            toast.warning('Calibration points are too close together — click the two ends of a known dimension.');
+            return;
+          }
+
+          const floor = state.floors.find(f => f.id === state.activeFloorId);
+          const underlays = floor?.underlays ?? [];
+          if (underlays.length === 0) {
+            toast.error('No underlay image on this floor to calibrate. Import a blueprint first.');
+            return;
+          }
+
+          // Prefer the underlay under the first click; fall back to the most recent
+          const target = underlays.find(u =>
+            p1.x >= u.x && p1.x <= u.x + u.width && p1.y >= u.y && p1.y <= u.y + u.height
+          ) ?? underlays[underlays.length - 1];
+
+          // Hand off to CalibrateScaleDialog for the real-world distance
+          state.setCalibrationRequest({ underlayId: target.id, underlayName: target.name, distPx, p1 });
+        }
+        return;
+      }
+
       // ─ Room detection (run once, return to select) ─────────────────
       if (tool === 'room_detect' && evt.button === 0) {
         detectRooms();
@@ -1550,6 +1573,12 @@ export default function CadCanvas() {
 
       const ptr = canvas.getScenePoint(evt);
       const snapped = snapToGrid(ptr.x, ptr.y);
+
+      // Calibration guide line follows the raw (unsnapped) pointer
+      if (tool === 'calibrate_scale' && calibrateRef.current.active && calibrateRef.current.ghostLine) {
+        calibrateRef.current.ghostLine.set({ x2: ptr.x, y2: ptr.y });
+        canvas.requestRenderAll();
+      }
 
       // Ghost line update for wall draw, pipe draw, duct draw, and dimension
       if ((tool === 'draw_wall' || tool === 'draw_pipe' || tool === 'draw_duct' || tool === 'add_dimension') && drawing.active && drawing.ghostLine) {
@@ -1933,10 +1962,21 @@ export default function CadCanvas() {
       placementGhostRef.current = null;
     }
 
+    // Clean up calibration guides when leaving the calibrate tool
+    const cal = calibrateRef.current;
+    if (activeTool !== 'calibrate_scale' && cal.active) {
+      if (cal.marker) cvs.remove(cal.marker);
+      if (cal.ghostLine) cvs.remove(cal.ghostLine);
+      cal.marker = null;
+      cal.ghostLine = null;
+      cal.active = false;
+      cvs.requestRenderAll();
+    }
+
     if (activeTool === 'pan') {
       cvs.defaultCursor = 'grab';
       cvs.selection = false;
-    } else if (activeTool === 'draw_wall' || activeTool === 'draw_duct' || activeTool === 'add_dimension') {
+    } else if (activeTool === 'draw_wall' || activeTool === 'draw_duct' || activeTool === 'add_dimension' || activeTool === 'calibrate_scale') {
       cvs.defaultCursor = 'crosshair';
       cvs.selection = false;
     } else if (activeTool === 'place_window' || activeTool === 'place_door' || activeTool === 'place_hvac' || activeTool === 'place_fitting') {

@@ -5,6 +5,7 @@ import { scopedKey } from '../utils/storage';
 import CadCanvas from '../features/cad/components/CadCanvas';
 import Toolbox from '../features/cad/components/Toolbox';
 import PropertyInspector from '../features/cad/components/PropertyInspector';
+import BlueprintDialogs from '../features/cad/components/BlueprintDialogs';
 import TopNavigationBar from '../features/cad/components/TopNavigationBar';
 import WallLengthOverlay from '../features/cad/components/WallLengthOverlay';
 import FloorSelector from '../features/cad/components/FloorSelector';
@@ -184,7 +185,7 @@ export default function CadWorkspace() {
         store.loadDrawing({});
       } else {
         const hasGeometry = store.floors.some(
-          f => f.walls.length > 0 || f.rooms.length > 0
+          f => f.walls.length > 0 || f.rooms.length > 0 || (f.underlays?.length ?? 0) > 0
         );
         if (!hasGeometry) {
           try {
@@ -192,7 +193,7 @@ export default function CadWorkspace() {
             if (saved) {
               const data = JSON.parse(saved) as Partial<SerializedDrawing>;
               const savedHasGeometry = data.floors?.some(
-                (f) => (f.walls?.length || 0) > 0 || (f.rooms?.length || 0) > 0
+                (f) => (f.walls?.length || 0) > 0 || (f.rooms?.length || 0) > 0 || (f.underlays?.length || 0) > 0
               );
               if (savedHasGeometry) {
                 store.loadDrawing(data);
@@ -212,14 +213,16 @@ export default function CadWorkspace() {
   // resume, go straight to a blank canvas.
   const handleDraft = () => {
     const store = useCadStore.getState();
-    const storeHasGeometry = store.floors.some(f => f.walls.length > 0 || f.rooms.length > 0);
+    const storeHasGeometry = store.floors.some(
+      f => f.walls.length > 0 || f.rooms.length > 0 || (f.underlays?.length ?? 0) > 0
+    );
     let savedHasGeometry = false;
     try {
       const saved = localStorage.getItem(scopedKey('hvac_cad_drawing'));
       if (saved) {
         const data = JSON.parse(saved) as Partial<SerializedDrawing>;
         savedHasGeometry = data.floors?.some(
-          (f) => (f.walls?.length || 0) > 0 || (f.rooms?.length || 0) > 0
+          (f) => (f.walls?.length || 0) > 0 || (f.rooms?.length || 0) > 0 || (f.underlays?.length || 0) > 0
         ) ?? false;
       }
     } catch { /* ignore */ }
@@ -281,6 +284,9 @@ export default function CadWorkspace() {
 
       {/* Thermal overlay legend (visible when thermal mode active) */}
       <ThermalLegend />
+
+      {/* Blueprint intake: PDF page picker + scale calibration */}
+      <BlueprintDialogs />
 
       {/* Mason — AI HVAC Assistant (complete help & docs built in) */}
       <Mason context="cad" position="bottom-left" />
