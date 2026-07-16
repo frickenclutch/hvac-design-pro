@@ -14,8 +14,12 @@ export const aiRoutes = new Hono<{ Bindings: Env }>();
 
 // Rasterized blueprint pages arrive as base64 data URLs. 10M chars of base64
 // ≈ 7.5MB decoded — comfortably above our 2400px PNG rasters, well below
-// Claude's per-image limits.
+// Claude's per-image limits. Plan sets often span several sheets, so the
+// endpoint accepts up to 6 images in one request and asks the model to merge
+// them into a single deduplicated room schedule.
 const MAX_IMAGE_B64_CHARS = 10_000_000;
+const MAX_IMAGES = 6;
+const MAX_TOTAL_B64_CHARS = 24_000_000;
 const DATA_URL_RE = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/;
 
 // What the model must return. Kept deliberately review-oriented: everything
@@ -66,9 +70,10 @@ const EXTRACTION_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-const SYSTEM_PROMPT = `You are a takeoff assistant for HVAC load calculation inside HVAC DesignPro. You are shown one rasterized page of a construction blueprint. Extract the room schedule a designer would need to run an ACCA Manual J residential load calculation.
+const SYSTEM_PROMPT = `You are a takeoff assistant for HVAC load calculation inside HVAC DesignPro. You are shown one or more rasterized sheets of the SAME construction plan set (a large plan is often split across several pages or image files). Extract the combined room schedule a designer would need to run an ACCA Manual J residential load calculation.
 
 Rules:
+- Treat all provided sheets as one building. Merge the room schedule across sheets and deduplicate: a room visible on two sheets (overlap regions, match lines, key plans) appears ONCE in the output.
 - Prefer printed dimension strings (e.g. 12'-6") over measuring the drawing. Report in decimal feet.
 - Never invent data. If a value isn't on the plan, omit the optional field and lower the confidence.
 - Every extraction is reviewed by a licensed professional before use — your job is a faithful first pass, not a final answer.
@@ -85,23 +90,40 @@ aiRoutes.post('/blueprint-extract', async (c) => {
     return c.json({ error: 'AI extraction is not configured on this deployment (ANTHROPIC_API_KEY missing).' }, 503);
   }
 
-  let body: { imageDataUrl?: string; projectId?: string; fileName?: string };
+  let body: { imageDataUrls?: string[]; imageDataUrl?: string; projectId?: string; fileName?: string };
   try {
     body = await c.req.json();
   } catch {
     return c.json({ error: 'Invalid JSON body' }, 400);
   }
 
-  const dataUrl = body.imageDataUrl ?? '';
-  if (dataUrl.length > MAX_IMAGE_B64_CHARS) {
-    return c.json({ error: 'Image too large for AI extraction (max ~7.5MB). Re-import the blueprint at a lower resolution.' }, 413);
+  // Accept an array of sheets (preferred) or the original single-image field.
+  const dataUrls = Array.isArray(body.imageDataUrls) && body.imageDataUrls.length > 0
+    ? body.imageDataUrls
+    : body.imageDataUrl
+      ? [body.imageDataUrl]
+      : [];
+  if (dataUrls.length === 0) {
+    return c.json({ error: 'Provide imageDataUrls (array of base64 data URLs)' }, 400);
   }
-  const match = DATA_URL_RE.exec(dataUrl);
-  if (!match) {
-    return c.json({ error: 'imageDataUrl must be a base64 PNG/JPEG/WebP/GIF data URL' }, 400);
+  if (dataUrls.length > MAX_IMAGES) {
+    return c.json({ error: `Too many sheets — send at most ${MAX_IMAGES} images per extraction.` }, 400);
   }
-  const mediaType = match[1] as 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
-  const imageB64 = match[2];
+  if (dataUrls.reduce((n, d) => n + d.length, 0) > MAX_TOTAL_B64_CHARS) {
+    return c.json({ error: 'Plan set too large for AI extraction (~18MB total). Re-import the sheets at a lower resolution.' }, 413);
+  }
+
+  const images: Array<{ mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'; data: string }> = [];
+  for (const dataUrl of dataUrls) {
+    if (dataUrl.length > MAX_IMAGE_B64_CHARS) {
+      return c.json({ error: 'One of the sheets is too large for AI extraction (max ~7.5MB each).' }, 413);
+    }
+    const match = DATA_URL_RE.exec(dataUrl);
+    if (!match) {
+      return c.json({ error: 'Every sheet must be a base64 PNG/JPEG/WebP/GIF data URL' }, 400);
+    }
+    images.push({ mediaType: match[1] as (typeof images)[number]['mediaType'], data: match[2] });
+  }
 
   const client = new Anthropic({ apiKey });
 
@@ -117,8 +139,16 @@ aiRoutes.post('/blueprint-extract', async (c) => {
       {
         role: 'user',
         content: [
-          { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageB64 } },
-          { type: 'text', text: 'Extract the room schedule from this blueprint page.' },
+          ...images.map((img) => ({
+            type: 'image' as const,
+            source: { type: 'base64' as const, media_type: img.mediaType, data: img.data },
+          })),
+          {
+            type: 'text' as const,
+            text: images.length === 1
+              ? 'Extract the room schedule from this blueprint page.'
+              : `These ${images.length} sheets belong to the same plan set. Extract ONE merged, deduplicated room schedule covering the whole building.`,
+          },
         ],
       },
     ],
@@ -151,6 +181,7 @@ aiRoutes.post('/blueprint-extract', async (c) => {
     projectId: body.projectId || undefined,
     detail: {
       model: response.model,
+      sheets: images.length,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
       orgId: user.orgId,

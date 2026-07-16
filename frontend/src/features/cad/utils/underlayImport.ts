@@ -19,9 +19,14 @@ const MAX_PDF_BYTES = 25 * 1024 * 1024;
 const MAX_RASTER_DIM = 2400;
 
 export function importUnderlayFiles(files: FileList | File[]): void {
-  for (const file of Array.from(files)) {
-    void importSingleFile(file);
-  }
+  // Sequential on purpose: PDFs share one page-picker dialog slot, and
+  // side-by-side tiling should follow the order the files were given.
+  const list = Array.from(files);
+  void (async () => {
+    for (const file of list) {
+      await importSingleFile(file);
+    }
+  })();
 }
 
 async function importSingleFile(file: File): Promise<void> {
@@ -55,12 +60,19 @@ async function importSingleFile(file: File): Promise<void> {
 
   const dataUrl = await readAsDataUrl(file);
   if (!dataUrl) return;
-  const img = new Image();
-  img.onload = () => {
-    placeUnderlay(dataUrl, file.name, img.naturalWidth, img.naturalHeight);
-    persistBlueprint(file);
-  };
-  img.src = dataUrl;
+  await new Promise<void>((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      placeUnderlay(dataUrl, file.name, img.naturalWidth, img.naturalHeight);
+      persistBlueprint(file);
+      resolve();
+    };
+    img.onerror = () => {
+      toast.error(`Could not read "${file.name}" as an image.`);
+      resolve();
+    };
+    img.src = dataUrl;
+  });
 }
 
 // ── PDF rasterization (lazy pdf.js) ─────────────────────────────────────────
@@ -102,7 +114,12 @@ async function rasterizePdf(file: File): Promise<{ dataUrl: string; width: numbe
   }
 }
 
-// ── Placement (matches historical import behavior: fit 600×400, center) ─────
+// ── Placement ────────────────────────────────────────────────────────────────
+// First sheet: fit 600×400 and center on the viewport (historical behavior).
+// Additional sheets TILE to the right of the existing ones — a plan set split
+// across multiple files must land side-by-side, never invisibly stacked.
+const TILE_GAP_PX = 40;
+
 function placeUnderlay(dataUrl: string, name: string, naturalW: number, naturalH: number): void {
   let w = naturalW;
   let h = naturalH;
@@ -112,23 +129,36 @@ function placeUnderlay(dataUrl: string, name: string, naturalW: number, naturalH
   if (h > maxH) { const r = maxH / h; w *= r; h *= r; }
 
   const state = useCadStore.getState();
-  const canvas = state.canvas;
-  let cx = 300, cy = 300;
-  if (canvas) {
-    const vpt = canvas.viewportTransform;
-    const zoom = canvas.getZoom();
-    if (vpt) {
-      cx = ((canvas.width ?? 800) / 2 - vpt[4]) / zoom;
-      cy = ((canvas.height ?? 600) / 2 - vpt[5]) / zoom;
+  const floor = state.floors.find(f => f.id === state.activeFloorId);
+  const existing = floor?.underlays ?? [];
+
+  let x: number;
+  let y: number;
+  if (existing.length > 0) {
+    // Tile right of the current sheet row, top-aligned with it
+    x = Math.max(...existing.map(u => u.x + u.width)) + TILE_GAP_PX;
+    y = Math.min(...existing.map(u => u.y));
+  } else {
+    const canvas = state.canvas;
+    let cx = 300, cy = 300;
+    if (canvas) {
+      const vpt = canvas.viewportTransform;
+      const zoom = canvas.getZoom();
+      if (vpt) {
+        cx = ((canvas.width ?? 800) / 2 - vpt[4]) / zoom;
+        cy = ((canvas.height ?? 600) / 2 - vpt[5]) / zoom;
+      }
     }
+    x = cx - w / 2;
+    y = cy - h / 2;
   }
 
   const underlay: UnderlayImage = {
     id: `underlay-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     name,
     dataUrl,
-    x: cx - w / 2,
-    y: cy - h / 2,
+    x,
+    y,
     width: w,
     height: h,
     rotation: 0,
@@ -139,8 +169,9 @@ function placeUnderlay(dataUrl: string, name: string, naturalW: number, naturalH
   state.addUnderlay(underlay);
   state.markDirty();
 
-  // Next ideal action: calibrate the blueprint so traced walls read in real feet
-  useGuidanceStore.getState().setHint('cad_calibrate_scale');
+  // Next ideal action: let the AI do the heavy lifting on the takeoff.
+  // (Calibrate Scale becomes the hinted fallback if AI is skipped or fails.)
+  useGuidanceStore.getState().setHint('cad_ai_extract');
 }
 
 // ── R2 persistence (best-effort, never blocks the local-first flow) ─────────

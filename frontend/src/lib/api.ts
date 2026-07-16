@@ -574,16 +574,18 @@ class ApiClient {
     return this.request<ApiCalculationDetail>(`/api/calculations/${id}`);
   }
 
-  // AI blueprint extraction (Worker → Claude vision). Every result is a
-  // PROPOSAL — the UI requires human review before anything becomes calc input.
-  async extractBlueprint(imageDataUrl: string, projectId?: string, fileName?: string) {
+  // AI blueprint extraction (Worker → Claude vision). Accepts a whole plan
+  // set (up to 6 sheets) and returns ONE merged room schedule. Every result
+  // is a PROPOSAL — the UI requires human review before anything becomes
+  // calc input.
+  async extractBlueprint(imageDataUrls: string[], projectId?: string, fileName?: string) {
     return this.request<{
       extraction: AiBlueprintExtraction;
       engine: string;
       usage: { inputTokens: number; outputTokens: number };
     }>('/api/ai/blueprint-extract', {
       method: 'POST',
-      body: JSON.stringify({ imageDataUrl, projectId, fileName }),
+      body: JSON.stringify({ imageDataUrls, projectId, fileName }),
     });
   }
 

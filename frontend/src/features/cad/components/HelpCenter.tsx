@@ -38,8 +38,8 @@ const sections: HelpSection[] = [
     icon: <FileText className="w-4 h-4" />,
     items: [
       {
-        title: 'Import a blueprint (PDF or image)',
-        desc: 'Drag a blueprint file onto the canvas, or use the Import Blueprint button in the toolbox. PDFs are rasterized (multi-page PDFs ask which page is the floor plan) and placed on the locked Underlay layer at 30% opacity so you can trace over them. The original file is saved to the active project\'s files.',
+        title: 'Import blueprints (PDF or images, multiple files)',
+        desc: 'Drag files onto the canvas, use the empty-canvas drop zone (click it to browse, multi-select supported), or the Import Blueprint toolbox button. Multiple sheets tile side-by-side. PDFs are rasterized (multi-page PDFs ask which page is the floor plan) and land on the locked Underlay layer. Originals save to the active project\'s files.',
       },
       {
         title: 'Calibrate Scale',
@@ -47,11 +47,11 @@ const sections: HelpSection[] = [
       },
       {
         title: 'AI Extract Rooms',
-        desc: 'The sparkles button sends the blueprint to the AI, which proposes a room schedule (names, dimensions, windows, exposure). Everything lands in a review dialog — edit or uncheck any room, then confirm to add them to Manual J. Nothing is applied without your review; you are the engineer of record.',
+        desc: 'The sparkles button sends every sheet on the floor to the AI as one plan set (up to 6) and proposes a merged room schedule. Everything lands in a review dialog — edit or uncheck any room, then confirm: the plan is drawn as real CAD geometry on a new "AI Takeoff" floor for finalizing and stamping, and the rooms go to Manual J. Nothing is applied without your review; you are the engineer of record.',
       },
       {
         title: 'Glimmer hints',
-        desc: 'After each step, the next ideal tool softly glows — import → Calibrate Scale → Draw Wall → Detect Rooms → Manual J. Click it (or any other tool) and the hint disappears. With reduced motion enabled, the glow is a steady ring.',
+        desc: 'After each step, the next ideal tool softly glows — import → AI Extract Rooms; if you skip the AI, Calibrate Scale → Draw Wall → Detect Rooms. Click the glowing tool (or any other) and the hint disappears. With reduced motion enabled, the glow is a steady ring.',
       },
       {
         title: 'Commercial plans',

@@ -163,6 +163,8 @@ export default function Toolbox() {
   }, [activeTool]);
 
   // ── AI blueprint extraction ───────────────────────────────────────────────
+  // Sends EVERY sheet on the active floor — plan sets split across multiple
+  // files are merged into one room schedule server-side.
   const handleAiExtract = () => {
     useGuidanceStore.getState().clearHint('cad_');
     const state = useCadStore.getState();
@@ -172,8 +174,10 @@ export default function Toolbox() {
       toast.warning('Import a blueprint first (PDF or image), then run AI takeoff.');
       return;
     }
-    const target = underlays[underlays.length - 1];
-    state.setAiExtractRequest({ underlayId: target.id, underlayName: target.name, dataUrl: target.dataUrl });
+    const sheets = underlays.slice(0, 6);
+    if (underlays.length > 6) toast.warning('Using the first 6 sheets — the AI takeoff caps at 6 per pass.');
+    const name = sheets.length === 1 ? sheets[0].name : `${sheets[0].name} (+${sheets.length - 1} more sheet${sheets.length > 2 ? 's' : ''})`;
+    state.setAiExtractRequest({ underlayName: name, dataUrls: sheets.map(u => u.dataUrl) });
   };
 
   // ── Image import ────────────────────────────────────────────────────────

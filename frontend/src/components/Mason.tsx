@@ -1177,12 +1177,11 @@ Drag a blueprint straight onto the CAD canvas, or click the **Import Blueprint**
 The page is placed on the locked, 30%-opacity **Underlay layer** so you can trace over it without selecting it by accident (unlock it from the Layers panel to move or resize).
 
 **The workflow:**
-1. **Import** the blueprint (it also saves to your project files when a project is active)
-2. **Calibrate Scale** — click both ends of a printed dimension so traced walls read in real feet
-3. **Trace walls** over the plan, then **Detect Rooms**
-4. Or skip tracing: **AI Extract Rooms** reads the plan for you (you review everything before it's used)
+1. **Import** the blueprint — multiple files welcome; sheets tile side-by-side (a project also saves the originals to its files)
+2. **AI Extract Rooms** (sparkles) — reads ALL sheets on the floor as one plan set and proposes a merged room schedule you review, then draws it in CAD and sends it to Manual J
+3. Manual alternative: **Calibrate Scale** against a printed dimension, trace walls, then **Detect Rooms**
 
-Limits: PDFs up to 25 MB, images up to 10 MB.`,
+Limits: PDFs up to 25 MB, images up to 10 MB, 6 sheets per AI pass.`,
   },
   {
     keywords: ['calibrate', 'calibrate scale', 'scale', 'real size', 'dimensions wrong', 'wrong size', 'feet', 'true to size', 'crosshair'],
@@ -1204,9 +1203,9 @@ The underlay rescales around your first click so that distance maps exactly to t
     contexts: ['cad', 'manualj'],
     answer: `**AI Extract Rooms — Claude reads the blueprint for you**
 
-Click the **sparkles icon** in the CAD toolbox after importing a blueprint. The plan page is sent to the AI, which proposes a room schedule: names, dimensions (preferring the plan's printed dimension strings), window counts, and exposure where a north arrow exists.
+Click the **sparkles icon** in the CAD toolbox after importing a blueprint. EVERY sheet on the active floor is sent together (up to 6) — a plan split across multiple files comes back as ONE merged, deduplicated room schedule: names, dimensions (preferring the plan's printed dimension strings), window counts, and exposure where a north arrow exists.
 
-**Nothing is applied automatically.** You get a review list where every room can be edited, unchecked, or corrected — each row carries a confidence badge (high = read from printed dimensions, low = inferred from proportions). Confirming adds the rooms to **Manual J** for the active project.
+**Nothing is applied automatically.** You get a review list where every room can be edited, unchecked, or corrected — each row carries a confidence badge (high = read from printed dimensions, low = inferred from proportions). Confirming **draws the plan as real CAD geometry on a new "AI Takeoff" floor** — for finalizing, stamping, and PDF export — and adds the rooms to **Manual J** for the active project.
 
 You remain the engineer of record: verify dimensions against the plan before calculating. The extraction is a first pass, not a stamp.
 
@@ -1219,9 +1218,9 @@ If you see "not configured", the deployment is missing its AI key — ask your a
 
 When you finish an action, DesignPro softly glimmers the tool that usually comes next in the workflow — for example:
 
-- Import a blueprint → **Calibrate Scale** glimmers
-- Calibrate → **Draw Wall** glimmers
-- Trace walls → **Detect Rooms** glimmers
+- Import a blueprint → **AI Extract Rooms** glimmers (the heavy lifter)
+- Skip or cancel the AI → **Calibrate Scale** glimmers (manual path)
+- Calibrate → **Draw Wall** glimmers, then walls → **Detect Rooms**
 - Detect rooms → **Import from CAD** glimmers in Manual J
 - Rooms imported → **Calculate Loads** glimmers
 - Results ready → **Find Retailer & Estimate** glimmers
@@ -1233,9 +1232,9 @@ It's a hint, not a requirement — it disappears as soon as you click it or choo
     contexts: ['cad', 'manualj'],
     answer: `**From a client's blueprint to an estimate — the full funnel**
 
-1. **CAD → Import Blueprint** — drop the client's PDF on the canvas
-2. **Calibrate Scale** against a printed dimension
-3. **AI Extract Rooms** (review and confirm) — or trace walls and **Detect Rooms**
+1. **CAD → Import Blueprint** — drop the client's files on the canvas (multiple sheets tile side-by-side)
+2. **AI Extract Rooms** — review the merged schedule, confirm, and the plan is drawn in CAD + sent to Manual J (manual path: Calibrate Scale → trace → Detect Rooms)
+3. **Finalize in CAD** — adjust walls, openings, and equipment on the "AI Takeoff" floor
 4. **Manual J** — review R-values, windows, and design conditions, then **Calculate Loads**
 5. **Find Retailer & Estimate** — regionally priced system estimate + nearest supply branches, with a one-click quote-request email that attaches the load report
 

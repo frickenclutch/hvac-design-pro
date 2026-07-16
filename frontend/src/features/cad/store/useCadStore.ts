@@ -279,12 +279,12 @@ export interface CalibrationRequest {
   p1: { x: number; y: number };
 }
 
-// AI extraction: a blueprint underlay queued for Claude-vision room takeoff.
-// The dialog owns the request → review → confirm lifecycle.
+// AI extraction: the active floor's blueprint sheets queued for Claude-vision
+// room takeoff (multi-sheet plan sets are merged into one schedule). The
+// dialog owns the request → review → confirm lifecycle.
 export interface AiExtractRequest {
-  underlayId: string;
   underlayName: string;
-  dataUrl: string;
+  dataUrls: string[];
 }
 
 // ── Serialized drawing ────────────────────────────────────────────────────────────

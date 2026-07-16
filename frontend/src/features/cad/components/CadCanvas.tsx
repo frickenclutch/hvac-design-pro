@@ -91,6 +91,18 @@ export default function CadCanvas() {
 
   const { activeTool, setZoom, setPanOffset, setSelectedObject, setCanvas } = useCadStore();
 
+  // Empty-floor dropzone: shown until the active floor has any content, so a
+  // first-time user gets an obvious "drop blueprints here / browse" target
+  // instead of a bare grid. Multi-select supported — plan sets often arrive
+  // as several files.
+  const dropInputRef = useRef<HTMLInputElement>(null);
+  const floorIsEmpty = useCadStore(s => {
+    const f = s.floors.find(fl => fl.id === s.activeFloorId);
+    if (!f) return false;
+    return f.walls.length === 0 && f.rooms.length === 0 && (f.underlays?.length ?? 0) === 0 &&
+      f.hvacUnits.length === 0 && f.ductSegments.length === 0;
+  });
+
   // Label inline edit overlay state
   const labelOverlayRef = useRef<HTMLDivElement | null>(null);
 
@@ -1998,6 +2010,34 @@ export default function CadCanvas() {
       onDrop={handleDrop}
     >
       <canvas ref={canvasRef} />
+
+      {/* Empty-floor upload target — drag files anywhere, or click to browse */}
+      {floorIsEmpty && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <button
+            onClick={() => dropInputRef.current?.click()}
+            className="pointer-events-auto flex flex-col items-center gap-3 px-12 py-10 rounded-3xl border-2 border-dashed border-slate-600/70 bg-slate-900/60 backdrop-blur-sm text-slate-400 hover:border-sky-500/60 hover:text-slate-200 hover:bg-slate-900/80 transition-all min-h-[44px] min-w-[44px]"
+            aria-label="Upload blueprints — drag files here or click to browse"
+          >
+            <svg className="w-10 h-10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            <span className="text-base font-semibold">Drop blueprints here</span>
+            <span className="text-xs text-slate-500">PDF, PNG, JPG — multiple files welcome · or click to browse</span>
+          </button>
+          <input
+            ref={dropInputRef}
+            type="file"
+            accept="image/*,.pdf"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files?.length) importUnderlayFiles(e.target.files);
+              e.target.value = '';
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

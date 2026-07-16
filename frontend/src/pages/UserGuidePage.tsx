@@ -114,10 +114,11 @@ const sections: GuideSection[] = [
       <div className="space-y-3">
         <p>Have a client's blueprint? Drop it straight into the CAD workspace and go from plan to estimate without redrawing anything from scratch.</p>
         <StepList steps={[
-          'Drag the blueprint (PDF or image) onto the CAD canvas — multi-page PDFs ask which page is the floor plan',
-          'Click Calibrate Scale (crosshair), then click both ends of a printed dimension and type the real distance (e.g. 30 or 24\' 6")',
-          'Click AI Extract Rooms (sparkles) to have the AI propose a room schedule — or trace walls over the plan and use Detect Rooms',
-          'Review every proposed room: edit names and dimensions, uncheck anything wrong, then confirm to send them to Manual J',
+          'Drop the blueprint files onto the CAD canvas (or click the drop zone to browse — multi-select works). Multiple sheets tile side-by-side; multi-page PDFs ask which page is the floor plan',
+          'Click AI Extract Rooms (sparkles) — all sheets are read together as one plan set and come back as a single merged room schedule',
+          'Review every proposed room: edit names and dimensions, uncheck anything wrong, then confirm — the plan is drawn on a new "AI Takeoff" CAD floor AND sent to Manual J',
+          'Finalize the drawing in CAD (walls, openings, equipment), stamp, and export — or go straight to Manual J',
+          'Prefer manual takeoff? Calibrate Scale against a printed dimension, trace walls, then Detect Rooms',
           'Calculate loads, then Find Retailer & Estimate for a regionally priced system quote',
         ]} />
         <Tip>Watch for the soft glow — after each step, the next ideal tool glimmers until you click it or pick something else. It's the platform walking you through the workflow.</Tip>

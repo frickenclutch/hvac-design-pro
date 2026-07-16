@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { FileText, Crosshair, Sparkles, Loader2, AlertTriangle } from 'lucide-react';
 import { useCadStore } from '../store/useCadStore';
 import { parseFeetInches } from '../utils/underlayImport';
@@ -11,6 +10,7 @@ import { api } from '../../../lib/api';
 import type { AiBlueprintExtraction, AiExtractedRoom } from '../../../lib/api';
 import { createDefaultRoom, createDefaultConditions } from '../../../engines/manualJ';
 import type { RoomInput, DesignConditions } from '../../../engines/manualJ';
+import { generateCadFloorFromManualJ } from '../../../engines/manualJToCad';
 
 // Blueprint-intake dialogs for the CAD workspace:
 //  - PdfPagePicker: multi-page PDF import paused awaiting a page choice
@@ -199,7 +199,6 @@ type EditableRoom = AiExtractedRoom & { included: boolean };
 function AiExtract() {
   const request = useCadStore(s => s.aiExtractRequest)!;
   const setRequest = useCadStore(s => s.setAiExtractRequest);
-  const navigate = useNavigate();
 
   const [phase, setPhase] = useState<'loading' | 'review' | 'error'>('loading');
   const [error, setError] = useState('');
@@ -210,7 +209,7 @@ function AiExtract() {
     let cancelled = false;
     setPhase('loading');
     const projectId = useProjectStore.getState().activeProjectId;
-    api.extractBlueprint(request.dataUrl, projectId ?? undefined, request.underlayName)
+    api.extractBlueprint(request.dataUrls, projectId ?? undefined, request.underlayName)
       .then(({ extraction: ex }) => {
         if (cancelled) return;
         setExtraction(ex);
@@ -221,9 +220,17 @@ function AiExtract() {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : 'Extraction failed');
         setPhase('error');
+        // AI couldn't help — hint the manual path instead
+        useGuidanceStore.getState().setHint('cad_calibrate_scale');
       });
     return () => { cancelled = true; };
-  }, [request.underlayId, request.dataUrl, request.underlayName]);
+  }, [request]);
+
+  // Closing without importing → the manual takeoff is the next ideal path
+  const dismiss = () => {
+    setRequest(null);
+    useGuidanceStore.getState().setHint('cad_calibrate_scale');
+  };
 
   const updateRoom = (i: number, patch: Partial<EditableRoom>) => {
     setRooms(prev => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
@@ -267,10 +274,28 @@ function AiExtract() {
       return;
     }
 
+    // Redraw the extracted plan as real CAD geometry on a new floor so the
+    // designer can finalize it — adjust walls, place openings and equipment,
+    // stamp, and export — before anything gets printed or produced.
+    const cadState = useCadStore.getState();
+    const newFloor = generateCadFloorFromManualJ(
+      newRooms,
+      cadState.projectScale.pxPerFt,
+      'grid',
+      cadState.floors.length,
+    );
+    newFloor.name = 'AI Takeoff';
+    useCadStore.setState((s) => ({
+      floors: [...s.floors, newFloor],
+      activeFloorId: newFloor.id,
+      isDirty: true,
+      undoStack: [],
+      redoStack: [],
+    }));
+
     setRequest(null);
-    toast.success(`${newRooms.length} room${newRooms.length === 1 ? '' : 's'} added to Manual J. Review the R-values and windows, then calculate.`);
+    toast.success(`${newRooms.length} room${newRooms.length === 1 ? '' : 's'} drawn on the "AI Takeoff" floor and added to Manual J. Finalize the plan here, then calculate loads.`);
     useGuidanceStore.getState().setHint('mj_calculate');
-    navigate('/calculator');
   };
 
   const confidenceColor: Record<AiExtractedRoom['confidence'], string> = {
@@ -289,7 +314,7 @@ function AiExtract() {
           </p>
           <p className="text-xs text-slate-600">Extracting the room schedule for review — nothing is applied automatically.</p>
           <button
-            onClick={() => setRequest(null)}
+            onClick={dismiss}
             className="mt-2 min-h-[44px] px-4 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 transition-colors text-sm"
           >
             Cancel
@@ -305,7 +330,7 @@ function AiExtract() {
           </p>
           <div className="flex justify-end">
             <button
-              onClick={() => setRequest(null)}
+              onClick={dismiss}
               className="min-h-[44px] px-4 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors text-sm"
             >
               Close
@@ -386,7 +411,7 @@ function AiExtract() {
 
           <div className="flex justify-end gap-2">
             <button
-              onClick={() => setRequest(null)}
+              onClick={dismiss}
               className="min-h-[44px] min-w-[44px] px-4 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 transition-colors text-sm"
             >
               Cancel
@@ -396,7 +421,7 @@ function AiExtract() {
               disabled={includedCount === 0}
               className="min-h-[44px] min-w-[44px] px-5 rounded-xl bg-sky-500/20 border border-sky-500/50 text-sky-100 hover:bg-sky-500/30 transition-colors text-sm font-medium disabled:opacity-40"
             >
-              Add {includedCount} to Manual J
+              Draw {includedCount} in CAD + Manual J
             </button>
           </div>
         </div>
