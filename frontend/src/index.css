@@ -161,3 +161,30 @@ body {
 .a11y-font-xlarge {
   font-size: 125%; /* 20px base instead of 16px */
 }
+
+/* ── Guidance glimmer — next-best-action hint ─────────────────────────────────
+   Applied by useGuidanceStore to the single "next ideal tool" control until
+   it's clicked or the user picks a different action. Uses the preference-
+   driven accent color; falls back to a static ring under reduced motion. */
+@keyframes guidance-glimmer {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgb(var(--accent-rgb, 52 211 153) / 0.15),
+                0 0 10px 1px rgb(var(--accent-rgb, 52 211 153) / 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgb(var(--accent-rgb, 52 211 153) / 0.4),
+                0 0 18px 5px rgb(var(--accent-rgb, 52 211 153) / 0.45);
+  }
+}
+
+.guidance-glimmer {
+  animation: guidance-glimmer 1.8s ease-in-out infinite;
+  border-radius: 0.75rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guidance-glimmer {
+    animation: none;
+    box-shadow: 0 0 0 2px rgb(var(--accent-rgb, 52 211 153) / 0.5);
+  }
+}
