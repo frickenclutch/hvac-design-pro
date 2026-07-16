@@ -7,6 +7,7 @@ import {
   Printer, MessageSquarePlus,
   Wind, SquarePen, GitBranch, FolderOpen, Flame,
   Users, Globe, ShieldCheck, BadgeCheck, Share2, Mail,
+  Sparkles,
 } from 'lucide-react';
 
 type GuideMode = 'easy' | 'advanced';
@@ -102,6 +103,33 @@ const sections: GuideSection[] = [
         <p>Selection is asymmetric: walls use <code className="text-emerald-400/70">selectedWallId</code> (string state) while all other objects use <code className="text-emerald-400/70">selectedObject</code> (Fabric.Object reference). The PropertyInspector reads the appropriate state and renders the matching panel.</p>
         <p><strong>Delete handling:</strong> The keydown handler in CadCanvas checks for <code className="text-emerald-400/70">selectedWallId</code> first, then falls through to <code className="text-emerald-400/70">selectedObject.name</code> prefix matching to dispatch the correct <code className="text-emerald-400/70">remove*</code> action (removeWall, removeOpening, removeHvacUnit, removePipe, removeAnnotation, removeUnderlay).</p>
         <p><strong>Grid snap:</strong> Configurable via Settings. Default 40px/ft. When enabled, wall endpoints round to the nearest grid intersection. Controlled by <code className="text-emerald-400/70">usePreferencesStore.gridSnap</code> and <code className="text-emerald-400/70">gridSpacing</code>.</p>
+      </div>
+    ),
+  },
+  {
+    id: 'blueprints',
+    title: 'Blueprints & AI Takeoff',
+    icon: <Sparkles className="w-5 h-5 text-sky-400" />,
+    easyContent: (
+      <div className="space-y-3">
+        <p>Have a client's blueprint? Drop it straight into the CAD workspace and go from plan to estimate without redrawing anything from scratch.</p>
+        <StepList steps={[
+          'Drag the blueprint (PDF or image) onto the CAD canvas — multi-page PDFs ask which page is the floor plan',
+          'Click Calibrate Scale (crosshair), then click both ends of a printed dimension and type the real distance (e.g. 30 or 24\' 6")',
+          'Click AI Extract Rooms (sparkles) to have the AI propose a room schedule — or trace walls over the plan and use Detect Rooms',
+          'Review every proposed room: edit names and dimensions, uncheck anything wrong, then confirm to send them to Manual J',
+          'Calculate loads, then Find Retailer & Estimate for a regionally priced system quote',
+        ]} />
+        <Tip>Watch for the soft glow — after each step, the next ideal tool glimmers until you click it or pick something else. It's the platform walking you through the workflow.</Tip>
+        <Tip>The AI never applies anything by itself. Every extracted room passes through your review first — you are the engineer of record.</Tip>
+      </div>
+    ),
+    advancedContent: (
+      <div className="space-y-3">
+        <p><strong>PDF ingestion:</strong> pdf.js is lazy-loaded (own bundle chunk) and rasterizes the chosen page to a PNG capped at 2400px on the long edge. The raster lands as an <code className="text-emerald-400/70">UnderlayImage</code> on the locked underlay layer; the original file is also uploaded to R2 with <code className="text-emerald-400/70">purpose: 'blueprint'</code> when a project is active (silent skip offline/draft).</p>
+        <p><strong>Scale calibration</strong> uniform-scales the underlay about the first clicked point so the clicked span equals the entered feet at <code className="text-emerald-400/70">projectScale.pxPerFt</code> (default 40). Existing traced geometry is never rescaled — calibrate before tracing. Calibration clicks intentionally bypass grid snap.</p>
+        <p><strong>AI extraction</strong> POSTs the underlay raster to <code className="text-emerald-400/70">/api/ai/blueprint-extract</code> (auth-gated Worker → Claude vision with a strict JSON schema). The response is a proposal object — rooms with per-room confidence, warnings, and a building-type flag. Confirmed rooms are spread over <code className="text-emerald-400/70">createDefaultRoom()</code> defaults and appended to the project-scoped Manual J inputs key, so the calculator hydrates them on mount. Commercial plans are flagged: Manual J output is budget-grade only for those.</p>
+        <p><strong>Guidance glimmer:</strong> <code className="text-emerald-400/70">useGuidanceStore</code> holds at most one hint id; surfaces clear their own namespace (<code className="text-emerald-400/70">cad_*</code>, <code className="text-emerald-400/70">mj_*</code>) when any tool is chosen. The animation honors reduced-motion (static ring) and uses the preference accent color.</p>
       </div>
     ),
   },

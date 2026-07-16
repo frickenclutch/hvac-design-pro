@@ -576,28 +576,28 @@ The Properties panel on the right gives you full control:
 - **Rotation** — any angle in degrees`,
   },
   {
-    keywords: ['import', 'upload', 'drag', 'drop', 'image', 'underlay', 'trace', 'blueprint', 'plan image'],
+    keywords: ['import', 'upload', 'drag', 'drop', 'image', 'underlay', 'plan image'],
     contexts: ['cad'],
-    answer: `**Importing Images (Underlay)**
+    answer: `**Importing Blueprints & Images (Underlay)**
 
 Two ways to import:
-1. **Drag & drop** — drag a PNG, JPG, or SVG file directly onto the canvas
-2. **Import button** — click **Import Image** at the bottom of the left toolbox
+1. **Drag & drop** — drag the file directly onto the canvas
+2. **Import button** — click **Import Blueprint** at the bottom of the left toolbox
 
-**Supported formats:** PNG, JPG, GIF, WebP, SVG
+**Supported formats:** PDF (multi-page PDFs ask which page is the floor plan), PNG, JPG, GIF, WebP, SVG
 
 **After importing:**
-- The image appears centered on the canvas, auto-scaled proportionally
+- The page/image appears centered on the canvas, auto-scaled proportionally
 - It lives on the **Underlay layer** (locked by default for tracing)
+- With a project active, the original file is also saved to your project files
 - Adjust opacity using the Underlay layer slider in the Layer Manager
 - To move/resize: **unlock the Underlay layer** first, then select and drag
 
-**Properties (when selected):**
-- Width & Height with aspect ratio lock
-- Rotation and opacity controls
-- Delete button
+**Next steps:**
+- **Calibrate Scale** (crosshair tool) — click both ends of a printed dimension so traced walls read in real feet
+- **AI Extract Rooms** (sparkles) — have the AI propose a room schedule you review before it goes to Manual J
 
-**Tip:** Import a scanned floor plan, set Underlay opacity to 30%, lock the layer, and trace over it with the Wall tool.`,
+**Tip:** the softly glowing toolbar button is the suggested next step in this workflow.`,
   },
   {
     keywords: ['export', 'pdf', 'print', 'plot', 'document', 'report'],
@@ -1162,6 +1162,95 @@ It's **off by default** (ACCA prohibits defaulting to worst-case). The best prac
 Click **Import from Manual J** at the top of the Design Loads section (or type \`/import\`). It reads your last Manual J calculation for the active project and also seeds a neutral starting equipment size (~105% of load) so the first check is meaningful.
 
 Then replace the seeded numbers with your actual candidate equipment's expanded-performance data and run the check. Results feed a compact summary back into the Manual J record for the combined report.`,
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // BLUEPRINT INTAKE, AI TAKEOFF & GUIDED WORKFLOW
+  // ══════════════════════════════════════════════════════════════════════════
+  {
+    keywords: ['blueprint', 'import pdf', 'pdf import', 'upload plan', 'floor plan pdf', 'drag and drop', 'underlay', 'import blueprint', 'trace'],
+    contexts: ['cad'],
+    answer: `**Importing a blueprint (PDF or image)**
+
+Drag a blueprint straight onto the CAD canvas, or click the **Import Blueprint** button (image icon) in the toolbox. PDF, PNG, JPG, WebP, GIF, and SVG all work — multi-page PDFs ask which page holds the floor plan.
+
+The page is placed on the locked, 30%-opacity **Underlay layer** so you can trace over it without selecting it by accident (unlock it from the Layers panel to move or resize).
+
+**The workflow:**
+1. **Import** the blueprint (it also saves to your project files when a project is active)
+2. **Calibrate Scale** — click both ends of a printed dimension so traced walls read in real feet
+3. **Trace walls** over the plan, then **Detect Rooms**
+4. Or skip tracing: **AI Extract Rooms** reads the plan for you (you review everything before it's used)
+
+Limits: PDFs up to 25 MB, images up to 10 MB.`,
+  },
+  {
+    keywords: ['calibrate', 'calibrate scale', 'scale', 'real size', 'dimensions wrong', 'wrong size', 'feet', 'true to size', 'crosshair'],
+    contexts: ['cad'],
+    answer: `**Calibrate Scale — make the blueprint true to size**
+
+An imported blueprint is just pixels until you tell the canvas what one known distance really is.
+
+1. Click the **Calibrate Scale** tool (crosshair icon)
+2. Click **both ends of a printed dimension** on the plan — a dimension line like 30'-0" is perfect
+3. Type the real distance — \`30\`, \`24.5\`, and \`24' 6"\` all parse
+
+The underlay rescales around your first click so that distance maps exactly to the canvas grid (1 grid square = 1 ft). Walls you trace afterwards read in **real feet**, which is what flows into Manual J.
+
+**Tips:** zoom in before clicking the endpoints — precision here is precision everywhere. Calibrate before tracing; already-traced geometry doesn't move when the underlay rescales.`,
+  },
+  {
+    keywords: ['ai extract', 'ai takeoff', 'extract rooms', 'ai rooms', 'sparkles', 'automatic takeoff', 'read blueprint', 'ai blueprint'],
+    contexts: ['cad', 'manualj'],
+    answer: `**AI Extract Rooms — Claude reads the blueprint for you**
+
+Click the **sparkles icon** in the CAD toolbox after importing a blueprint. The plan page is sent to the AI, which proposes a room schedule: names, dimensions (preferring the plan's printed dimension strings), window counts, and exposure where a north arrow exists.
+
+**Nothing is applied automatically.** You get a review list where every room can be edited, unchecked, or corrected — each row carries a confidence badge (high = read from printed dimensions, low = inferred from proportions). Confirming adds the rooms to **Manual J** for the active project.
+
+You remain the engineer of record: verify dimensions against the plan before calculating. The extraction is a first pass, not a stamp.
+
+If you see "not configured", the deployment is missing its AI key — ask your admin.`,
+  },
+  {
+    keywords: ['glimmer', 'glowing', 'glow', 'why is the button glowing', 'highlighted button', 'shimmer', 'hint', 'suggested next', 'next step'],
+    contexts: ['cad', 'manualj', 'manual-d', 'manual-s', 'aed'],
+    answer: `**The glowing button is your next suggested step**
+
+When you finish an action, DesignPro softly glimmers the tool that usually comes next in the workflow — for example:
+
+- Import a blueprint → **Calibrate Scale** glimmers
+- Calibrate → **Draw Wall** glimmers
+- Trace walls → **Detect Rooms** glimmers
+- Detect rooms → **Import from CAD** glimmers in Manual J
+- Rooms imported → **Calculate Loads** glimmers
+- Results ready → **Find Retailer & Estimate** glimmers
+
+It's a hint, not a requirement — it disappears as soon as you click it or choose any other tool. If you use reduced motion (OS setting), the glimmer shows as a steady ring instead of an animation.`,
+  },
+  {
+    keywords: ['blueprint to quote', 'quote from blueprint', 'estimate from plan', 'client blueprint', 'walk in', 'pre-drawn', 'takeoff to estimate'],
+    contexts: ['cad', 'manualj'],
+    answer: `**From a client's blueprint to an estimate — the full funnel**
+
+1. **CAD → Import Blueprint** — drop the client's PDF on the canvas
+2. **Calibrate Scale** against a printed dimension
+3. **AI Extract Rooms** (review and confirm) — or trace walls and **Detect Rooms**
+4. **Manual J** — review R-values, windows, and design conditions, then **Calculate Loads**
+5. **Find Retailer & Estimate** — regionally priced system estimate + nearest supply branches, with a one-click quote-request email that attaches the load report
+
+Every step's next tool glimmers when you complete the previous one. The whole flow stays scoped to the active project, so the blueprint, drawing, loads, and estimate all live together.`,
+  },
+  {
+    keywords: ['commercial', 'warehouse', 'assembly', 'manual n', 'office building', 'retail building', 'church', 'gym', 'commercial building'],
+    contexts: ['cad', 'manualj'],
+    answer: `**Commercial buildings — know the limits**
+
+Manual J is a **residential** load standard. For commercial / assembly occupancies (warehouses, gyms, churches, offices), a Manual J result is a **budget estimate only** — it is *not* permit-valid, and it won't capture ventilation-dominated loads (ASHRAE 62.1 outdoor air per occupant) that drive assembly spaces.
+
+The AI blueprint takeoff flags commercial plans automatically. Use the result to ballpark equipment and quote materials — and set client expectations accordingly.
+
+**ACCA Manual N** (commercial load calculation) is on the DesignPro roadmap; until it ships, permit-grade commercial calcs need a commercial tool or a licensed mechanical engineer's methods.`,
   },
 ];
 
