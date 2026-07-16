@@ -12,6 +12,7 @@
     "db:migrate:dev": "wrangler d1 execute hvac-design-pro-dev --file=./migrations/0001_init.sql --local"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.111.0",
     "hono": "^4.7.0",
     "itty-router": "^5.0.0"
   },

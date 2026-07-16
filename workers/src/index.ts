@@ -14,6 +14,7 @@ import { permitRoutes } from './routes/permits';
 import { auditRoutes } from './routes/audit';
 import { billingRoutes } from './routes/billing';
 import { webhookRoutes } from './routes/webhooks';
+import { aiRoutes } from './routes/ai';
 import { authMiddleware } from './middleware/auth';
 import { auditMiddleware } from './middleware/audit';
 
@@ -31,6 +32,9 @@ export interface Env {
    *  rest. Set via `wrangler secret put MFA_ENC_KEY`. Unset → MFA enrollment
    *  refuses (never stores a plaintext secret). */
   MFA_ENC_KEY?: string;
+  /** Anthropic API key for AI blueprint extraction — set via
+   *  `wrangler secret put ANTHROPIC_API_KEY`. Unset → /api/ai/* returns 503. */
+  ANTHROPIC_API_KEY?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -115,6 +119,7 @@ app.route('/api/forum', forumRoutes);
 app.route('/api/permits', permitRoutes);
 app.route('/api/audit-log', auditRoutes);
 app.route('/api/billing', billingRoutes);
+app.route('/api/ai', aiRoutes);
 
 // ── Scheduled handler (Cloudflare Cron Triggers) ───────────────────────────
 // Every cron schedule declared in wrangler.toml's [triggers] block fires
