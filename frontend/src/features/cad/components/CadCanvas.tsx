@@ -106,6 +106,65 @@ export default function CadCanvas() {
   // Label inline edit overlay state
   const labelOverlayRef = useRef<HTMLDivElement | null>(null);
 
+  // ── Paste-to-import ─────────────────────────────────────────────────────────
+  // Ctrl+V anywhere in the workspace imports clipboard images (screenshots,
+  // copied files) as blueprint underlays. Skips editable fields and pauses
+  // while an intake dialog is open so it never hijacks a real paste.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      const s = useCadStore.getState();
+      if (s.pdfPageRequest || s.calibrationRequest || s.aiExtractRequest) return;
+
+      const files: File[] = [];
+      if (e.clipboardData) {
+        files.push(...Array.from(e.clipboardData.files));
+        if (files.length === 0) {
+          for (const item of Array.from(e.clipboardData.items)) {
+            if (item.kind === 'file' && item.type.startsWith('image/')) {
+              const f = item.getAsFile();
+              if (f) files.push(f);
+            }
+          }
+        }
+      }
+      if (files.length > 0) {
+        e.preventDefault();
+        importUnderlayFiles(files);
+      }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, []);
+
+  // Right-click on the dropzone = paste from clipboard (Clipboard API needs a
+  // user gesture; the browser may ask for permission the first time).
+  const handleDropzoneContextMenu = useCallback(async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      const items = await navigator.clipboard.read();
+      const files: File[] = [];
+      let n = 0;
+      for (const item of items) {
+        const imgType = item.types.find(t => t.startsWith('image/'));
+        if (!imgType) continue;
+        const blob = await item.getType(imgType);
+        n += 1;
+        const ext = imgType.split('/')[1] === 'jpeg' ? 'jpg' : imgType.split('/')[1];
+        files.push(new File([blob], `pasted-${n}.${ext}`, { type: imgType }));
+      }
+      if (files.length === 0) {
+        toast.info('No image on the clipboard — copy an image first, or press Ctrl+V.');
+        return;
+      }
+      importUnderlayFiles(files);
+    } catch {
+      toast.info('Clipboard access was blocked — press Ctrl+V to paste instead.');
+    }
+  }, []);
+
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -2016,14 +2075,15 @@ export default function CadCanvas() {
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <button
             onClick={() => dropInputRef.current?.click()}
+            onContextMenu={handleDropzoneContextMenu}
             className="pointer-events-auto flex flex-col items-center gap-3 px-12 py-10 rounded-3xl border-2 border-dashed border-slate-600/70 bg-slate-900/60 backdrop-blur-sm text-slate-400 hover:border-sky-500/60 hover:text-slate-200 hover:bg-slate-900/80 transition-all min-h-[44px] min-w-[44px]"
-            aria-label="Upload blueprints — drag files here or click to browse"
+            aria-label="Upload blueprints — drag files here, click to browse, or paste from the clipboard"
           >
             <svg className="w-10 h-10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
             </svg>
             <span className="text-base font-semibold">Drop blueprints here</span>
-            <span className="text-xs text-slate-500">PDF, PNG, JPG — multiple files welcome · or click to browse</span>
+            <span className="text-xs text-slate-500">PDF, PNG, JPG — multiple files welcome · click to browse · Ctrl+V or right-click to paste</span>
           </button>
           <input
             ref={dropInputRef}

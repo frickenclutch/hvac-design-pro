@@ -580,9 +580,10 @@ The Properties panel on the right gives you full control:
     contexts: ['cad'],
     answer: `**Importing Blueprints & Images (Underlay)**
 
-Two ways to import:
-1. **Drag & drop** — drag the file directly onto the canvas
-2. **Import button** — click **Import Blueprint** at the bottom of the left toolbox
+Ways to import:
+1. **Drag & drop** — drag the files directly onto the canvas
+2. **Paste** — copy an image anywhere (file explorer, email, a screenshot) and press **Ctrl+V** in the workspace, or right-click the drop zone
+3. **Import button** — click **Import Blueprint** at the bottom of the left toolbox (multi-select supported)
 
 **Supported formats:** PDF (multi-page PDFs ask which page is the floor plan), PNG, JPG, GIF, WebP, SVG
 

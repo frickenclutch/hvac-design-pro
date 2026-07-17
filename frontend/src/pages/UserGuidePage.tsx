@@ -114,7 +114,7 @@ const sections: GuideSection[] = [
       <div className="space-y-3">
         <p>Have a client's blueprint? Drop it straight into the CAD workspace and go from plan to estimate without redrawing anything from scratch.</p>
         <StepList steps={[
-          'Drop the blueprint files onto the CAD canvas (or click the drop zone to browse — multi-select works). Multiple sheets tile side-by-side; multi-page PDFs ask which page is the floor plan',
+          'Drop the blueprint files onto the CAD canvas, click the drop zone to browse (multi-select works), or paste a copied image with Ctrl+V / right-click. Multiple sheets tile side-by-side; multi-page PDFs ask which page is the floor plan',
           'Click AI Extract Rooms (sparkles) — all sheets are read together as one plan set and come back as a single merged room schedule',
           'Review every proposed room: edit names and dimensions, uncheck anything wrong, then confirm — the plan is drawn on a new "AI Takeoff" CAD floor AND sent to Manual J',
           'Finalize the drawing in CAD (walls, openings, equipment), stamp, and export — or go straight to Manual J',

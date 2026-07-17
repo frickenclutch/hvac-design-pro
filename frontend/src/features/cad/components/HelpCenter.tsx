@@ -39,7 +39,7 @@ const sections: HelpSection[] = [
     items: [
       {
         title: 'Import blueprints (PDF or images, multiple files)',
-        desc: 'Drag files onto the canvas, use the empty-canvas drop zone (click it to browse, multi-select supported), or the Import Blueprint toolbox button. Multiple sheets tile side-by-side. PDFs are rasterized (multi-page PDFs ask which page is the floor plan) and land on the locked Underlay layer. Originals save to the active project\'s files.',
+        desc: 'Drag files onto the canvas, click the empty-canvas drop zone to browse (multi-select supported), paste from the clipboard (Ctrl+V anywhere, or right-click the drop zone), or use the Import Blueprint toolbox button. Multiple sheets tile side-by-side. PDFs are rasterized (multi-page PDFs ask which page is the floor plan) and land on the locked Underlay layer. Originals save to the active project\'s files.',
       },
       {
         title: 'Calibrate Scale',
