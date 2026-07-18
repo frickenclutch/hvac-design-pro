@@ -6,7 +6,7 @@ import { toast } from '../stores/useToastStore';
 import SubmitForReviewModal from '../features/permits/SubmitForReviewModal';
 import NewProjectModal from '../features/projects/components/NewProjectModal';
 import EntityAuditModal from '../components/EntityAuditModal';
-import PortalVortexIcon from '../components/PortalVortexIcon';
+import newProjectPlaque from '../assets/brand/new-project-plaque.png';
 import { useAccessPolicyStore } from '../stores/useAccessPolicyStore';
 import {
   loadProjects as loadProjectsSynced,
@@ -324,16 +324,16 @@ export default function Dashboard() {
         <button
           onClick={() => setIsModalOpen(true)}
           aria-label="New Project"
-          className="portal-button relative overflow-hidden rounded-2xl min-h-[44px] min-w-[44px] py-2.5 px-5 sm:px-6 flex items-center gap-2.5 flex-shrink-0 transition-transform duration-200 hover:scale-105"
+          className="portal-button relative overflow-hidden rounded-full min-h-[44px] p-[3px] flex items-center flex-shrink-0 transition-transform duration-200 hover:scale-105"
         >
           {/* Rotating conic rim — square layer sized past the pill's diagonal
               so the spin never uncovers a corner */}
           <span aria-hidden className="absolute left-1/2 top-1/2 w-64 h-64 -translate-x-1/2 -translate-y-1/2">
             <span className="portal-ring absolute inset-0" />
           </span>
-          <span aria-hidden className="absolute inset-[2px] rounded-[14px] bg-slate-950/95" />
-          <PortalVortexIcon className="relative z-10 w-5 h-5 text-emerald-400" />
-          <span className="relative z-10 hidden sm:block font-semibold text-emerald-300">New Project</span>
+          {/* Machined New Project plaque — the button face (icon + language
+              baked into the artwork, stadium alpha matches rounded-full) */}
+          <img src={newProjectPlaque} alt="" className="relative z-10 h-11 w-auto max-w-none rounded-full" />
         </button>
       </header>
 
