@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
-import { ArrowLeft, Save, Undo2, Redo2, Download, Zap, Box, Search, ChevronDown, ChevronUp, HelpCircle, Pencil, X, ArrowRight, Building2, Home, MapPin, Briefcase, Check, History, FolderPlus } from 'lucide-react';
+import { ArrowLeft, Save, Undo2, Redo2, Download, Zap, Box, Search, ChevronDown, ChevronUp, HelpCircle, Pencil, X, ArrowRight, Building2, Home, MapPin, Briefcase, Check, History } from 'lucide-react';
 import AssetSearch from './AssetSearch';
 import ErrorBoundary from '../../../components/ErrorBoundary';
 import { scopedKey } from '../../../utils/storage';
 import UserAvatarMenu from '../../../components/UserAvatarMenu';
-import PortalVortexIcon from '../../../components/PortalVortexIcon';
+import newProjectGear from '../../../assets/brand/new-project-gear.png';
+import cadPortalBlackhole from '../../../assets/brand/cad-portal-blackhole.png';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useCadStore } from '../store/useCadStore';
 import { useAuthStore } from '../../auth/store/useAuthStore';
@@ -45,6 +46,17 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
   // ── Creation portal dropdown ────────────────────────────────────────────
   const [portalOpen, setPortalOpen] = useState(false);
   const portalRef = useRef<HTMLDivElement>(null);
+
+  // Gravity pulse — the black-hole face implodes and springs back on every
+  // toggle. Reset-then-set (via rAF) so rapid clicks restart the animation.
+  const [portalPulse, setPortalPulse] = useState(false);
+  const pulseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const firePortalPulse = () => {
+    setPortalPulse(false);
+    requestAnimationFrame(() => setPortalPulse(true));
+    if (pulseTimer.current) clearTimeout(pulseTimer.current);
+    pulseTimer.current = setTimeout(() => setPortalPulse(false), 550);
+  };
 
   useEffect(() => {
     if (!portalOpen) return;
@@ -87,6 +99,9 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
 
   const saveStatusText = saveError ? 'Save error' : isSaving ? 'Saving...' : isDirty ? 'Unsaved' : lastSavedAt ? 'Saved' : 'Draft';
   const saveStatusColor = saveError ? 'text-red-400 border-red-500/20 bg-red-500/10' : isSaving ? 'text-amber-400 border-amber-500/20 bg-amber-500/10' : isDirty ? 'text-slate-400 border-slate-500/20 bg-slate-500/10' : 'text-emerald-400 border-emerald-500/20 bg-emerald-500/10';
+  // Enamel badge variant for the sheet-metal portal menu — solid plates stay
+  // legible on the knurled fill where translucent tints wash out.
+  const portalPillClass = saveError ? 'bg-red-700 border-red-900/60 text-red-50' : isSaving ? 'bg-amber-400 border-amber-700/60 text-amber-950' : isDirty ? 'bg-slate-700 border-slate-900/60 text-slate-100' : 'bg-emerald-700 border-emerald-900/60 text-emerald-50';
 
   const titleCommittedRef = useRef(false);
 
@@ -351,89 +366,91 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
            {/* ── Creation portal — save, new-project, 3D + export ─────── */}
            <div className="relative" ref={portalRef}>
              <button
-               onClick={() => setPortalOpen(v => !v)}
+               onClick={() => { setPortalOpen(v => !v); firePortalPulse(); }}
                aria-label="Creation portal — save, new project, 3D view, or export PDF"
                aria-expanded={portalOpen}
                aria-haspopup="menu"
-               className={`portal-button relative min-h-[44px] min-w-[44px] w-11 h-11 rounded-2xl overflow-hidden flex items-center justify-center transition-transform duration-200 ${portalOpen ? 'scale-105' : 'hover:scale-105'}`}
+               className={`portal-button-metallic relative min-h-[44px] min-w-[44px] w-11 h-11 rounded-2xl overflow-hidden flex items-center justify-center transition-transform duration-200 ${portalOpen ? 'scale-105' : 'hover:scale-105'}${portalPulse ? ' portal-implode' : ''}`}
              >
-               <span aria-hidden className="portal-ring absolute inset-[-50%]" />
+               <span aria-hidden className="portal-ring-metallic absolute inset-[-50%]" />
                <span aria-hidden className="absolute inset-[2px] rounded-[14px] bg-slate-950/95" />
-               <PortalVortexIcon className={`relative z-10 w-5 h-5 transition-all duration-500 ${portalOpen ? 'text-emerald-300 rotate-180' : 'text-emerald-400'}`} />
+               {/* Platinum/copper black-hole face — spins as the portal opens */}
+               <img
+                 src={cadPortalBlackhole}
+                 alt=""
+                 aria-hidden
+                 className={`absolute inset-[2px] z-10 rounded-[14px] object-cover transition-transform duration-700 ${portalOpen ? 'rotate-180' : ''}`}
+               />
                {isDirty && !isSaving && (
-                 <span aria-hidden className="absolute top-[5px] right-[5px] z-10 w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)]" />
+                 <span aria-hidden className="absolute top-[5px] right-[5px] z-20 w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)]" />
                )}
              </button>
 
              {portalOpen && (
                <div
                  role="menu"
-                 className="absolute right-0 top-full mt-3 w-72 rounded-2xl border border-slate-700/50 bg-slate-900/95 backdrop-blur-xl shadow-[0_20px_60px_rgba(0,0,0,0.7)] overflow-hidden animate-in fade-in slide-in-from-top-2 zoom-in-95 duration-200 z-50"
+                 className="portal-menu-emerge portal-menu-metal absolute right-0 top-full mt-3 w-72 z-50"
                >
-                 <div className="px-4 pt-3 pb-2 flex items-center justify-between border-b border-slate-800/80">
-                   <span className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Creation Portal</span>
-                   <span className={`${saveStatusColor} text-[9px] uppercase font-mono tracking-widest px-1.5 py-0.5 rounded border`}>{saveStatusText}</span>
+                 <div className="px-2.5 pt-1.5 pb-2 flex items-center justify-between">
+                   <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-800 [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">Creation Portal</span>
+                   <span className={`${portalPillClass} text-[9px] uppercase font-mono font-bold tracking-widest px-1.5 py-0.5 rounded border shadow-[inset_0_1px_1px_rgba(255,255,255,0.35),0_1px_3px_rgba(0,0,0,0.4)]`}>{saveStatusText}</span>
                  </div>
 
                  <button
                    role="menuitem"
                    onClick={() => { setPortalOpen(false); handleSave(); }}
-                   className="w-full min-h-[44px] flex items-center gap-3 px-4 py-3 text-left hover:bg-emerald-500/10 transition-colors group"
+                   className="w-full min-h-[44px] flex items-center gap-3 px-2.5 py-3 text-left hover:bg-slate-950/15 transition-colors group"
                  >
-                   <span className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center shrink-0 group-hover:shadow-[0_0_14px_rgba(16,185,129,0.35)] transition-shadow">
-                     <Save className="w-4 h-4 text-emerald-400" />
+                   <span className="w-9 h-9 rounded-xl bg-teal-600 border-2 border-teal-900/50 flex items-center justify-center shrink-0 shadow-[inset_0_1px_2px_rgba(255,255,255,0.45),0_2px_5px_rgba(0,0,0,0.45)]">
+                     <Save className="w-4 h-4 text-teal-50" />
                    </span>
                    <span className="flex flex-col">
-                     <span className="text-sm font-semibold text-slate-100">{isDraft ? 'Save as Project' : 'Save'}</span>
-                     <span className="text-[11px] text-slate-500">
+                     <span className="text-sm font-bold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.45)]">{isDraft ? 'Save as Project' : 'Save'}</span>
+                     <span className="text-xs font-semibold text-slate-800 [text-shadow:0_1px_0_rgba(255,255,255,0.55)]">
                        {saveError ? 'Save failed — try again' : isSaving ? 'Saving…' : isDraft ? 'Turn this draft into a project' : isDirty ? 'Unsaved changes' : 'All changes saved'}
                      </span>
                    </span>
                  </button>
 
-                 <div className="h-px bg-slate-800/80 mx-4" />
-
                  <button
                    role="menuitem"
                    onClick={() => { setPortalOpen(false); openProjectModal('newProject'); }}
-                   className="w-full min-h-[44px] flex items-center gap-3 px-4 py-3 text-left hover:bg-sky-500/10 transition-colors group"
+                   className="w-full min-h-[44px] flex items-center gap-3 px-2.5 py-3 text-left hover:bg-slate-950/15 transition-colors group"
                  >
-                   <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-500/15 to-violet-500/15 border border-sky-500/30 flex items-center justify-center shrink-0 group-hover:shadow-[0_0_14px_rgba(56,189,248,0.35)] transition-shadow">
-                     <FolderPlus className="w-4 h-4 text-sky-400" />
+                   <span className="w-9 h-9 rounded-xl bg-slate-600 border-2 border-slate-900/50 flex items-center justify-center shrink-0 shadow-[inset_0_1px_2px_rgba(255,255,255,0.45),0_2px_5px_rgba(0,0,0,0.45)] overflow-hidden">
+                     <img src={newProjectGear} alt="" aria-hidden className="w-7 h-7 rounded-full" />
                    </span>
                    <span className="flex flex-col">
-                     <span className="text-sm font-semibold text-slate-100">New Project</span>
-                     <span className="text-[11px] text-slate-500">Fresh workspace — right from the canvas</span>
+                     <span className="text-sm font-bold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.45)]">New Project</span>
+                     <span className="text-xs font-semibold text-slate-800 [text-shadow:0_1px_0_rgba(255,255,255,0.55)]">Fresh workspace — right from the canvas</span>
                    </span>
                  </button>
-
-                 <div className="h-px bg-slate-800/80 mx-4" />
 
                  <button
                    role="menuitem"
                    onClick={() => { setPortalOpen(false); setShow3D(true); }}
-                   className="w-full min-h-[44px] flex items-center gap-3 px-4 py-3 text-left hover:bg-violet-500/10 transition-colors group"
+                   className="w-full min-h-[44px] flex items-center gap-3 px-2.5 py-3 text-left hover:bg-slate-950/15 transition-colors group"
                  >
-                   <span className="w-9 h-9 rounded-xl bg-violet-500/10 border border-violet-500/30 flex items-center justify-center shrink-0 group-hover:shadow-[0_0_14px_rgba(167,139,250,0.35)] transition-shadow">
-                     <Box className="w-4 h-4 text-violet-400" />
+                   <span className="w-9 h-9 rounded-xl bg-violet-600 border-2 border-violet-900/50 flex items-center justify-center shrink-0 shadow-[inset_0_1px_2px_rgba(255,255,255,0.45),0_2px_5px_rgba(0,0,0,0.45)]">
+                     <Box className="w-4 h-4 text-violet-50" />
                    </span>
                    <span className="flex flex-col">
-                     <span className="text-sm font-semibold text-slate-100">3D View</span>
-                     <span className="text-[11px] text-slate-500">Walk the model in three dimensions</span>
+                     <span className="text-sm font-bold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.45)]">3D View</span>
+                     <span className="text-xs font-semibold text-slate-800 [text-shadow:0_1px_0_rgba(255,255,255,0.55)]">Walk the model in three dimensions</span>
                    </span>
                  </button>
 
                  <button
                    role="menuitem"
                    onClick={() => { setPortalOpen(false); handleExport(); }}
-                   className="w-full min-h-[44px] flex items-center gap-3 px-4 py-3 text-left hover:bg-amber-500/10 transition-colors group"
+                   className="w-full min-h-[44px] flex items-center gap-3 px-2.5 py-3 text-left hover:bg-slate-950/15 transition-colors group"
                  >
-                   <span className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shrink-0 group-hover:shadow-[0_0_14px_rgba(251,191,36,0.3)] transition-shadow">
-                     <Download className="w-4 h-4 text-amber-400" />
+                   <span className="w-9 h-9 rounded-xl bg-amber-500 border-2 border-amber-800/60 flex items-center justify-center shrink-0 shadow-[inset_0_1px_2px_rgba(255,255,255,0.45),0_2px_5px_rgba(0,0,0,0.45)]">
+                     <Download className="w-4 h-4 text-amber-950" />
                    </span>
                    <span className="flex flex-col">
-                     <span className="text-sm font-semibold text-slate-100">Export PDF</span>
-                     <span className="text-[11px] text-slate-500">Permit-ready plot of this drawing</span>
+                     <span className="text-sm font-bold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.45)]">Export PDF</span>
+                     <span className="text-xs font-semibold text-slate-800 [text-shadow:0_1px_0_rgba(255,255,255,0.55)]">Permit-ready plot of this drawing</span>
                    </span>
                  </button>
                </div>

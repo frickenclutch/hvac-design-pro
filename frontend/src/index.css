@@ -326,8 +326,107 @@ body {
   box-shadow: 0 0 28px rgb(16 185 129 / 0.45), 0 4px 15px rgb(0 0 0 / 0.4);
 }
 
+/* Metallic variant — platinum/copper rim + glow for the black-hole trigger.
+   Same spinning-conic construction as .portal-ring, colored to the artwork
+   instead of the emerald accent. */
+.portal-ring-metallic {
+  background: conic-gradient(
+    from 0deg,
+    rgb(226 232 240 / 0.95),
+    rgb(148 163 184 / 0.5),
+    rgb(226 155 120 / 0.9),
+    rgb(184 115 82 / 0.45),
+    rgb(241 245 249 / 0.85),
+    rgb(120 130 145 / 0.4),
+    rgb(226 232 240 / 0.95)
+  );
+  animation: portal-spin 7s linear infinite;
+}
+
+.portal-button-metallic {
+  box-shadow: 0 0 16px rgb(196 130 92 / 0.3), 0 4px 15px rgb(0 0 0 / 0.4);
+  transition: box-shadow 0.3s ease;
+}
+
+.portal-button-metallic:hover,
+.portal-button-metallic[aria-expanded='true'] {
+  box-shadow: 0 0 26px rgb(214 150 110 / 0.5), 0 0 10px rgb(226 232 240 / 0.25), 0 4px 15px rgb(0 0 0 / 0.4);
+}
+
+/* Sheet-metal menu — a machined brushed-steel plate. The fill is the panel
+   artwork's interior melted to a soft light-field; the edge is a simple
+   machined bevel (top-light, bottom-shadow inset ring). Text renders
+   engraved: dark ink with a bottom-light letterpress shadow, applied inline
+   per element. */
+.portal-menu-metal {
+  border: 1px solid rgb(71 85 105 / 0.8);
+  border-radius: 1rem;
+  overflow: hidden;
+  background: #aeb3ba url('./assets/brand/portal-menu-steel.webp');
+  background-size: 100% 100%;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.5),
+    inset 0 -1px 0 rgb(0 0 0 / 0.35),
+    inset 1px 0 0 rgb(255 255 255 / 0.2),
+    inset -1px 0 0 rgb(0 0 0 / 0.2),
+    0 20px 60px rgb(0 0 0 / 0.75),
+    0 0 24px rgb(196 130 92 / 0.15);
+}
+
+/* Menu emergence — the dropdown escapes the singularity toward the viewer:
+   born tiny and light-warped at the hole (above the menu's right edge),
+   swelling and resolving sharp with a slight overshoot as it arrives. */
+@keyframes portal-menu-emerge {
+  0% {
+    opacity: 0;
+    scale: 0.05;
+    rotate: -7deg;
+    filter: blur(10px) brightness(1.6);
+  }
+  55% {
+    opacity: 1;
+    filter: blur(1px) brightness(1.05);
+  }
+  80% {
+    scale: 1.02;
+    rotate: 0.5deg;
+  }
+  100% {
+    opacity: 1;
+    scale: 1;
+    rotate: 0deg;
+    filter: none;
+  }
+}
+
+.portal-menu-emerge {
+  transform-origin: calc(100% - 22px) -12px;
+  animation: portal-menu-emerge 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .portal-ring {
+  .portal-ring-metallic,
+  .portal-menu-emerge {
+    animation: none;
+  }
+}
+
+/* Click pulse — the portal face collapses toward the singularity and
+   springs back (overshoot easing). Composes with the open-state rotation
+   since scale and rotate are independent properties. */
+@keyframes portal-implode {
+  0%   { scale: 1; }
+  45%  { scale: 0.68; }
+  100% { scale: 1; }
+}
+
+.portal-implode {
+  animation: portal-implode 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portal-ring,
+  .portal-implode {
     animation: none;
   }
 }
