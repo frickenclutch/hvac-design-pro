@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import {
   Thermometer, Wind, Sun, Droplets, ArrowRight, RotateCcw,
   ChevronDown, ChevronUp, Home, Building2, Info,
-  FileDown, Printer, Gauge, Shield, MapPin
+  FileDown, Printer, Gauge, Shield, MapPin, AlertTriangle
 } from 'lucide-react';
 import {
   type RoomInput, type DesignConditions, type WholeHouseResult,
@@ -12,6 +12,7 @@ import {
   APPLIANCE_LIBRARY, ROOM_TYPE_PRESETS,
 } from '../engines/manualJ';
 import { lookupByZip } from '../engines/ashraeWeather';
+import { reconcileDuctAssumptions, type DuctReconcileReport } from '../engines/ductReconcile';
 import { convertAllFloorsToManualJ } from '../engines/cadToManualJ';
 import { generateCadFloorFromManualJ, type LayoutAlgorithm } from '../engines/manualJToCad';
 import { useCadStore } from '../features/cad/store/useCadStore';
@@ -26,6 +27,8 @@ import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { usePreferencesStore } from '../stores/usePreferencesStore';
 import { scopedKey } from '../utils/storage';
 import { buildFormJ1, MANUAL_J8_ENGINE_VERSION } from '../engines/manualJ8';
+import { ENGINE_VERSIONS } from '../engines/versions';
+import { stampBudgetEstimateAllPages, budgetEstimatePrintOverlayHtml } from '../features/reports/budgetEstimateWatermark';
 import { roomInputsToFormJ1Input } from '../engines/manualJ8/adapters/legacy';
 import { syncCalcToD1 } from '../features/calculations/calcStorage';
 import { toast } from '../stores/useToastStore';
@@ -43,6 +46,14 @@ function getInputsKey(projectId: string | null): string {
 }
 function getResultsKey(projectId: string | null): string {
   return scopedKey(`hvac_manualj_results_${projectId || 'draft'}`);
+}
+/** Manual D's persisted design inputs — read-only, for duct reconciliation */
+function getMdInputsKey(projectId: string | null): string {
+  return scopedKey(`hvac_manuald_inputs_${projectId || 'draft'}`);
+}
+/** Remembered dismissal signature for the duct-drift callout */
+function getDuctDismissKey(projectId: string | null): string {
+  return scopedKey(`hvac_manualj_ductnudge_${projectId || 'draft'}`);
 }
 
 // One-time migration: move old global keys to draft if no scoped data exists
@@ -124,6 +135,41 @@ export default function ManualJCalculator() {
     const t = setTimeout(() => setSaveStatus('idle'), 1500);
     return () => clearTimeout(t);
   }, [buildingType, rooms, conditions, activeProjectId]);
+
+  // ── Manual D duct-design reconciliation ─────────────────────────────────
+  // Manual D's persisted design (per-room run lengths) is compared against
+  // this worksheet's documented duct-length assumption; material drift
+  // surfaces a callout in the Duct System section. Dismissals are remembered
+  // per comparison signature, so the nudge only returns when either side
+  // actually changes. Applying is always user-confirmed (ACCA: no silent
+  // value substitution).
+  const [ductReconcile, setDuctReconcile] = useState<DuctReconcileReport | null>(null);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(getMdInputsKey(activeProjectId));
+      if (!raw) { setDuctReconcile(null); return; }
+      const parsed = JSON.parse(raw) as { rooms?: { actualLengthFt?: unknown }[] };
+      const runs = Array.isArray(parsed.rooms)
+        ? parsed.rooms.map(r => ({ actualLengthFt: Number(r?.actualLengthFt) }))
+        : [];
+      const report = reconcileDuctAssumptions(conditions.ductLengthFt, runs);
+      if (!report?.exceedsThreshold) { setDuctReconcile(null); return; }
+      const dismissed = localStorage.getItem(getDuctDismissKey(activeProjectId));
+      setDuctReconcile(dismissed === report.signature ? null : report);
+    } catch { setDuctReconcile(null); }
+  }, [activeProjectId, conditions.ductLengthFt]);
+
+  const applyDesignedDuctLength = () => {
+    if (!ductReconcile) return;
+    setConditions(c => ({ ...c, ductLengthFt: ductReconcile.designedLengthFt }));
+    toast.success(`Duct run length updated to ${ductReconcile.designedLengthFt} ft from the Manual D design.`);
+  };
+
+  const dismissDuctReconcile = () => {
+    if (!ductReconcile) return;
+    try { localStorage.setItem(getDuctDismissKey(activeProjectId), ductReconcile.signature); } catch { /* ignore */ }
+    setDuctReconcile(null);
+  };
 
   const addRoom = (floorName?: string) => {
     const newRoom = createDefaultRoom(rooms.length);
@@ -310,8 +356,12 @@ export default function ManualJCalculator() {
       calcType: 'MANUAL_J',
       inputs: { buildingType, rooms, conditions },
       outputs: res,
-      engineVersion: 'manualJ-legacy-1.0',
+      engineVersion: ENGINE_VERSIONS.manualJLegacy,
       durationMs,
+      // Commercial runs through the residential engine are budget-estimate by
+      // derivation (Unit N0); residential stays permit-grade.
+      method: buildingType === 'commercial' ? 'manualJ-residential-approximation' : 'manualJ-residential',
+      buildingType,
     });
 
     // ── Phase 1: shadow-run cert-grade engine for drift telemetry ───────
@@ -360,6 +410,8 @@ export default function ManualJCalculator() {
           },
           engineVersion: MANUAL_J8_ENGINE_VERSION,
           durationMs: j8DurationMs,
+          method: 'manualJ8-shadow',
+          buildingType,
         });
       } catch (err) {
         // Adapter or engine threw — log a finding but don't disrupt the user
@@ -379,6 +431,8 @@ export default function ManualJCalculator() {
           },
           engineVersion: `${MANUAL_J8_ENGINE_VERSION}-fail`,
           durationMs: 0,
+          method: 'manualJ8-shadow',
+          buildingType,
         });
       }
     }
@@ -429,6 +483,7 @@ export default function ManualJCalculator() {
         @media print { body { padding: 20px; } }
       </style>
     </head><body>
+      ${buildingType === 'commercial' ? budgetEstimatePrintOverlayHtml() : ''}
       <div class="header">
         <h1>${displayName} — Manual J Load Report</h1>
         <p>ACCA Manual J 8th Edition — Residential Heating & Cooling Load Calculation</p>
@@ -527,7 +582,7 @@ export default function ManualJCalculator() {
     // `engine_version` column on the calc record in D1.
     const engineStamp = usePreferencesStore.getState().engineVersion === 'manualJ8'
       ? `Engine ${MANUAL_J8_ENGINE_VERSION} (cert-grade)`
-      : 'Engine manualJ-legacy-1.0 (production display)';
+      : `Engine ${ENGINE_VERSIONS.manualJLegacy} (production display)`;
     const drawFooter = () => {
       doc.setFont('helvetica', 'normal'); doc.setFontSize(6); doc.setTextColor(150);
       doc.text(`${watermark}  \u2014  ACCA Manual J 8th Edition (ANSI/ACCA 2-2016)  \u2014  ASHRAE 62.2-2022`, margin, ph - 20);
@@ -889,6 +944,13 @@ export default function ManualJCalculator() {
       drawFooter(); drawStamp();
     }
 
+    // ── Budget-estimate stamp (Unit N0, un-removable) ─────────────────────
+    // Commercial runs use residential Manual J math today; every page gets
+    // the diagonal grade stamp regardless of watermark preferences.
+    if (buildingType === 'commercial') {
+      stampBudgetEstimateAllPages(doc);
+    }
+
     doc.save(`ManualJ_Report_${safeProjectName}_${new Date().toISOString().slice(0, 10)}.pdf`);
   };
 
@@ -1054,6 +1116,39 @@ export default function ManualJCalculator() {
             <NumericField label="Duct Run Length (ft)" value={conditions.ductLengthFt}
               onChange={v => setConditions(c => ({ ...c, ductLengthFt: v }))} />
           </div>
+
+          {/* Manual D drift callout — as-designed length vs this assumption */}
+          {ductReconcile && (
+            <div role="status" aria-live="polite" className="mt-6 rounded-2xl border border-amber-500/25 bg-amber-500/5 p-4 flex items-start gap-3 flex-wrap">
+              <span className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-4 h-4 text-amber-400" />
+              </span>
+              <div className="flex-1 min-w-[240px]">
+                <p className="text-sm font-semibold text-amber-200">
+                  Manual D design differs from this duct assumption
+                </p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  The as-designed system totals {ductReconcile.designedLengthFt} ft across {ductReconcile.runCount} run{ductReconcile.runCount === 1 ? '' : 's'} — this worksheet documents {ductReconcile.assumedLengthFt} ft
+                  {ductReconcile.deltaPercent !== null ? ` (${ductReconcile.deltaPercent}% drift)` : ''}.
+                  Applying keeps the documented assumption in sync; duct load factors remain driven by location, insulation, and leakage.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={applyDesignedDuctLength}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-xs font-bold min-h-[44px]"
+                >
+                  Apply {ductReconcile.designedLengthFt} ft
+                </button>
+                <button
+                  onClick={dismissDuctReconcile}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-bold min-h-[44px]"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
         </section>
 
         {/* ═══ Room-by-Room Inputs ═══ */}

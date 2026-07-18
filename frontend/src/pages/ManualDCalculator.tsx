@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import {
   GitBranch, Wind, Gauge, ArrowRight, RotateCcw,
   Plus, Trash2, ChevronDown, AlertTriangle, CheckCircle, Info,
@@ -15,6 +16,8 @@ import ProjectContextBar from '../components/ProjectContextBar';
 import ProjectGateDialog from '../components/ProjectGateDialog';
 import { scopedKey } from '../utils/storage';
 import { syncCalcToD1 } from '../features/calculations/calcStorage';
+import { ENGINE_VERSIONS } from '../engines/versions';
+import { reconcileDuctAssumptions } from '../engines/ductReconcile';
 
 // ── User + project scoped persistence ────────────────────────────────────────
 function getStorageKey(projectId: string | null): string {
@@ -145,6 +148,22 @@ export default function ManualDCalculator() {
     return () => clearTimeout(t);
   }, [application, equipmentCfm, blowerEsp, filterDrop, coilDrop, ductMaterial, preferredShape, maxAspectRatio, rooms, activeProjectId]);
 
+  // ── Duct-assumption drift vs Manual J ───────────────────────────────────
+  // After a calculation, compare this design's total straight-run length
+  // against Manual J's documented duct-length assumption for the project.
+  // Material drift gets a hint under the results; the reconcile action
+  // itself lives in Manual J's Duct System section.
+  const ductDrift = useMemo(() => {
+    if (!result) return null;
+    try {
+      const raw = localStorage.getItem(getMjInputsKey(activeProjectId));
+      if (!raw) return null;
+      const mj = JSON.parse(raw) as { conditions?: { ductLengthFt?: unknown } };
+      const report = reconcileDuctAssumptions(Number(mj.conditions?.ductLengthFt), result.runs);
+      return report?.exceedsThreshold ? report : null;
+    } catch { return null; }
+  }, [result, activeProjectId]);
+
   const addRoom = useCallback(() => {
     setRooms(prev => [...prev, createDefaultRoom(prev.length)]);
     setResult(null);
@@ -265,8 +284,12 @@ export default function ManualDCalculator() {
       calcType: 'MANUAL_D',
       inputs: input,
       outputs: res,
-      engineVersion: 'manualD-1.0',
+      engineVersion: ENGINE_VERSIONS.manualD,
       durationMs,
+      method: 'manualD',
+      // Commercial duct schedules are fed by residential-approximated loads
+      // until Manual N ships (Unit N6) — grade caps at budget-estimate.
+      buildingType: application,
     });
   }, [activeProjectId, activeProjectName, equipmentCfm, blowerEsp, filterDrop, coilDrop, ductMaterial, preferredShape, maxAspectRatio, application, rooms]);
 
@@ -405,7 +428,7 @@ export default function ManualDCalculator() {
 
     // ── Footer engine stamp (matches AED / Manual J audit-trail style) ───
     doc.setFont('helvetica', 'normal'); doc.setFontSize(6); doc.setTextColor(150);
-    doc.text('Engine manualD-1.0  —  ACCA Manual D (Equal Friction Method)', margin, ph - 20);
+    doc.text(`Engine ${ENGINE_VERSIONS.manualD}  —  ACCA Manual D (Equal Friction Method)`, margin, ph - 20);
     doc.text(new Date().toISOString().slice(0, 10), pw - margin, ph - 20, { align: 'right' });
 
     const safeName = (activeProjectName || 'Manual_D').replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '');
@@ -703,6 +726,31 @@ export default function ManualDCalculator() {
               <MiniStat label="Critical Path Pressure Drop" value={`${result.criticalPathPressureDrop.toFixed(4)} inwg`} />
               <MiniStat label="Duct Material" value={MATERIAL_OPTIONS.find(m => m[0] === ductMaterial)?.[1] ?? ductMaterial} />
             </div>
+
+            {/* Manual J duct-assumption drift hint */}
+            {ductDrift && (
+              <div role="status" aria-live="polite" className="glass-panel rounded-2xl border border-amber-500/20 p-5 flex items-start gap-3 flex-wrap">
+                <span className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-4 h-4 text-amber-400" />
+                </span>
+                <div className="flex-1 min-w-[240px]">
+                  <p className="text-sm font-bold text-white">Manual J assumes a different duct system</p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    This design totals {ductDrift.designedLengthFt} ft of straight run —{' '}
+                    {ductDrift.deltaPercent !== null
+                      ? `the Manual J worksheet documents ${ductDrift.assumedLengthFt} ft (${ductDrift.deltaPercent}% drift).`
+                      : 'the Manual J worksheet has no usable duct run length yet.'}{' '}
+                    Keep the load worksheet's documented assumption in sync with the as-designed system.
+                  </p>
+                </div>
+                <Link
+                  to="/calculator"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-bold min-h-[44px]"
+                >
+                  Reconcile in Manual J <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+            )}
 
             {/* Balancing Notes */}
             {result.balancingNotes.length > 0 && (
