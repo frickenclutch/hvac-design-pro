@@ -22,6 +22,7 @@ export interface PanelSizes {
   layersScale: number;       // 0.7–1.25 scale factor for layers panel
   toolboxScale: number;      // 0.75–1.25 scale factor for tool buttons
   toolboxPos: ToolboxPosition; // last floating position of the toolbox
+  floorsPos: ToolboxPosition | null; // floors bar position — null = docked top-center
 }
 
 export const DEFAULT_PANEL_SIZES: PanelSizes = {
@@ -31,6 +32,7 @@ export const DEFAULT_PANEL_SIZES: PanelSizes = {
   layersScale: 1,
   toolboxScale: 1,
   toolboxPos: { x: 24, y: -1 },  // y=-1 signals "auto-center vertically"
+  floorsPos: null,
 };
 
 export interface UserPreferences {
