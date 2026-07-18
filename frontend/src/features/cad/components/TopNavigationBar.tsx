@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
-import { ArrowLeft, Save, Undo2, Redo2, Download, Zap, Box, Search, ChevronDown, ChevronUp, HelpCircle, Pencil, X, ArrowRight, Building2, Home, MapPin, Briefcase, Check, History } from 'lucide-react';
+import { ArrowLeft, Save, Undo2, Redo2, Download, Zap, Box, Search, ChevronDown, ChevronUp, HelpCircle, Pencil, X, ArrowRight, Building2, Home, MapPin, Briefcase, Check, History, FolderPlus } from 'lucide-react';
 import AssetSearch from './AssetSearch';
 import ErrorBoundary from '../../../components/ErrorBoundary';
 import { scopedKey } from '../../../utils/storage';
 import UserAvatarMenu from '../../../components/UserAvatarMenu';
+import PortalVortexIcon from '../../../components/PortalVortexIcon';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useCadStore } from '../store/useCadStore';
 import { useAuthStore } from '../../auth/store/useAuthStore';
@@ -29,14 +30,37 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
   const [titleDraft, setTitleDraft] = useState('');
   const titleInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Save-as-project modal for drafts ────────────────────────────────────
+  // ── Project creation modal ──────────────────────────────────────────────
+  // 'saveAs'     — draft mode Save: create a project and keep the drawing.
+  // 'newProject' — creation portal: spin up a fresh workspace from the canvas.
   const [showSaveModal, setShowSaveModal] = useState(false);
+  const [modalMode, setModalMode] = useState<'saveAs' | 'newProject'>('saveAs');
   const [saveStep, setSaveStep] = useState(1);
   const [saveName, setSaveName] = useState('');
   const [saveType, setSaveType] = useState('Residential');
   const [saveAddress, setSaveAddress] = useState('');
   const [saveCity, setSaveCity] = useState('');
   const [isSavingProject, setIsSavingProject] = useState(false);
+
+  // ── Creation portal dropdown ────────────────────────────────────────────
+  const [portalOpen, setPortalOpen] = useState(false);
+  const portalRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!portalOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (portalRef.current && !portalRef.current.contains(e.target as Node)) setPortalOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPortalOpen(false);
+    };
+    window.addEventListener('pointerdown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [portalOpen]);
 
   // Derive display name — fall back gracefully when no project route
   const displayName = activeProjectName ?? (id ? `Project ${id}` : 'CAD Workspace');
@@ -91,15 +115,20 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
   // ── Save handler ──────────────────────────────────────────────────────────
   const isDraft = !activeProjectId;
 
+  const openProjectModal = (mode: 'saveAs' | 'newProject') => {
+    setModalMode(mode);
+    setSaveName('');
+    setSaveType('Residential');
+    setSaveAddress('');
+    setSaveCity('');
+    setSaveStep(1);
+    setShowSaveModal(true);
+  };
+
   const handleSave = () => {
     if (isDraft) {
       // No project exists yet — open the save-as modal
-      setSaveName('');
-      setSaveType('Residential');
-      setSaveAddress('');
-      setSaveCity('');
-      setSaveStep(1);
-      setShowSaveModal(true);
+      openProjectModal('saveAs');
       return;
     }
 
@@ -118,6 +147,28 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
     if (!saveName.trim() || isSavingProject) return;
     setIsSavingProject(true);
     try {
+      if (modalMode === 'newProject') {
+        // Preserve the current workspace before leaving it — auto-save covers
+        // this too, but a synchronous flush costs nothing and closes the gap.
+        if (activeProjectId) {
+          try {
+            const store = useCadStore.getState();
+            localStorage.setItem(scopedKey(`hvac_cad_${activeProjectId}`), JSON.stringify(store.serializeDrawing()));
+          } catch { /* best-effort */ }
+        }
+        const newId = await createProject({
+          name: saveName.trim(),
+          type: saveType,
+          address: saveAddress,
+          city: saveCity,
+        });
+        setShowSaveModal(false);
+        // Switch the workspace — CadWorkspace's load effect sees the new
+        // route id, resets to a clean slate, and starts the fresh drawing.
+        navigate(`/project/${newId}/cad`);
+        return;
+      }
+
       const newId = await createProject({
         name: saveName.trim(),
         type: saveType,
@@ -297,26 +348,97 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
            >
              <ChevronUp className="w-4 h-4" />
            </button>
-           <button
-             onClick={() => setShow3D(true)}
-             className="flex items-center gap-2 bg-slate-900/80 text-slate-300 px-4 py-2.5 rounded-xl text-sm font-semibold hover:text-white hover:bg-slate-800 transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] border border-slate-700/50 backdrop-blur-md"
-           >
-             <Box className="w-4 h-4" /> 3D View
-           </button>
-           <button
-             onClick={handleExport}
-             aria-label="Export PDF"
-             className="flex items-center gap-2 bg-slate-900/80 text-slate-300 px-4 py-2.5 rounded-xl text-sm font-semibold hover:text-white hover:bg-slate-800 transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] border border-slate-700/50 backdrop-blur-md"
-           >
-             <Download className="w-4 h-4" /> Export PDF
-           </button>
-           <button
-             onClick={handleSave}
-             aria-label="Save Project"
-             className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-500/20 hover:shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] border border-emerald-500/30 backdrop-blur-md"
-           >
-             <Save className="w-4 h-4" /> {isDraft ? 'Save Project' : 'Save'}
-           </button>
+           {/* ── Creation portal — save, new-project, 3D + export ─────── */}
+           <div className="relative" ref={portalRef}>
+             <button
+               onClick={() => setPortalOpen(v => !v)}
+               aria-label="Creation portal — save, new project, 3D view, or export PDF"
+               aria-expanded={portalOpen}
+               aria-haspopup="menu"
+               className={`portal-button relative min-h-[44px] min-w-[44px] w-11 h-11 rounded-2xl overflow-hidden flex items-center justify-center transition-transform duration-200 ${portalOpen ? 'scale-105' : 'hover:scale-105'}`}
+             >
+               <span aria-hidden className="portal-ring absolute inset-[-50%]" />
+               <span aria-hidden className="absolute inset-[2px] rounded-[14px] bg-slate-950/95" />
+               <PortalVortexIcon className={`relative z-10 w-5 h-5 transition-all duration-500 ${portalOpen ? 'text-emerald-300 rotate-180' : 'text-emerald-400'}`} />
+               {isDirty && !isSaving && (
+                 <span aria-hidden className="absolute top-[5px] right-[5px] z-10 w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)]" />
+               )}
+             </button>
+
+             {portalOpen && (
+               <div
+                 role="menu"
+                 className="absolute right-0 top-full mt-3 w-72 rounded-2xl border border-slate-700/50 bg-slate-900/95 backdrop-blur-xl shadow-[0_20px_60px_rgba(0,0,0,0.7)] overflow-hidden animate-in fade-in slide-in-from-top-2 zoom-in-95 duration-200 z-50"
+               >
+                 <div className="px-4 pt-3 pb-2 flex items-center justify-between border-b border-slate-800/80">
+                   <span className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Creation Portal</span>
+                   <span className={`${saveStatusColor} text-[9px] uppercase font-mono tracking-widest px-1.5 py-0.5 rounded border`}>{saveStatusText}</span>
+                 </div>
+
+                 <button
+                   role="menuitem"
+                   onClick={() => { setPortalOpen(false); handleSave(); }}
+                   className="w-full min-h-[44px] flex items-center gap-3 px-4 py-3 text-left hover:bg-emerald-500/10 transition-colors group"
+                 >
+                   <span className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center shrink-0 group-hover:shadow-[0_0_14px_rgba(16,185,129,0.35)] transition-shadow">
+                     <Save className="w-4 h-4 text-emerald-400" />
+                   </span>
+                   <span className="flex flex-col">
+                     <span className="text-sm font-semibold text-slate-100">{isDraft ? 'Save as Project' : 'Save'}</span>
+                     <span className="text-[11px] text-slate-500">
+                       {saveError ? 'Save failed — try again' : isSaving ? 'Saving…' : isDraft ? 'Turn this draft into a project' : isDirty ? 'Unsaved changes' : 'All changes saved'}
+                     </span>
+                   </span>
+                 </button>
+
+                 <div className="h-px bg-slate-800/80 mx-4" />
+
+                 <button
+                   role="menuitem"
+                   onClick={() => { setPortalOpen(false); openProjectModal('newProject'); }}
+                   className="w-full min-h-[44px] flex items-center gap-3 px-4 py-3 text-left hover:bg-sky-500/10 transition-colors group"
+                 >
+                   <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-500/15 to-violet-500/15 border border-sky-500/30 flex items-center justify-center shrink-0 group-hover:shadow-[0_0_14px_rgba(56,189,248,0.35)] transition-shadow">
+                     <FolderPlus className="w-4 h-4 text-sky-400" />
+                   </span>
+                   <span className="flex flex-col">
+                     <span className="text-sm font-semibold text-slate-100">New Project</span>
+                     <span className="text-[11px] text-slate-500">Fresh workspace — right from the canvas</span>
+                   </span>
+                 </button>
+
+                 <div className="h-px bg-slate-800/80 mx-4" />
+
+                 <button
+                   role="menuitem"
+                   onClick={() => { setPortalOpen(false); setShow3D(true); }}
+                   className="w-full min-h-[44px] flex items-center gap-3 px-4 py-3 text-left hover:bg-violet-500/10 transition-colors group"
+                 >
+                   <span className="w-9 h-9 rounded-xl bg-violet-500/10 border border-violet-500/30 flex items-center justify-center shrink-0 group-hover:shadow-[0_0_14px_rgba(167,139,250,0.35)] transition-shadow">
+                     <Box className="w-4 h-4 text-violet-400" />
+                   </span>
+                   <span className="flex flex-col">
+                     <span className="text-sm font-semibold text-slate-100">3D View</span>
+                     <span className="text-[11px] text-slate-500">Walk the model in three dimensions</span>
+                   </span>
+                 </button>
+
+                 <button
+                   role="menuitem"
+                   onClick={() => { setPortalOpen(false); handleExport(); }}
+                   className="w-full min-h-[44px] flex items-center gap-3 px-4 py-3 text-left hover:bg-amber-500/10 transition-colors group"
+                 >
+                   <span className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shrink-0 group-hover:shadow-[0_0_14px_rgba(251,191,36,0.3)] transition-shadow">
+                     <Download className="w-4 h-4 text-amber-400" />
+                   </span>
+                   <span className="flex flex-col">
+                     <span className="text-sm font-semibold text-slate-100">Export PDF</span>
+                     <span className="text-[11px] text-slate-500">Permit-ready plot of this drawing</span>
+                   </span>
+                 </button>
+               </div>
+             )}
+           </div>
         </div>
 
       </div>
@@ -344,11 +466,15 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                   ))}
                 </div>
                 <h2 className="text-3xl font-extrabold text-white tracking-tight">
-                  {saveStep === 1 ? 'Save as New Project' : 'Project Location'}
+                  {saveStep === 1
+                    ? (modalMode === 'newProject' ? 'Create New Project' : 'Save as New Project')
+                    : 'Project Location'}
                 </h2>
                 <p className="text-slate-400 font-medium mt-1">
                   {saveStep === 1
-                    ? 'Create a workspace to save your drawing.'
+                    ? (modalMode === 'newProject'
+                        ? 'Spin up a fresh working space without leaving the canvas.'
+                        : 'Create a workspace to save your drawing.')
                     : 'Optional — add a location for this project.'}
                 </p>
               </div>
@@ -450,7 +576,7 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                     onClick={handleSaveModalSubmit}
                     className="flex-[2] py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all flex items-center justify-center gap-2 disabled:opacity-40"
                   >
-                    <Check className="w-5 h-5" /> {isSavingProject ? 'Saving…' : 'Create & Save'}
+                    <Check className="w-5 h-5" /> {isSavingProject ? 'Creating…' : modalMode === 'newProject' ? 'Create Project' : 'Create & Save'}
                   </button>
                 )}
               </div>

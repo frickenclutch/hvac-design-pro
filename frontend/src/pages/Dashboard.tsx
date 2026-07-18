@@ -6,6 +6,7 @@ import { toast } from '../stores/useToastStore';
 import SubmitForReviewModal from '../features/permits/SubmitForReviewModal';
 import NewProjectModal from '../features/projects/components/NewProjectModal';
 import EntityAuditModal from '../components/EntityAuditModal';
+import PortalVortexIcon from '../components/PortalVortexIcon';
 import { useAccessPolicyStore } from '../stores/useAccessPolicyStore';
 import {
   loadProjects as loadProjectsSynced,
@@ -322,10 +323,17 @@ export default function Dashboard() {
         </div>
         <button
           onClick={() => setIsModalOpen(true)}
-          className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold py-2.5 px-5 sm:px-6 rounded-full shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all transform hover:-translate-y-1 min-h-[44px] flex-shrink-0"
+          aria-label="New Project"
+          className="portal-button relative overflow-hidden rounded-2xl min-h-[44px] min-w-[44px] py-2.5 px-5 sm:px-6 flex items-center gap-2.5 flex-shrink-0 transition-transform duration-200 hover:scale-105"
         >
-          <Plus className="w-5 h-5" />
-          <span className="hidden sm:block">New Project</span>
+          {/* Rotating conic rim — square layer sized past the pill's diagonal
+              so the spin never uncovers a corner */}
+          <span aria-hidden className="absolute left-1/2 top-1/2 w-64 h-64 -translate-x-1/2 -translate-y-1/2">
+            <span className="portal-ring absolute inset-0" />
+          </span>
+          <span aria-hidden className="absolute inset-[2px] rounded-[14px] bg-slate-950/95" />
+          <PortalVortexIcon className="relative z-10 w-5 h-5 text-emerald-400" />
+          <span className="relative z-10 hidden sm:block font-semibold text-emerald-300">New Project</span>
         </button>
       </header>
 

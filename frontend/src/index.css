@@ -188,3 +188,37 @@ body {
     box-shadow: 0 0 0 2px rgb(var(--accent-rgb, 52 211 153) / 0.5);
   }
 }
+
+/* ── Creation portal — top-bar project actions trigger ────────────────────────
+   A slow-rotating conic rim behind an inset core span, leaving only a ~2px
+   animated ring visible. Falls back to a static ring under reduced motion. */
+@keyframes portal-spin {
+  to { transform: rotate(360deg); }
+}
+
+.portal-ring {
+  background: conic-gradient(
+    from 0deg,
+    rgb(16 185 129 / 0.95),
+    rgb(56 189 248 / 0.55),
+    rgb(167 139 250 / 0.85),
+    rgb(16 185 129 / 0.35),
+    rgb(16 185 129 / 0.95)
+  );
+  animation: portal-spin 5s linear infinite;
+}
+
+.portal-button {
+  box-shadow: 0 0 18px rgb(16 185 129 / 0.25), 0 4px 15px rgb(0 0 0 / 0.4);
+}
+
+.portal-button:hover,
+.portal-button[aria-expanded='true'] {
+  box-shadow: 0 0 28px rgb(16 185 129 / 0.45), 0 4px 15px rgb(0 0 0 / 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portal-ring {
+    animation: none;
+  }
+}
