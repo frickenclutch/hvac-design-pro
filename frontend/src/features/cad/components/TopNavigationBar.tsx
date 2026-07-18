@@ -391,8 +391,10 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                  role="menu"
                  className="portal-menu-emerge portal-menu-metal absolute right-0 top-full mt-3 w-72 z-50"
                >
+                 {/* Specular sweep — glancing light over the whole plate */}
+                 <span aria-hidden className="portal-menu-sheen absolute inset-0 pointer-events-none" />
                  <div className="px-2.5 pt-1.5 pb-2 flex items-center justify-between">
-                   <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-800 [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">Creation Portal</span>
+                   <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-950 [text-shadow:0_1px_0_rgba(255,255,255,0.55)]">Creation Portal</span>
                    <span className={`${portalPillClass} text-[9px] uppercase font-mono font-bold tracking-widest px-1.5 py-0.5 rounded border shadow-[inset_0_1px_1px_rgba(255,255,255,0.35),0_1px_3px_rgba(0,0,0,0.4)]`}>{saveStatusText}</span>
                  </div>
 
@@ -405,8 +407,8 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                      <Save className="w-4 h-4 text-teal-50" />
                    </span>
                    <span className="flex flex-col">
-                     <span className="text-sm font-bold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.45)]">{isDraft ? 'Save as Project' : 'Save'}</span>
-                     <span className="text-xs font-semibold text-slate-800 [text-shadow:0_1px_0_rgba(255,255,255,0.55)]">
+                     <span className="text-sm font-bold text-slate-950 [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">{isDraft ? 'Save as Project' : 'Save'}</span>
+                     <span className="text-xs font-semibold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.6)]">
                        {saveError ? 'Save failed — try again' : isSaving ? 'Saving…' : isDraft ? 'Turn this draft into a project' : isDirty ? 'Unsaved changes' : 'All changes saved'}
                      </span>
                    </span>
@@ -421,8 +423,8 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                      <img src={newProjectGear} alt="" aria-hidden className="w-7 h-7 rounded-full" />
                    </span>
                    <span className="flex flex-col">
-                     <span className="text-sm font-bold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.45)]">New Project</span>
-                     <span className="text-xs font-semibold text-slate-800 [text-shadow:0_1px_0_rgba(255,255,255,0.55)]">Fresh workspace — right from the canvas</span>
+                     <span className="text-sm font-bold text-slate-950 [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">New Project</span>
+                     <span className="text-xs font-semibold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.6)]">Fresh workspace — right from the canvas</span>
                    </span>
                  </button>
 
@@ -435,8 +437,8 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                      <Box className="w-4 h-4 text-violet-50" />
                    </span>
                    <span className="flex flex-col">
-                     <span className="text-sm font-bold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.45)]">3D View</span>
-                     <span className="text-xs font-semibold text-slate-800 [text-shadow:0_1px_0_rgba(255,255,255,0.55)]">Walk the model in three dimensions</span>
+                     <span className="text-sm font-bold text-slate-950 [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">3D View</span>
+                     <span className="text-xs font-semibold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.6)]">Walk the model in three dimensions</span>
                    </span>
                  </button>
 
@@ -449,8 +451,8 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                      <Download className="w-4 h-4 text-amber-950" />
                    </span>
                    <span className="flex flex-col">
-                     <span className="text-sm font-bold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.45)]">Export PDF</span>
-                     <span className="text-xs font-semibold text-slate-800 [text-shadow:0_1px_0_rgba(255,255,255,0.55)]">Permit-ready plot of this drawing</span>
+                     <span className="text-sm font-bold text-slate-950 [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">Export PDF</span>
+                     <span className="text-xs font-semibold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.6)]">Permit-ready plot of this drawing</span>
                    </span>
                  </button>
                </div>

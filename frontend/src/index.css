@@ -362,7 +362,7 @@ body {
   border: 1px solid rgb(71 85 105 / 0.8);
   border-radius: 1rem;
   overflow: hidden;
-  background: #aeb3ba url('./assets/brand/portal-menu-steel.webp');
+  background: #c3c7cd url('./assets/brand/portal-menu-steel.webp');
   background-size: 100% 100%;
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.5),
@@ -371,6 +371,33 @@ body {
     inset -1px 0 0 rgb(0 0 0 / 0.2),
     0 20px 60px rgb(0 0 0 / 0.75),
     0 0 24px rgb(196 130 92 / 0.15);
+}
+
+/* Living light on the aluminum plate — a slow specular band glides across
+   the entire surface (engraved text included, as real glancing light would).
+   Rendered as an overlay span so it sweeps above the rows; pointer-events
+   none keeps the menu interactive. */
+@keyframes portal-menu-sheen {
+  from { background-position: 0% 0%; }
+  to   { background-position: 100% 100%; }
+}
+
+.portal-menu-sheen {
+  background: linear-gradient(
+    115deg,
+    transparent 34%,
+    rgb(255 255 255 / 0.10) 45%,
+    rgb(255 255 255 / 0.03) 50%,
+    transparent 63%
+  );
+  background-size: 300% 300%;
+  animation: portal-menu-sheen 13s ease-in-out infinite alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portal-menu-sheen {
+    animation: none;
+  }
 }
 
 /* Menu emergence — the dropdown escapes the singularity toward the viewer:
