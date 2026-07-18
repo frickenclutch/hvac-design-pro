@@ -22,8 +22,9 @@
  */
 
 import { api } from '../../lib/api';
+import { buildGradeStamp, type Assumption, type BuildingType } from '../../engines/calcGrade';
 
-export type CalcType = 'MANUAL_J' | 'MANUAL_D' | 'MANUAL_S' | 'AED';
+export type CalcType = 'MANUAL_J' | 'MANUAL_D' | 'MANUAL_S' | 'AED' | 'MANUAL_N';
 
 export interface CalcSyncInput {
   projectId: string | null | undefined;
@@ -32,6 +33,22 @@ export interface CalcSyncInput {
   outputs: unknown;
   engineVersion?: string;
   durationMs?: number;
+  /** Which math family produced the outputs — REQUIRED so every new record
+   *  carries a derived __grade/__assumptions/__method stamp (Unit N0, spec §2).
+   *  e.g. 'manualJ-residential', 'manualJ-residential-approximation',
+   *  'manualJ8-shadow', 'manualD', 'manualS', 'aed', 'manualN'. */
+  method: string;
+  /** When known; 'commercial' caps the grade at budget-estimate until real
+   *  Manual N math ships (Units N1-N2). */
+  buildingType?: BuildingType;
+  /** Engine/adapter assumption ledger to merge into the stamp. */
+  assumptions?: Assumption[];
+}
+
+/** Plain-object guard: stamps only merge into JSON-object payloads. Every
+ *  current call site passes objects; anything else passes through unstamped. */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
 export interface CalcSyncResult {
@@ -52,12 +69,28 @@ export async function syncCalcToD1(input: CalcSyncInput): Promise<CalcSyncResult
   // the Cloud chip; until that's clicked, calc rows would orphan-FK.
   if (input.projectId.startsWith('proj-')) return null;
 
+  // ── Grade stamp (Unit N0) ─────────────────────────────────────────────
+  // Derived from the method + building type + assumption ledger; merged into
+  // the outputs JSON so the append-only D1 record is machine-readably graded.
+  // Stamps go LAST in the spread so an engine can never assert its own grade.
+  const stamp = buildGradeStamp({
+    method: input.method,
+    buildingType: input.buildingType,
+    assumptions: input.assumptions,
+  });
+  const outputs = isPlainObject(input.outputs)
+    ? { ...input.outputs, ...stamp }
+    : input.outputs;
+  const inputs = isPlainObject(input.inputs) && input.buildingType
+    ? { ...input.inputs, __buildingType: input.buildingType }
+    : input.inputs;
+
   try {
     return await api.saveCalculation({
       projectId: input.projectId,
       calcType: input.calcType,
-      inputs: input.inputs,
-      outputs: input.outputs,
+      inputs,
+      outputs,
       engineVersion: input.engineVersion,
       durationMs: input.durationMs,
     });

@@ -37,14 +37,16 @@ import {
   type ManualDResult,
 } from '../../engines/manualD';
 import { MANUAL_J8_ENGINE_VERSION } from '../../engines/manualJ8';
+import { ENGINE_VERSIONS } from '../../engines/versions';
+import { stampBudgetEstimateAllPages } from './budgetEstimateWatermark';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Engine version stamps. Manual J 8 and Manual S export their own constants;
-// AED and Manual D have no module-level constant, so they are pinned here (and
-// surfaced on the Codes & Standards Basis page + section footers).
+// AED and Manual D pin theirs in the canonical engines/versions.ts map
+// (hoisted there in Unit N0 — bump versions there, not here).
 // ─────────────────────────────────────────────────────────────────────────────
-const MANUAL_D_ENGINE_VERSION = 'manualD-1.0';
-const AED_ENGINE_VERSION = 'aed-1.0';
+const MANUAL_D_ENGINE_VERSION = ENGINE_VERSIONS.manualD;
+const AED_ENGINE_VERSION = ENGINE_VERSIONS.aed;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public input shape
@@ -64,6 +66,9 @@ export interface CombinedReportData {
   /** Manual J design conditions — feeds the Codes & Standards Basis page.
    *  Read from the Manual J inputs blob by the page. */
   conditions?: DesignConditions | null;
+  /** Building type from the Manual J inputs blob. 'commercial' triggers the
+   *  un-removable BUDGET ESTIMATE page stamp (Unit N0). */
+  buildingType?: 'residential' | 'commercial' | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -230,7 +235,7 @@ export async function generateCombinedReport(data: CombinedReportData): Promise<
   // displays whichever engine the user has selected; stamp that version.
   const manualJEngineVersion = prefs.engineVersion === 'manualJ8'
     ? MANUAL_J8_ENGINE_VERSION
-    : 'manualJ-legacy';
+    : ENGINE_VERSIONS.manualJLegacy;
 
   // AED pass/fail — taken from the standalone AED result when present, else
   // from the whole-house Manual J AED summary. Drives the section-header /
@@ -780,6 +785,13 @@ export async function generateCombinedReport(data: CombinedReportData): Promise<
     doc.setTextColor(0);
 
     drawFooter(`Attestation — sealed by ${prefs.peName}`);
+  }
+
+  // ── Budget-estimate stamp (Unit N0, un-removable) ───────────────────────
+  // Commercial projects run residential math today — every page of the
+  // combined report carries the diagonal grade stamp, preference-independent.
+  if (data.buildingType === 'commercial') {
+    stampBudgetEstimateAllPages(doc);
   }
 
   // ── Save ────────────────────────────────────────────────────────────────

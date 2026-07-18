@@ -10,6 +10,7 @@ import { useCadStore } from '../features/cad/store/useCadStore';
 import { toast } from '../stores/useToastStore';
 import { scopedKey } from '../utils/storage';
 import { syncCalcToD1 } from '../features/calculations/calcStorage';
+import { ENGINE_VERSIONS } from '../engines/versions';
 
 // ── Display formatting ──────────────────────────────────────────────────────
 function fmt(value: number): string {
@@ -208,8 +209,9 @@ export default function AedAnalysis() {
       calcType: 'AED',
       inputs: { groups },
       outputs: res,
-      engineVersion: 'aed-1.0',
+      engineVersion: ENGINE_VERSIONS.aed,
       durationMs,
+      method: 'aed',
     });
   };
 
@@ -349,7 +351,7 @@ export default function AedAnalysis() {
     // the Manual J PDF footer. AED uses its own engine so we stamp that
     // version explicitly.
     doc.setFontSize(6); doc.setTextColor(150);
-    doc.text('Engine aed-1.0  —  ACCA Manual J 8th Edition Section N (AED)', margin, ph - 20);
+    doc.text(`Engine ${ENGINE_VERSIONS.aed}  —  ACCA Manual J 8th Edition Section N (AED)`, margin, ph - 20);
     doc.text(new Date().toISOString().slice(0, 10), pw - margin, ph - 20, { align: 'right' });
 
     doc.save(`AED_Analysis_${new Date().toISOString().slice(0, 10)}.pdf`);

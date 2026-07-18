@@ -35,9 +35,10 @@ function mjInputsKey(projectId: string | null): string {
   return scopedKey(`hvac_manualj_inputs_${projectId || 'draft'}`);
 }
 
-/** Shape of the Manual J persisted inputs blob — only the bit we need here. */
+/** Shape of the Manual J persisted inputs blob — only the bits we need here. */
 interface StoredManualJInputs {
   conditions?: DesignConditions;
+  buildingType?: 'residential' | 'commercial';
 }
 
 /** Safely parse a JSON localStorage value; null on absence or corruption. */
@@ -53,9 +54,12 @@ interface GatheredData {
   manualD: ManualDResult | null;
   /** Design conditions from the Manual J inputs — feeds the Codes & Standards Basis page. */
   conditions: DesignConditions | null;
+  /** Building type from the Manual J inputs — 'commercial' triggers the
+   *  un-removable BUDGET ESTIMATE stamp on the combined PDF (Unit N0). */
+  buildingType: 'residential' | 'commercial' | null;
 }
 
-const EMPTY: GatheredData = { manualJ: null, aed: null, manualS: null, manualD: null, conditions: null };
+const EMPTY: GatheredData = { manualJ: null, aed: null, manualS: null, manualD: null, conditions: null, buildingType: null };
 
 /** Read + recompute every tool's data for the active project. Pure + defensive. */
 function gather(projectId: string | null, projectName: string): GatheredData {
@@ -90,8 +94,11 @@ function gather(projectId: string | null, projectName: string): GatheredData {
   if (mjInputs && mjInputs.conditions && typeof mjInputs.conditions.outdoorCoolingTemp === 'number') {
     conditions = mjInputs.conditions;
   }
+  const buildingType = mjInputs?.buildingType === 'commercial' ? 'commercial' as const
+    : mjInputs?.buildingType === 'residential' ? 'residential' as const
+    : null;
 
-  return { manualJ, aed, manualS, manualD, conditions };
+  return { manualJ, aed, manualS, manualD, conditions, buildingType };
 }
 
 export default function CombinedReportPage() {
@@ -128,6 +135,7 @@ export default function CombinedReportPage() {
         manualS: data.manualS,
         manualD: data.manualD,
         conditions: data.conditions,
+        buildingType: data.buildingType,
       });
     } catch {
       alert('Failed to generate the combined report. Please try again.');

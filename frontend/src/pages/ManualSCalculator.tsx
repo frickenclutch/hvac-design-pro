@@ -299,6 +299,7 @@ export default function ManualSCalculator() {
       outputs: res,
       engineVersion: res.engineVersion,
       durationMs,
+      method: 'manualS',
     });
 
     // Back-patch a compact Manual S summary into the Manual J results so the
