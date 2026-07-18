@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
-import { Home, Compass, Settings, Users, LogOut, Thermometer, PenTool, Menu, X, Search, BookOpen, GitBranch, Sun, Globe, ShieldCheck, Activity, PackageCheck, FileText } from 'lucide-react';
+import { Home, Settings, Users, LogOut, Thermometer, PenTool, Menu, X, Search, BookOpen, GitBranch, Sun, Globe, ShieldCheck, Activity, PackageCheck, FileText } from 'lucide-react';
 import LandingPage from './pages/LandingPage';
 import OnboardingPage from './pages/OnboardingPage';
 import AuthPage from './pages/AuthPage';
@@ -14,6 +14,7 @@ import AuthCallbackPage from './pages/AuthCallbackPage';
 const MfaChallengePage = lazy(() => import('./pages/MfaChallengePage'));
 const MfaEnrollPage = lazy(() => import('./pages/MfaEnrollPage'));
 import UserAvatarMenu from './components/UserAvatarMenu';
+import hvacEmblem from './assets/brand/hvac-emblem.png';
 import ErrorBoundary from './components/ErrorBoundary';
 import ToastContainer from './components/ToastContainer';
 import ImpersonationBanner from './components/ImpersonationBanner';
@@ -164,8 +165,12 @@ function AppLayout() {
       {showSidebar && (
         <div className="md:hidden flex items-center justify-between px-4 py-3 glass-panel border-b border-slate-800/60 z-50 flex-shrink-0">
           <div className="flex items-center gap-2.5">
-            <Compass className={`w-6 h-6 flex-shrink-0 drop-shadow-[0_0_12px_rgba(52,211,153,0.5)] ${organisation?.type === 'municipality' ? 'text-amber-400' : 'text-emerald-400'}`} />
-            <span className="text-sm font-bold premium-gradient-text">DesignPro</span>
+            <img
+              src={hvacEmblem}
+              alt="HVAC Design Pro"
+              className={`w-7 h-7 flex-shrink-0 rounded-full object-cover ${organisation?.type === 'municipality' ? 'drop-shadow-[0_0_10px_rgba(245,158,11,0.45)]' : 'drop-shadow-[0_0_10px_rgba(52,211,153,0.35)]'}`}
+            />
+            <span className="text-sm font-bold premium-gradient-text">HVAC Design Pro</span>
           </div>
           <div className="flex items-center gap-1">
             <button onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))}
@@ -217,7 +222,8 @@ function AppLayout() {
             <button
               onClick={handleBrandToggle}
               title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              className={`relative overflow-hidden rounded-xl flex items-center gap-2.5 mb-8 px-1.5 py-1.5 text-emerald-400 w-full hover:opacity-90 transition-opacity ${thermalSurge ? 'thermal-surge' : ''}`}
+              aria-label="HVAC Design Pro — toggle sidebar"
+              className={`relative overflow-hidden rounded-xl flex items-center mb-8 text-emerald-400 hover:opacity-90 transition-opacity ${sidebarCollapsed ? 'w-11 h-11 justify-center left-1/2 -translate-x-1/2' : 'w-full gap-2 px-1 py-1.5'} ${thermalSurge ? 'thermal-surge' : ''}`}
             >
               {/* Machined-metal bezel — rim layers show only at the 1.5px ring
                   left uncovered by the inset core below */}
@@ -227,11 +233,22 @@ function AppLayout() {
               {/* Thermostat ambience — cold→hot drift + breeze sheen */}
               <span aria-hidden className="thermal-ambient absolute inset-[1.5px] rounded-[10px]" />
               <span aria-hidden className="thermal-breeze absolute inset-[1.5px] rounded-[10px]" />
-              <Compass className={`relative z-10 w-7 h-7 flex-shrink-0 drop-shadow-[0_0_12px_rgba(52,211,153,0.5)] ${organisation?.type === 'municipality' ? 'text-amber-400 drop-shadow-[0_0_12px_rgba(245,158,11,0.5)]' : ''}`} />
+              {/* Gear-vortex emblem — shown in totality when collapsed */}
+              <img
+                src={hvacEmblem}
+                alt=""
+                aria-hidden
+                className={`relative z-10 shrink-0 max-w-none rounded-full object-cover transition-all duration-300 ${sidebarCollapsed ? 'w-10 h-10' : 'w-8 h-8'} ${organisation?.type === 'municipality' ? 'drop-shadow-[0_0_10px_rgba(245,158,11,0.45)]' : 'drop-shadow-[0_0_10px_rgba(52,211,153,0.35)]'}`}
+              />
               {!sidebarCollapsed && (
-                <h1 className="relative z-10 text-base font-bold tracking-tight premium-gradient-text truncate">
-                  DesignPro
-                </h1>
+                <span className="relative z-10 flex flex-col min-w-0 text-left">
+                  <h1 className="text-sm font-bold tracking-tight premium-gradient-text truncate leading-tight">
+                    HVAC Design Pro
+                  </h1>
+                  <span className="text-[7px] font-semibold uppercase tracking-[0.05em] text-slate-400 truncate">
+                    Legacy Archive &amp; Engineering
+                  </span>
+                </span>
               )}
             </button>
 
