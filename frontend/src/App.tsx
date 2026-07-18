@@ -139,6 +139,17 @@ function AppLayout() {
   const location = useLocation();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
+  // Thermal surge — bloom the brand mark's ambient gradient while the sidebar
+  // collapses/expands, then let it cool back to its idle drift.
+  const [thermalSurge, setThermalSurge] = useState(false);
+  const surgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleBrandToggle = () => {
+    updatePrefs({ sidebarCollapsed: !sidebarCollapsed });
+    setThermalSurge(true);
+    if (surgeTimer.current) clearTimeout(surgeTimer.current);
+    surgeTimer.current = setTimeout(() => setThermalSurge(false), 1400);
+  };
+
   // CAD workspace is full-screen — no sidebar
   const isCadRoute = location.pathname.includes('/cad');
   const showSidebar = isAuthenticated && !isCadRoute;
@@ -204,12 +215,21 @@ function AppLayout() {
         <nav aria-label="Main navigation" className={`hidden md:flex ${sidebarCollapsed ? 'w-16' : 'w-56'} glass-panel border-r border-slate-800/60 flex-col justify-between py-4 transition-all duration-300 z-50 flex-shrink-0`}>
           <div className="px-2.5">
             <button
-              onClick={() => updatePrefs({ sidebarCollapsed: !sidebarCollapsed })}
-              className="flex items-center gap-2.5 mb-8 px-1.5 py-1 text-emerald-400 w-full hover:opacity-80 transition-opacity"
+              onClick={handleBrandToggle}
+              title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              className={`relative overflow-hidden rounded-xl flex items-center gap-2.5 mb-8 px-1.5 py-1.5 text-emerald-400 w-full hover:opacity-90 transition-opacity ${thermalSurge ? 'thermal-surge' : ''}`}
             >
-              <Compass className={`w-7 h-7 flex-shrink-0 drop-shadow-[0_0_12px_rgba(52,211,153,0.5)] ${organisation?.type === 'municipality' ? 'text-amber-400 drop-shadow-[0_0_12px_rgba(245,158,11,0.5)]' : ''}`} />
+              {/* Machined-metal bezel — rim layers show only at the 1.5px ring
+                  left uncovered by the inset core below */}
+              <span aria-hidden className="metallic-rim absolute inset-0" />
+              <span aria-hidden className="metallic-glint absolute inset-0" />
+              <span aria-hidden className="absolute inset-[1.5px] rounded-[10px] bg-slate-950/95" />
+              {/* Thermostat ambience — cold→hot drift + breeze sheen */}
+              <span aria-hidden className="thermal-ambient absolute inset-[1.5px] rounded-[10px]" />
+              <span aria-hidden className="thermal-breeze absolute inset-[1.5px] rounded-[10px]" />
+              <Compass className={`relative z-10 w-7 h-7 flex-shrink-0 drop-shadow-[0_0_12px_rgba(52,211,153,0.5)] ${organisation?.type === 'municipality' ? 'text-amber-400 drop-shadow-[0_0_12px_rgba(245,158,11,0.5)]' : ''}`} />
               {!sidebarCollapsed && (
-                <h1 className="text-base font-bold tracking-tight premium-gradient-text truncate">
+                <h1 className="relative z-10 text-base font-bold tracking-tight premium-gradient-text truncate">
                   DesignPro
                 </h1>
               )}

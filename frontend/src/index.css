@@ -189,6 +189,115 @@ body {
   }
 }
 
+/* ── Thermal ambient — DesignPro brand thermostat ─────────────────────────────
+   A slow cold→hot→cold drift across ten temperature shades (deep blues through
+   deep dark reds), layered under the sidebar brand mark, plus a faint drifting
+   sheen that reads as a breeze. `.thermal-surge` (applied briefly while the
+   sidebar collapses/expands) blooms the layers vivid, then they cool back.
+   Global .reduce-motion / .a11y-reduced-motion freeze these automatically. */
+@keyframes thermal-drift {
+  from { background-position: 0% 50%; }
+  to   { background-position: 100% 50%; }
+}
+
+@keyframes thermal-breeze {
+  from { background-position: 0% 0%; }
+  to   { background-position: 100% 100%; }
+}
+
+.thermal-ambient {
+  background: linear-gradient(
+    100deg,
+    #172554,  /* 1 deep cold navy */
+    #1e40af,  /* 2 blue */
+    #2563eb,  /* 3 bright blue */
+    #0ea5e9,  /* 4 sky */
+    #22d3ee,  /* 5 cyan — mild */
+    #7c3aed,  /* 6 violet — crossover */
+    #c026d3,  /* 7 fuchsia — warming */
+    #e11d48,  /* 8 rose — hot */
+    #b91c1c,  /* 9 red */
+    #7f1d1d   /* 10 deep dark red */
+  );
+  background-size: 1000% 100%;
+  animation: thermal-drift 44s ease-in-out infinite alternate;
+  opacity: 0.16;
+  transition: opacity 0.6s ease, filter 0.6s ease;
+  pointer-events: none;
+}
+
+.thermal-breeze {
+  background: linear-gradient(
+    115deg,
+    transparent 25%,
+    rgb(226 232 240 / 0.10) 40%,
+    transparent 55%,
+    rgb(148 163 184 / 0.06) 70%,
+    transparent 85%
+  );
+  background-size: 250% 250%;
+  animation: thermal-breeze 11s ease-in-out infinite alternate;
+  opacity: 0.55;
+  transition: opacity 0.6s ease;
+  pointer-events: none;
+}
+
+.thermal-surge .thermal-ambient {
+  opacity: 0.55;
+  filter: saturate(1.7) brightness(1.3);
+}
+
+.thermal-surge .thermal-breeze {
+  opacity: 1;
+}
+
+/* Machined-metal bezel around the brand thermostat. The rim layers fill the
+   whole button; the inset core + thermal layers cover all but a ~1.5px ring,
+   so only the bezel shows the metal. A specular glint sweeps past every few
+   seconds; the surge warms the metal slightly. */
+.metallic-rim {
+  background: conic-gradient(
+    from 220deg,
+    #64748b,
+    #e2e8f0 12%,
+    #64748b 26%,
+    #cbd5e1 40%,
+    #334155 55%,
+    #f1f5f9 72%,
+    #475569 86%,
+    #64748b
+  );
+  transition: filter 0.6s ease;
+}
+
+@keyframes metallic-glint {
+  from { background-position: 0% 0; }
+  to   { background-position: 100% 0; }
+}
+
+.metallic-glint {
+  background: linear-gradient(
+    115deg,
+    transparent 42%,
+    rgb(248 250 252 / 0.9) 50%,
+    transparent 58%
+  );
+  background-size: 320% 100%;
+  animation: metallic-glint 7s ease-in-out infinite;
+}
+
+.thermal-surge .metallic-rim {
+  filter: brightness(1.3) sepia(0.25);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thermal-ambient,
+  .thermal-breeze,
+  .metallic-glint {
+    animation: none;
+  }
+}
+
 /* ── Creation portal — top-bar project actions trigger ────────────────────────
    A slow-rotating conic rim behind an inset core span, leaving only a ~2px
    animated ring visible. Falls back to a static ring under reduced motion. */
