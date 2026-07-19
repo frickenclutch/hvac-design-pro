@@ -359,11 +359,17 @@ function VectorTrace() {
       redoStack: [],
     }));
     setRequest(null);
+    // The trace is exact *relative* geometry — it inherits whatever scale the
+    // sheet is currently at. That is only real-world-true once the sheet has
+    // been calibrated, so say so and point at Calibrate Scale rather than
+    // routing the user past it.
     toast.success(
-      `${walls.length} run${walls.length === 1 ? '' : 's'} converted to CAD geometry at true scale.` +
+      `${walls.length} run${walls.length === 1 ? '' : 's'} converted to CAD geometry, ` +
+      `matching the drawing exactly at the sheet's current scale. ` +
+      `Calibrate Scale off a known dimension to set real-world feet.` +
       (removeSheet ? ' Blueprint sheet removed — the drawing now stands on its own.' : ''),
     );
-    useGuidanceStore.getState().setHint('cad_detect_rooms');
+    useGuidanceStore.getState().setHint('cad_calibrate_scale');
   };
 
   return (
@@ -388,8 +394,9 @@ function VectorTrace() {
       {phase === 'review' && result && sheet && (
         <div>
           <p className="text-xs text-emerald-400/90 mb-3">
-            Exact geometry — positions come from the PDF's own line data, so this is
-            measurement-for-measurement with no scaling error.
+            Exact geometry — positions come from the PDF's own line data, so every
+            proportion and angle is measurement-for-measurement with no distortion.
+            Real-world feet still come from Calibrate Scale.
           </p>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs mb-4">
             <dt className="text-slate-500">Runs found</dt>

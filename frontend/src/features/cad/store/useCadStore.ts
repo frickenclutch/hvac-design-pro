@@ -659,14 +659,24 @@ export const useCadStore = create<CadState>((set, get) => {
       // [x - w/2, x + w/2]. Now it is drawn from its top-left. Subtracting half
       // its size reproduces the box the user last saw, so any walls they traced
       // against it stay aligned.
+      //
+      // Rotation matters: Fabric rotates about the origin point, so moving the
+      // origin from centre to top-left also moves the pivot. The rendered centre
+      // becomes (x, y) + R(angle)·(w/2, h/2), and the inverse that holds the
+      // sheet still is therefore (x, y) − R(angle)·(w/2, h/2). At rotation 0
+      // this is exactly the plain half-size subtraction above.
       set((s) => ({
         floors: s.floors.map(f => ({
           ...f,
-          underlays: (f.underlays ?? []).map(u => ({
-            ...u,
-            x: u.x - u.width / 2,
-            y: u.y - u.height / 2,
-          })),
+          underlays: (f.underlays ?? []).map(u => {
+            const t = ((u.rotation ?? 0) * Math.PI) / 180;
+            const cos = Math.cos(t), sin = Math.sin(t);
+            return {
+              ...u,
+              x: u.x - (u.width / 2) * cos + (u.height / 2) * sin,
+              y: u.y - (u.width / 2) * sin - (u.height / 2) * cos,
+            };
+          }),
         })),
         underlayMigration: null,
         isDirty: true,
