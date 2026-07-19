@@ -112,6 +112,10 @@ export interface AiExtractedRoom {
   windowCount?: number;
   exposureDirection?: 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
   confidence: 'high' | 'medium' | 'low';
+  /** Room boundary traced on the sheet — normalized [0,1] coords, y down. */
+  polygon?: Array<{ x: number; y: number }>;
+  /** 0-based index of the sheet the polygon was traced on (default 0). */
+  imageIndex?: number;
   notes?: string;
 }
 
