@@ -683,7 +683,10 @@ export default function CadCanvas() {
     // element has loaded bakes in naturalWidth=0 and renders nothing — so the
     // fabric object is added on load, with a same-name sweep to dedupe
     // overlapping syncs.
-    if (underlayLayer?.visible && floor.underlays) {
+    // Sheets stay hidden while a legacy drawing awaits the re-anchor decision:
+    // drawing them first would show the blueprint half a sheet off from the
+    // geometry traced against it.
+    if (underlayLayer?.visible && floor.underlays && !state.underlayMigration) {
       for (const u of floor.underlays) {
         const objName = `${PREFIX.underlay}${u.id}`;
         const imgEl = new Image();
@@ -694,6 +697,14 @@ export default function CadCanvas() {
           const fImg = new fabric.FabricImage(imgEl, {
             left: u.x,
             top: u.y,
+            // UnderlayImage.x/y are the sheet's TOP-LEFT everywhere else —
+            // import placement, Calibrate Scale, the object:modified sync-back,
+            // and the blueprint→CAD mapper all assume it. Fabric's default
+            // origin is the object's CENTER, which drew every sheet offset by
+            // half its size from where the data said it was: traced geometry
+            // and the drawing it came from could never line up. Pin the origin.
+            originX: 'left',
+            originY: 'top',
             scaleX: u.width / imgEl.naturalWidth,
             scaleY: u.height / imgEl.naturalHeight,
             angle: u.rotation,
@@ -1994,7 +2005,11 @@ export default function CadCanvas() {
         state.activeFloorId !== prevState.activeFloorId ||
         state.floors !== prevState.floors ||
         state.layers !== prevState.layers ||
-        state.thermalOverlayEnabled !== prevState.thermalOverlayEnabled
+        state.thermalOverlayEnabled !== prevState.thermalOverlayEnabled ||
+        // Resolving the legacy-sheet prompt un-hides the underlays. The 'keep'
+        // branch leaves `floors` untouched, so without this the sheets would
+        // stay invisible until some unrelated edit forced a re-sync.
+        state.underlayMigration !== prevState.underlayMigration
       ) {
         syncFloorToCanvas(canvas);
       }

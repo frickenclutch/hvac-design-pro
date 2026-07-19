@@ -281,10 +281,28 @@ export interface CalibrationRequest {
 
 // AI extraction: the active floor's blueprint sheets queued for Claude-vision
 // room takeoff (multi-sheet plan sets are merged into one schedule). The
-// dialog owns the request → review → confirm lifecycle.
+// dialog owns the request → review → confirm lifecycle. underlayIds parallels
+// dataUrls — extracted polygons carry an imageIndex that resolves through it
+// back to the source sheet's placement rect.
 export interface AiExtractRequest {
   underlayName: string;
   dataUrls: string[];
+  underlayIds: string[];
+}
+
+// A drawing saved before the underlay-origin fix has been loaded. Its sheets
+// are NOT rendered until the user resolves this — showing them first would
+// display the blueprint half a sheet away from the geometry traced against it,
+// which is exactly the confusion the fix removes.
+export interface UnderlayMigrationRequest {
+  sheetCount: number;
+}
+
+// Vector trace: pull the true line geometry out of a CAD-plotted PDF and
+// convert it to CAD walls. Exact by construction — no vision model involved.
+export interface VectorTraceRequest {
+  underlayId: string;
+  underlayName: string;
 }
 
 // ── Serialized drawing ────────────────────────────────────────────────────────────
@@ -295,6 +313,11 @@ export interface AiExtractRequest {
 export interface SerializedDrawing {
   floors: Floor[];
   activeFloorId: string;
+  /** Schema marker: sheets authored after the underlay-origin fix, where
+   *  UnderlayImage.x/y is the sheet's top-left (as every consumer assumes).
+   *  Absent on drawings saved while sheets were rendered centered on x/y —
+   *  those need the one-time re-anchor prompt before they are shown. */
+  underlayOrigin?: 'top-left';
   layers: Layer[];
   projectScale: ProjectScale;
   gridSnapEnabled: boolean;
@@ -428,6 +451,12 @@ interface CadState {
   setCalibrationRequest: (req: CalibrationRequest | null) => void;
   aiExtractRequest: AiExtractRequest | null;
   setAiExtractRequest: (req: AiExtractRequest | null) => void;
+  vectorTraceRequest: VectorTraceRequest | null;
+  setVectorTraceRequest: (req: VectorTraceRequest | null) => void;
+  underlayMigration: UnderlayMigrationRequest | null;
+  /** 'reanchor' keeps each sheet exactly where it was displayed before the fix
+   *  (x -= width/2); 'keep' leaves the stored coordinates untouched. */
+  resolveUnderlayMigration: (mode: 'reanchor' | 'keep') => void;
 
   // ── Multi-floor system ──────────────────────────────────────────────────────
   floors: Floor[];
@@ -616,6 +645,33 @@ export const useCadStore = create<CadState>((set, get) => {
     setCalibrationRequest: (req) => set({ calibrationRequest: req }),
     aiExtractRequest: null,
     setAiExtractRequest: (req) => set({ aiExtractRequest: req }),
+
+    vectorTraceRequest: null,
+    setVectorTraceRequest: (req) => set({ vectorTraceRequest: req }),
+
+    underlayMigration: null,
+    resolveUnderlayMigration: (mode) => {
+      if (mode === 'keep') {
+        set({ underlayMigration: null, isDirty: true });
+        return;
+      }
+      // Pre-fix, a sheet stored at (x, y) was drawn CENTERED there, occupying
+      // [x - w/2, x + w/2]. Now it is drawn from its top-left. Subtracting half
+      // its size reproduces the box the user last saw, so any walls they traced
+      // against it stay aligned.
+      set((s) => ({
+        floors: s.floors.map(f => ({
+          ...f,
+          underlays: (f.underlays ?? []).map(u => ({
+            ...u,
+            x: u.x - u.width / 2,
+            y: u.y - u.height / 2,
+          })),
+        })),
+        underlayMigration: null,
+        isDirty: true,
+      }));
+    },
 
     // ── Multi-floor system ────────────────────────────────────────────────────
     floors: [defaultFloor],
@@ -1111,6 +1167,7 @@ export const useCadStore = create<CadState>((set, get) => {
         panelFloors: s.panelFloors,
         panelNavBar: s.panelNavBar,
         ghostingEnabled: s.ghostingEnabled,
+        underlayOrigin: 'top-left',
       };
     },
 
@@ -1141,6 +1198,10 @@ export const useCadStore = create<CadState>((set, get) => {
         ductSystems: f.ductSystems ?? [],
         radiantZones: f.radiantZones ?? [],
       }));
+
+      const legacySheetCount = d.underlayOrigin === 'top-left'
+        ? 0
+        : floors.reduce((n, f) => n + (f.underlays?.length ?? 0), 0);
 
       // Sync floorCounter to highest existing floor index so addFloor()
       // never creates a duplicate ID that collides with a loaded floor.
@@ -1173,6 +1234,9 @@ export const useCadStore = create<CadState>((set, get) => {
         isDirty: false,
         undoStack: [],
         redoStack: [],
+        // Drawings saved before the origin fix carry no marker. If any sheets
+        // are present, hold them back and ask first — see UnderlayMigrationRequest.
+        underlayMigration: legacySheetCount > 0 ? { sheetCount: legacySheetCount } : null,
       });
     },
   };

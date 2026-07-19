@@ -116,7 +116,7 @@ const sections: GuideSection[] = [
         <StepList steps={[
           'Drop the blueprint files onto the CAD canvas, click the drop zone to browse (multi-select works), or paste a copied image with Ctrl+V / right-click. Multiple sheets tile side-by-side; multi-page PDFs ask which page is the floor plan',
           'Click AI Extract Rooms (sparkles) — all sheets are read together as one plan set and come back as a single merged room schedule',
-          'Review every proposed room: edit names and dimensions, uncheck anything wrong, then confirm — the plan is drawn on a new "AI Takeoff" CAD floor AND sent to Manual J',
+          'Review every proposed room: edit names and dimensions, watch the dashed green previews on the canvas, then confirm — walls are drawn at their TRUE positions on the blueprint (auto-calibrating the sheet scale from printed dimensions) AND the rooms are sent to Manual J',
           'Finalize the drawing in CAD (walls, openings, equipment), stamp, and export — or go straight to Manual J',
           'Prefer manual takeoff? Calibrate Scale against a printed dimension, trace walls, then Detect Rooms',
           'Calculate loads, then Find Retailer & Estimate for a regionally priced system quote',

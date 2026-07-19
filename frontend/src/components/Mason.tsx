@@ -1206,7 +1206,7 @@ The underlay rescales around your first click so that distance maps exactly to t
 
 Click the **sparkles icon** in the CAD toolbox after importing a blueprint. EVERY sheet on the active floor is sent together (up to 6) — a plan split across multiple files comes back as ONE merged, deduplicated room schedule: names, dimensions (preferring the plan's printed dimension strings), window counts, and exposure where a north arrow exists.
 
-**Nothing is applied automatically.** You get a review list where every room can be edited, unchecked, or corrected — each row carries a confidence badge (high = read from printed dimensions, low = inferred from proportions). Confirming **draws the plan as real CAD geometry on a new "AI Takeoff" floor** — for finalizing, stamping, and PDF export — and adds the rooms to **Manual J** for the active project.
+**Nothing is applied automatically.** You get a review list where every room can be edited, unchecked, or corrected — each row carries a confidence badge (high = read from printed dimensions, low = inferred from proportions). The AI also traces each room's outline on the sheet, and dashed green previews show exactly where the rooms will land — **on the blueprint itself, measurement for measurement**, not an invented layout. Confirming **draws the walls at their true positions on the active floor**, auto-calibrates the sheet scale from the printed dimensions (optional checkbox), and adds the rooms to **Manual J** for the active project. Rooms whose outline couldn't be traced go to Manual J only; if no outlines come back at all, a schematic "AI Takeoff" floor is generated as a fallback.
 
 You remain the engineer of record: verify dimensions against the plan before calculating. The extraction is a first pass, not a stamp.
 
@@ -1235,7 +1235,7 @@ It's a hint, not a requirement — it disappears as soon as you click it or choo
 
 1. **CAD → Import Blueprint** — drop the client's files on the canvas (multiple sheets tile side-by-side)
 2. **AI Extract Rooms** — review the merged schedule, confirm, and the plan is drawn in CAD + sent to Manual J (manual path: Calibrate Scale → trace → Detect Rooms)
-3. **Finalize in CAD** — adjust walls, openings, and equipment on the "AI Takeoff" floor
+3. **Finalize in CAD** — the walls land on the blueprint at true scale; adjust them, then place openings and equipment
 4. **Manual J** — review R-values, windows, and design conditions, then **Calculate Loads**
 5. **Find Retailer & Estimate** — regionally priced system estimate + nearest supply branches, with a one-click quote-request email that attaches the load report
 
