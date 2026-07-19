@@ -18,6 +18,10 @@ import { scopedKey } from '../utils/storage';
 import { syncCalcToD1 } from '../features/calculations/calcStorage';
 import { ENGINE_VERSIONS } from '../engines/versions';
 import { reconcileDuctAssumptions } from '../engines/ductReconcile';
+import { manualJToManualD } from '../engines/manualJToManualD';
+import { measureCadDucts, cadRoomId, manualJRoomId } from '../engines/cadToManualD';
+import type { CadDuctTakeoff } from '../engines/cadToManualD';
+import type { WholeHouseResult } from '../engines/manualJ';
 
 // ── User + project scoped persistence ────────────────────────────────────────
 function getStorageKey(projectId: string | null): string {
@@ -105,6 +109,9 @@ export default function ManualDCalculator() {
   const [maxAspectRatio, setMaxAspectRatio] = useState(saved?.maxAspectRatio ?? 4);
   const [rooms, setRooms] = useState<ManualDRoomInput[]>(saved?.rooms ?? [createDefaultRoom(0)]);
   const [result, setResult] = useState<ManualDResult | null>(null);
+  // What the last import actually measured from CAD, so the page can say which
+  // runs came from drawn geometry and which are still estimates.
+  const [cadTakeoff, setCadTakeoff] = useState<CadDuctTakeoff | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
   const [fittingEditorId, setFittingEditorId] = useState<string | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
@@ -192,58 +199,68 @@ export default function ManualDCalculator() {
       }
 
       if (resultsRaw) {
-        // Use calculated results — proper CFM distribution from cooling loads
-        const results = JSON.parse(resultsRaw);
+        // Use calculated results — proper CFM distribution from cooling loads.
+        const results = JSON.parse(resultsRaw) as WholeHouseResult;
         if (!results.rooms || !Array.isArray(results.rooms)) {
           alert('Invalid Manual J results. Please re-run the Manual J calculation.');
           return;
         }
 
-        const totalCoolingBtu = results.totalCoolingBtu || results.rooms.reduce((s: number, r: any) => s + (r.coolingBtuTotal || 0), 0);
-        const systemCfm = Math.round((results.recommendedTons || 3) * 400);
+        // Anything the designer actually drew in CAD outranks an estimate.
+        // measureCadDucts only returns a room when real geometry exists for it,
+        // so untouched rooms still fall through to the bridge's defaults.
+        const cad = useCadStore.getState();
+        const takeoff = measureCadDucts(cad.floors, cad.projectScale.pxPerFt);
 
-        const imported: ManualDRoomInput[] = results.rooms.map((r: any) => {
-          const roomCfm = totalCoolingBtu > 0
-            ? Math.round(systemCfm * ((r.coolingBtuTotal || 0) / totalCoolingBtu))
-            : Math.round(systemCfm / results.rooms.length);
-
-          return {
-            roomId: uid(),
-            roomName: r.roomName || r.name || 'Unknown Room',
-            requiredCfm: roomCfm,
-            actualLengthFt: roomCfm < 50 ? 12 : roomCfm < 100 ? 18 : roomCfm < 150 ? 25 : roomCfm < 200 ? 30 : roomCfm < 300 ? 35 : 40,
-            fittings: [
-              { type: 'takeoff_round' as FittingType, qty: 1 },
-              { type: 'elbow_90' as FittingType, qty: 1 },
-              { type: 'register_boot' as FittingType, qty: 1 },
-            ],
-          };
+        // The bridge owns CFM distribution, run-length estimation, and the
+        // default fitting set — one implementation, not a copy of it here.
+        const input = manualJToManualD(results, {
+          blowerEspInwg: blowerEsp,
+          filterDropInwg: filterDrop,
+          coilDropInwg: coilDrop,
+          ductMaterial,
+          preferredShape,
+          maxAspectRatio,
+          application,
+          roomOverrides: takeoff.overrides,
         });
 
-        if (imported.length > 0) {
-          setEquipmentCfm(systemCfm);
-          setRooms(imported);
+        if (input.rooms.length > 0) {
+          setEquipmentCfm(input.equipmentCfm);
+          // roomId is preserved from Manual J (cad-room-<id> for CAD rooms),
+          // which is what lets Apply to CAD find the drawn segments again.
+          setRooms(input.rooms);
           setResult(null);
+          setCadTakeoff(takeoff.measurements.length > 0 ? takeoff : null);
         }
       } else if (inputsRaw) {
-        // Fallback: use room inputs (no results available)
-        const data = JSON.parse(inputsRaw);
+        // Fallback: room inputs only, no calculated loads to distribute, so
+        // CFM stays a rough area baseline. Identity and drawn geometry are
+        // still honoured — this path used to mint a fresh id and break the
+        // chain back to CAD.
+        const data = JSON.parse(inputsRaw) as { rooms?: Array<Record<string, unknown>> };
         if (!data.rooms || !Array.isArray(data.rooms)) {
           alert('Invalid Manual J data format.');
           return;
         }
 
-        // Estimate CFM from room area and assume ~1 CFM per sq ft as rough baseline
-        const imported: ManualDRoomInput[] = data.rooms.map((r: any, i: number) => {
-          const area = (r.lengthFt || 12) * (r.widthFt || 10);
+        const cad = useCadStore.getState();
+        const takeoff = measureCadDucts(cad.floors, cad.projectScale.pxPerFt);
+
+        const imported: ManualDRoomInput[] = data.rooms.map((r, i) => {
+          const area = (Number(r.lengthFt) || 12) * (Number(r.widthFt) || 10);
           const estimatedCfm = Math.round(area * 1.0); // ~1 CFM/sqft baseline
+          const roomId = typeof r.cadRoomId === 'string' && r.cadRoomId
+            ? manualJRoomId(r.cadRoomId)
+            : uid();
+          const measured = takeoff.overrides[roomId];
 
           return {
-            roomId: uid(),
-            roomName: r.name || `Room ${i + 1}`,
+            roomId,
+            roomName: (typeof r.name === 'string' && r.name) || `Room ${i + 1}`,
             requiredCfm: estimatedCfm,
-            actualLengthFt: 25,
-            fittings: [
+            actualLengthFt: measured?.actualLengthFt ?? 25,
+            fittings: measured?.fittings ?? [
               { type: 'takeoff_round' as FittingType, qty: 1 },
               { type: 'elbow_90' as FittingType, qty: 1 },
               { type: 'register_boot' as FittingType, qty: 1 },
@@ -254,6 +271,7 @@ export default function ManualDCalculator() {
         if (imported.length > 0) {
           setRooms(imported);
           setResult(null);
+          setCadTakeoff(takeoff.measurements.length > 0 ? takeoff : null);
         }
       }
     } catch { alert('Failed to parse Manual J data.'); }
@@ -440,7 +458,11 @@ export default function ManualDCalculator() {
     const cad = useCadStore.getState();
     let updated = 0;
     for (const run of result.runs) {
-      const segs = cad.floors.flatMap(f => (f.ductSegments ?? []).filter(d => d.roomId === run.roomId));
+      // Duct segments store the BARE CAD room id, while a run carries the
+      // Manual J id (cad-room-<id>). Comparing them directly never matched,
+      // which surfaced as "draw ducts first" even when ducts were drawn.
+      const targetRoomId = cadRoomId(run.roomId) ?? run.roomId;
+      const segs = cad.floors.flatMap(f => (f.ductSegments ?? []).filter(d => d.roomId === targetRoomId));
       for (const seg of segs) {
         cad.updateDuctSegment(seg.id, {
           diameterIn: run.diameterIn,
@@ -579,6 +601,33 @@ export default function ManualDCalculator() {
               </button>
             </div>
           </div>
+
+          {/* Which runs came from drawn geometry and which are still estimates.
+              A permit document should never leave that ambiguous. */}
+          {cadTakeoff && (
+            <div className="mb-4 p-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/5">
+              <div className="flex items-start gap-2">
+                <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <div className="text-sm text-slate-300">
+                  <span className="font-semibold text-emerald-300">
+                    {cadTakeoff.measurements.length} run{cadTakeoff.measurements.length === 1 ? '' : 's'} measured from your CAD drawing
+                  </span>
+                  <span className="block text-xs text-slate-400 mt-1">
+                    Run length and fitting counts for {cadTakeoff.measurements.map(m => m.roomName).join(', ')} come from
+                    the ducts you drew, not from an estimate.
+                    {cadTakeoff.unmeasuredRoomNames.length > 0 && (
+                      <> {cadTakeoff.unmeasuredRoomNames.length} room{cadTakeoff.unmeasuredRoomNames.length === 1 ? '' : 's'} had
+                      no drawn ducts and still use estimated lengths — draw them in CAD and re-import to measure those too.</>
+                    )}
+                    {cadTakeoff.unassignedSegmentCount > 0 && (
+                      <> {cadTakeoff.unassignedSegmentCount} drawn segment{cadTakeoff.unassignedSegmentCount === 1 ? '' : 's'} {cadTakeoff.unassignedSegmentCount === 1 ? 'is' : 'are'} not
+                      assigned to a room, so {cadTakeoff.unassignedSegmentCount === 1 ? 'it was' : 'they were'} not counted.</>
+                    )}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="glass-panel rounded-3xl border border-slate-800/60 overflow-hidden">
             <div className="overflow-x-auto">
