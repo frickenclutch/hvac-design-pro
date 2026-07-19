@@ -34,8 +34,11 @@ export default function Toolbox() {
 
   // ── Arrange mode — user-ordered tool rail, persisted per user ───────────
   // Toggled from the top strip; tools stop activating and become draggable
-  // rows. The order lives in prefs.toolboxOrder (null = default grouping).
+  // rows. The order lives in prefs.toolboxOrder (null = default grouping);
+  // removed tools live in prefs.toolboxHidden and surface in arrange mode's
+  // hidden tray (the greater toolbox), restorable with one click.
   const toolboxOrder = usePreferencesStore(s => s.toolboxOrder);
+  const toolboxHidden = usePreferencesStore(s => s.toolboxHidden ?? []);
   const [arrangeMode, setArrangeMode] = useState(false);
   const [dragToolId, setDragToolId] = useState<string | null>(null);
   const [liveOrder, setLiveOrder] = useState<string[] | null>(null);
@@ -326,8 +329,22 @@ export default function Toolbox() {
     return [...known, ...missing];
   })();
   const hasCustomOrder = !!toolboxOrder;
-  const renderIds = liveOrder ?? orderedIds;
+  // Rail shows the ordered VISIBLE tools; hidden ids wait in the tray.
+  const visibleIds = orderedIds.filter(id => !toolboxHidden.includes(id));
+  const hiddenIds = defaultIds.filter(id => toolboxHidden.includes(id));
+  const renderIds = liveOrder ?? visibleIds;
   const railMap = new Map(railItems.map(i => [i.id, i]));
+
+  // Remove a tool to the hidden tray / restore it to the rail. 'select' is
+  // never removable — the rail always keeps a pointer. Hiding declutters
+  // only; keyboard shortcuts still reach hidden tools.
+  const removeTool = (id: string) => {
+    if (id === 'select') return;
+    updatePrefs({ toolboxHidden: [...toolboxHidden.filter(h => h !== id), id] });
+  };
+  const restoreTool = (id: string) => {
+    updatePrefs({ toolboxHidden: toolboxHidden.filter(h => h !== id) });
+  };
 
   const onArrangeDragStart = (e: React.PointerEvent, id: string) => {
     e.preventDefault();
@@ -456,6 +473,16 @@ export default function Toolbox() {
                     className={`relative rounded-xl cursor-grab active:cursor-grabbing transition-shadow ${dragToolId === id ? 'ring-2 ring-emerald-400/70 bg-slate-800/80 z-10' : 'ring-1 ring-slate-700/60 hover:ring-slate-500/70'}`}
                   >
                     <div className="pointer-events-none">{item.node}</div>
+                    {id !== 'select' && (
+                      <button
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => { e.stopPropagation(); removeTool(id); }}
+                        className="absolute -top-1 -right-1 z-20 w-4 h-4 rounded-full bg-slate-800 border border-slate-600 text-slate-400 hover:text-red-300 hover:border-red-400/70 flex items-center justify-center transition-colors"
+                        title="Remove from toolbox"
+                      >
+                        <Minus className="w-2.5 h-2.5" />
+                      </button>
+                    )}
                   </div>
                 ) : (
                   item.node
@@ -464,10 +491,33 @@ export default function Toolbox() {
               </React.Fragment>
             );
           })}
+          {/* Greater toolbox — hidden tools, only reachable from arrange mode */}
+          {arrangeMode && hiddenIds.length > 0 && (
+            <>
+              <div className="w-8 h-px bg-slate-700/60 rounded-full my-1.5" />
+              <div className="text-[8px] font-mono font-bold uppercase tracking-widest text-slate-600 mb-0.5 select-none">Hidden</div>
+              {hiddenIds.map((id) => {
+                const item = railMap.get(id);
+                if (!item) return null;
+                return (
+                  <div key={id} className="relative rounded-xl ring-1 ring-slate-800/80 opacity-60 hover:opacity-90 transition-opacity">
+                    <div className="pointer-events-none">{item.node}</div>
+                    <button
+                      onClick={() => restoreTool(id)}
+                      className="absolute -top-1 -right-1 z-20 w-4 h-4 rounded-full bg-slate-800 border border-slate-600 text-slate-400 hover:text-emerald-300 hover:border-emerald-400/70 flex items-center justify-center transition-colors"
+                      title="Add back to toolbox"
+                    >
+                      <Plus className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+                );
+              })}
+            </>
+          )}
           {arrangeMode && (
             <button
-              onClick={() => updatePrefs({ toolboxOrder: null })}
-              title="Reset to default order"
+              onClick={() => updatePrefs({ toolboxOrder: null, toolboxHidden: [] })}
+              title="Reset toolbox — default order, all tools shown"
               className="mt-1 p-1.5 rounded-lg text-slate-500 hover:text-amber-300 hover:bg-slate-800/80 transition-colors"
             >
               <RotateCcw className="w-3.5 h-3.5" />

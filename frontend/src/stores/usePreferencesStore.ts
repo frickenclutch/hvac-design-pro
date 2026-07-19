@@ -56,6 +56,9 @@ export interface UserPreferences {
   /** Custom toolbox tool order (rail ids, top→bottom). null = default
    *  grouped layout. Set from the toolbox's arrange mode. */
   toolboxOrder: string[] | null;
+  /** Tools removed from the rail (still available in arrange mode's hidden
+   *  tray, and via keyboard shortcuts — hiding declutters, never disables). */
+  toolboxHidden: string[];
 
   // PDF & Print Customization
   pdfIncludeDrawing: boolean;
@@ -107,6 +110,7 @@ const defaults: UserPreferences = {
   animationsEnabled: true,
   panelSizes: { ...DEFAULT_PANEL_SIZES },
   toolboxOrder: null,
+  toolboxHidden: [],
   pdfIncludeDrawing: true,
   pdfIncludeRoomSchedule: true,
   pdfIncludeOpeningSchedule: true,
