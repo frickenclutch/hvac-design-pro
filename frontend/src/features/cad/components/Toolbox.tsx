@@ -25,6 +25,11 @@ export default function Toolbox() {
   const panelRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ x: number; y: number }>({ x: savedPos?.x ?? 24, y: savedPos?.y ?? -1 });
   const [autoCentered, setAutoCentered] = useState(false);
+  // Latest position — read by the drag-end and re-clamp handlers so prefs
+  // persistence happens as a plain event-handler call, never inside a
+  // setState updater (React forbids updating another component's store
+  // mid-render). Kept in sync at every setPos site.
+  const posRef = useRef(pos);
 
   // Auto-center vertically on first mount (y=-1 sentinel) or clamp to viewport
   useEffect(() => {
@@ -35,7 +40,9 @@ export default function Toolbox() {
     if (pos.y === -1 && !autoCentered) {
       // First mount — center vertically
       const vy = Math.max(EDGE_MARGIN, (window.innerHeight - h) / 2);
-      setPos(p => ({ ...p, y: vy }));
+      const centered = { x: pos.x, y: vy };
+      posRef.current = centered;
+      setPos(centered);
       setAutoCentered(true);
     } else if (!autoCentered) {
       // Saved position — clamp to current viewport so toolbox is always visible
@@ -44,7 +51,9 @@ export default function Toolbox() {
       const clampedX = Math.max(EDGE_MARGIN, Math.min(maxX, pos.x));
       const clampedY = Math.max(EDGE_MARGIN, Math.min(maxY, pos.y));
       if (clampedX !== pos.x || clampedY !== pos.y) {
-        setPos({ x: clampedX, y: clampedY });
+        const clamped = { x: clampedX, y: clampedY };
+        posRef.current = clamped;
+        setPos(clamped);
       }
       setAutoCentered(true);
     }
@@ -62,6 +71,7 @@ export default function Toolbox() {
     e.stopPropagation();
     dragging.current = true;
     dragStart.current = { mx: e.clientX, my: e.clientY, ox: pos.x, oy: pos.y };
+    posRef.current = { x: pos.x, y: pos.y };
 
     const target = e.currentTarget as HTMLElement;
     target.setPointerCapture(e.pointerId);
@@ -78,20 +88,20 @@ export default function Toolbox() {
       const maxX = window.innerWidth - w - EDGE_MARGIN;
       const maxY = window.innerHeight - h - EDGE_MARGIN;
 
-      setPos({
+      const next = {
         x: Math.round(Math.max(EDGE_MARGIN, Math.min(maxX, dragStart.current.ox + dx))),
         y: Math.round(Math.max(EDGE_MARGIN, Math.min(maxY, dragStart.current.oy + dy))),
-      });
+      };
+      posRef.current = next;
+      setPos(next);
     };
 
     const onUp = () => {
       dragging.current = false;
-      // Persist final position
+      // Persist final position — plain call, never inside a setState updater
       const ps = usePreferencesStore.getState().panelSizes;
-      setPos(p => {
-        updatePrefs({ panelSizes: { ...ps, toolboxPos: { x: p.x, y: p.y } } });
-        return p;
-      });
+      const p = posRef.current;
+      updatePrefs({ panelSizes: { ...ps, toolboxPos: { x: p.x, y: p.y } } });
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
@@ -114,22 +124,24 @@ export default function Toolbox() {
     const next = Math.round(Math.min(maxScale, Math.max(0.7, currentScale + delta)) * 100) / 100;
     updatePrefs({ panelSizes: { ...ps, toolboxScale: next } });
 
-    // Re-clamp position so the toolbox stays within viewport after scaling
+    // Re-clamp position so the toolbox stays within viewport after scaling.
+    // Reads posRef and persists as plain calls — no setState-updater side
+    // effects (same fix as FloorSelector).
     requestAnimationFrame(() => {
       if (!panelRef.current) return;
       const rect = panelRef.current.getBoundingClientRect();
       const maxX = window.innerWidth - rect.width - EDGE_MARGIN;
       const maxY = window.innerHeight - rect.height - EDGE_MARGIN;
-      setPos(p => {
-        const nx = Math.max(EDGE_MARGIN, Math.min(maxX, p.x));
-        const ny = Math.max(EDGE_MARGIN, Math.min(maxY, p.y));
-        if (nx !== p.x || ny !== p.y) {
-          const latest = usePreferencesStore.getState().panelSizes;
-          updatePrefs({ panelSizes: { ...latest, toolboxPos: { x: nx, y: ny } } });
-          return { x: nx, y: ny };
-        }
-        return p;
-      });
+      const p = posRef.current;
+      const nx = Math.max(EDGE_MARGIN, Math.min(maxX, p.x));
+      const ny = Math.max(EDGE_MARGIN, Math.min(maxY, p.y));
+      if (nx !== p.x || ny !== p.y) {
+        const latest = usePreferencesStore.getState().panelSizes;
+        updatePrefs({ panelSizes: { ...latest, toolboxPos: { x: nx, y: ny } } });
+        const next = { x: nx, y: ny };
+        posRef.current = next;
+        setPos(next);
+      }
     });
   };
 
