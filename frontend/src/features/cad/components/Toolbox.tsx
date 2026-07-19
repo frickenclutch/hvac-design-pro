@@ -1,5 +1,6 @@
 import React, { useRef, useState, useCallback, useEffect, useLayoutEffect } from 'react';
-import { MousePointer2, Hand, SquarePen, LayoutGrid, DoorOpen, Wind, Ruler, Type, ScanLine, ImagePlus, Crosshair, Sparkles, Package, Thermometer, ChevronLeft, ChevronRight, Cylinder, GitBranch, Diamond, Minus, Plus, GripVertical } from 'lucide-react';
+import { MousePointer2, Hand, SquarePen, LayoutGrid, DoorOpen, Wind, Ruler, Type, ScanLine, ImagePlus, Crosshair, Package, Thermometer, ChevronLeft, ChevronRight, Cylinder, GitBranch, Diamond, Minus, Plus, GripVertical, ArrowUpDown, Check, RotateCcw } from 'lucide-react';
+import aiExtractIcon from '../../../assets/brand/ai-extract-icon.webp';
 import { useCadStore } from '../store/useCadStore';
 import type { ToolType } from '../store/useCadStore';
 import { importUnderlayFiles } from '../utils/underlayImport';
@@ -30,6 +31,17 @@ export default function Toolbox() {
   // setState updater (React forbids updating another component's store
   // mid-render). Kept in sync at every setPos site.
   const posRef = useRef(pos);
+
+  // ── Arrange mode — user-ordered tool rail, persisted per user ───────────
+  // Toggled from the top strip; tools stop activating and become draggable
+  // rows. The order lives in prefs.toolboxOrder (null = default grouping).
+  const toolboxOrder = usePreferencesStore(s => s.toolboxOrder);
+  const [arrangeMode, setArrangeMode] = useState(false);
+  const [dragToolId, setDragToolId] = useState<string | null>(null);
+  const [liveOrder, setLiveOrder] = useState<string[] | null>(null);
+  const liveOrderRef = useRef<string[] | null>(null);
+  const arrangeItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const arrangeDragInfo = useRef<{ id: string; startY: number; startIndex: number; rowH: number; order: string[] } | null>(null);
 
   // Auto-center vertically on first mount (y=-1 sentinel) or clamp to viewport
   useEffect(() => {
@@ -204,6 +216,162 @@ export default function Toolbox() {
     e.target.value = '';
   };
 
+  // ── Tool rail registry — single source of the rail's contents ────────────
+  // Registry order IS the default order; groupEnd marks where a section
+  // divider renders. Dividers only show while the default order is active —
+  // a custom arrangement is the user's own organization.
+  const railItems: { id: string; groupEnd?: boolean; node: React.ReactNode }[] = [
+    { id: 'select', node: <ToolButton id="select" icon={<MousePointer2 className="w-5 h-5" />} label="Select (V)" active={activeTool === 'select'} onClick={() => setActiveTool('select')} /> },
+    { id: 'pan', groupEnd: true, node: <ToolButton id="pan" icon={<Hand className="w-5 h-5" />} label="Pan (H)" active={activeTool === 'pan'} onClick={() => setActiveTool('pan')} /> },
+    { id: 'draw_wall', node: <ToolButton id="draw_wall" icon={<SquarePen className="w-5 h-5" />} label="Draw Wall (W)" active={activeTool === 'draw_wall'} onClick={() => setActiveTool('draw_wall')} glimmer={guidanceHint === 'cad_draw_wall'} /> },
+    { id: 'place_window', node: <ToolButton id="place_window" icon={<LayoutGrid className="w-5 h-5" />} label="Add Window" active={activeTool === 'place_window'} onClick={() => setActiveTool('place_window')} /> },
+    { id: 'place_door', groupEnd: true, node: <ToolButton id="place_door" icon={<DoorOpen className="w-5 h-5" />} label="Add Door" active={activeTool === 'place_door'} onClick={() => setActiveTool('place_door')} /> },
+    { id: 'place_hvac', node: <ToolButton id="place_hvac" icon={<Wind className="w-5 h-5" />} label="HVAC Units" active={activeTool === 'place_hvac'} onClick={() => setActiveTool('place_hvac')} primary /> },
+    { id: 'draw_pipe', node: <ToolButton id="draw_pipe" icon={<Cylinder className="w-5 h-5" />} label="Pipe Builder" active={activeTool === 'draw_pipe'} onClick={() => setActiveTool('draw_pipe')} primary /> },
+    { id: 'draw_duct', node: <ToolButton id="draw_duct" icon={<GitBranch className="w-5 h-5" />} label="Draw Duct (X)" active={activeTool === 'draw_duct'} onClick={() => setActiveTool('draw_duct')} primary /> },
+    { id: 'place_fitting', node: <ToolButton id="place_fitting" icon={<Diamond className="w-5 h-5" />} label="Place Fitting (J)" active={activeTool === 'place_fitting'} onClick={() => setActiveTool('place_fitting')} primary /> },
+    {
+      id: 'asset_library', groupEnd: true, node: (
+        <div className="relative group">
+          <button
+            onClick={() => setShowAssetLibrary(true)}
+            className={`p-3 mx-2 rounded-xl transition-all duration-300 group relative ${
+              showAssetLibrary
+                ? 'text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 shadow-[0_0_12px_rgba(52,211,153,0.15)]'
+                : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/80 border border-transparent'
+            }`}
+            aria-label="Asset Library"
+          >
+            <Package className="w-5 h-5" />
+          </button>
+          <div className="absolute left-full top-1/2 -translate-y-1/2 ml-4 px-3 py-1.5 bg-slate-800/90 border border-slate-700 text-slate-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 backdrop-blur-md shadow-xl">
+            Asset Library
+            <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-2 bg-slate-800/90 border-l border-b border-slate-700 rotate-45" />
+          </div>
+        </div>
+      )
+    },
+    { id: 'add_dimension', node: <ToolButton id="add_dimension" icon={<Ruler className="w-5 h-5" />} label="Dimension" active={activeTool === 'add_dimension'} onClick={() => setActiveTool('add_dimension')} /> },
+    { id: 'add_label', node: <ToolButton id="add_label" icon={<Type className="w-5 h-5" />} label="Label" active={activeTool === 'add_label'} onClick={() => setActiveTool('add_label')} /> },
+    { id: 'room_detect', node: <ToolButton id="room_detect" icon={<ScanLine className="w-5 h-5" />} label="Detect Rooms" active={activeTool === 'room_detect'} onClick={() => setActiveTool('room_detect')} glimmer={guidanceHint === 'cad_detect_rooms'} /> },
+    {
+      id: 'building_science', groupEnd: true, node: (
+        <div className="relative group">
+          <button
+            onClick={() => setShowBuildingScience(v => !v)}
+            className={`p-3 mx-2 rounded-xl transition-all duration-300 group relative ${showBuildingScience ? 'text-amber-50 bg-amber-500/20 border border-amber-500/50 shadow-[0_0_20px_rgba(245,158,11,0.3)]' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/80 border border-transparent'}`}
+            aria-label="Building Science"
+          >
+            <Thermometer className="w-5 h-5" />
+          </button>
+          <div className="absolute left-full top-1/2 -translate-y-1/2 ml-4 px-3 py-1.5 bg-slate-800/90 border border-slate-700 text-slate-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 backdrop-blur-md shadow-xl">
+            Building Science
+            <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-2 bg-slate-800/90 border-l border-b border-slate-700 rotate-45" />
+          </div>
+        </div>
+      )
+    },
+    {
+      id: 'import_blueprint', node: (
+        <div className="relative group">
+          <button
+            onClick={handleImportImage}
+            className="p-3 mx-2 rounded-xl transition-all duration-300 group relative text-slate-400 hover:text-slate-100 hover:bg-slate-800/80 border border-transparent"
+            aria-label="Import Blueprint (PDF or Image)"
+          >
+            <ImagePlus className="w-5 h-5" />
+          </button>
+          <div className="absolute left-full top-1/2 -translate-y-1/2 ml-4 px-3 py-1.5 bg-slate-800/90 border border-slate-700 text-slate-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 backdrop-blur-md shadow-xl">
+            Import Blueprint (PDF / Image)
+            <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-2 bg-slate-800/90 border-l border-b border-slate-700 rotate-45" />
+          </div>
+        </div>
+      )
+    },
+    { id: 'calibrate_scale', node: <ToolButton id="calibrate_scale" icon={<Crosshair className="w-5 h-5" />} label="Calibrate Scale" active={activeTool === 'calibrate_scale'} onClick={() => setActiveTool('calibrate_scale')} glimmer={guidanceHint === 'cad_calibrate_scale'} /> },
+    {
+      id: 'ai_extract', node: (
+        <div className="relative group">
+          <button
+            onClick={handleAiExtract}
+            className={`p-3 mx-2 rounded-xl transition-all duration-300 group relative hover:bg-slate-800/80 border border-transparent${glimmerClass('cad_ai_extract', guidanceHint)}`}
+            aria-label="Algorithmic Extraction Tool (review before import)"
+          >
+            {/* Glowing hexagon glyph — glow-on-transparent cut from the
+                emblem art. Rendered at 36px (negative margin keeps the
+                button's 44px footprint) so its detail reads in the rail. */}
+            <img
+              src={aiExtractIcon}
+              alt=""
+              aria-hidden
+              className="w-9 h-9 -m-2 max-w-none group-hover:brightness-125 transition-[filter] duration-300"
+            />
+          </button>
+          <div className="absolute left-full top-1/2 -translate-y-1/2 ml-4 px-3 py-1.5 bg-slate-800/90 border border-slate-700 text-slate-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 backdrop-blur-md shadow-xl">
+            Algorithmic Extraction Tool
+            <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-2 bg-slate-800/90 border-l border-b border-slate-700 rotate-45" />
+          </div>
+        </div>
+      )
+    },
+  ];
+
+  const defaultIds = railItems.map(i => i.id);
+  const orderedIds = (() => {
+    if (!toolboxOrder) return defaultIds;
+    // Saved order filtered to known ids; any tools shipped since the user
+    // arranged append at the end (forward compat).
+    const known = toolboxOrder.filter(id => defaultIds.includes(id));
+    const missing = defaultIds.filter(id => !known.includes(id));
+    return [...known, ...missing];
+  })();
+  const hasCustomOrder = !!toolboxOrder;
+  const renderIds = liveOrder ?? orderedIds;
+  const railMap = new Map(railItems.map(i => [i.id, i]));
+
+  const onArrangeDragStart = (e: React.PointerEvent, id: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const order = [...renderIds];
+    const el = arrangeItemRefs.current[id];
+    const rowH = Math.max(20, el ? el.getBoundingClientRect().height : 44);
+    arrangeDragInfo.current = { id, startY: e.clientY, startIndex: order.indexOf(id), rowH, order };
+    setDragToolId(id);
+    liveOrderRef.current = order;
+    setLiveOrder(order);
+
+    const onMove = (me: PointerEvent) => {
+      const d = arrangeDragInfo.current;
+      if (!d) return;
+      const delta = Math.round((me.clientY - d.startY) / d.rowH);
+      const target = Math.max(0, Math.min(d.order.length - 1, d.startIndex + delta));
+      const next = d.order.filter(x => x !== d.id);
+      next.splice(target, 0, d.id);
+      liveOrderRef.current = next;
+      setLiveOrder(next);
+    };
+
+    const onUp = () => {
+      const d = arrangeDragInfo.current;
+      arrangeDragInfo.current = null;
+      const final = liveOrderRef.current ?? (d ? d.order : null);
+      setDragToolId(null);
+      setLiveOrder(null);
+      liveOrderRef.current = null;
+      if (final) {
+        // A result identical to the default keeps prefs at null so the
+        // grouped layout (with dividers) stays in effect.
+        const isDefault = final.length === defaultIds.length && final.every((x, i) => x === defaultIds[i]);
+        updatePrefs({ toolboxOrder: isDefault ? null : final });
+      }
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
   // ═══════════════════════════════════════════════════════════════════════════
   // HIDDEN when 3D viewer is open — toolbox only applies to 2D canvas
   // ═══════════════════════════════════════════════════════════════════════════
@@ -260,203 +428,51 @@ export default function Toolbox() {
 
           <GripVertical className="w-3 h-3 text-slate-600" />
 
-          {/* Spacer to balance */}
-          <div className="w-5" />
+          {/* Arrange toggle — enter/exit tool-reorder mode */}
+          <button
+            onClick={(e) => { e.stopPropagation(); setArrangeMode(v => !v); }}
+            className={`p-1 rounded-lg transition-colors ${arrangeMode ? 'text-emerald-300 bg-emerald-500/15' : 'text-slate-500 hover:text-slate-200 hover:bg-slate-800/80'}`}
+            title={arrangeMode ? 'Done arranging' : 'Arrange tools — drag rows to reorder'}
+            aria-pressed={arrangeMode}
+          >
+            {arrangeMode ? <Check className="w-3.5 h-3.5" /> : <ArrowUpDown className="w-3.5 h-3.5" />}
+          </button>
         </div>
 
         <div className="w-8 h-px bg-slate-700/60 rounded-full" />
 
-        {/* ── Tools ──────────────────────────────────────────────────── */}
-        <div className="py-1.5">
-          <ToolButton
-            id="select"
-            icon={<MousePointer2 className="w-5 h-5" />}
-            label="Select (V)"
-            active={activeTool === 'select'}
-            onClick={() => setActiveTool('select')}
-          />
-
-          <ToolButton
-            id="pan"
-            icon={<Hand className="w-5 h-5" />}
-            label="Pan (H)"
-            active={activeTool === 'pan'}
-            onClick={() => setActiveTool('pan')}
-          />
-        </div>
-
-        <div className="w-8 h-px bg-slate-700/60 rounded-full" />
-
-        <div className="py-1.5">
-          <ToolButton
-            id="draw_wall"
-            icon={<SquarePen className="w-5 h-5" />}
-            label="Draw Wall (W)"
-            active={activeTool === 'draw_wall'}
-            onClick={() => setActiveTool('draw_wall')}
-            glimmer={guidanceHint === 'cad_draw_wall'}
-          />
-
-          <ToolButton
-            id="place_window"
-            icon={<LayoutGrid className="w-5 h-5" />}
-            label="Add Window"
-            active={activeTool === 'place_window'}
-            onClick={() => setActiveTool('place_window')}
-          />
-
-          <ToolButton
-            id="place_door"
-            icon={<DoorOpen className="w-5 h-5" />}
-            label="Add Door"
-            active={activeTool === 'place_door'}
-            onClick={() => setActiveTool('place_door')}
-          />
-        </div>
-
-        <div className="w-8 h-px bg-slate-700/60 rounded-full" />
-
-        <div className="py-1.5">
-          <ToolButton
-            id="place_hvac"
-            icon={<Wind className="w-5 h-5" />}
-            label="HVAC Units"
-            active={activeTool === 'place_hvac'}
-            onClick={() => setActiveTool('place_hvac')}
-            primary
-          />
-
-          <ToolButton
-            id="draw_pipe"
-            icon={<Cylinder className="w-5 h-5" />}
-            label="Pipe Builder"
-            active={activeTool === 'draw_pipe'}
-            onClick={() => setActiveTool('draw_pipe')}
-            primary
-          />
-
-          <ToolButton
-            id="draw_duct"
-            icon={<GitBranch className="w-5 h-5" />}
-            label="Draw Duct (X)"
-            active={activeTool === 'draw_duct'}
-            onClick={() => setActiveTool('draw_duct')}
-            primary
-          />
-
-          <ToolButton
-            id="place_fitting"
-            icon={<Diamond className="w-5 h-5" />}
-            label="Place Fitting (J)"
-            active={activeTool === 'place_fitting'}
-            onClick={() => setActiveTool('place_fitting')}
-            primary
-          />
-
-          <div className="relative group">
+        {/* ── Tools — registry-ordered; user-arrangeable via the toggle ── */}
+        <div className="py-1.5 flex flex-col items-center">
+          {renderIds.map((id, idx) => {
+            const item = railMap.get(id);
+            if (!item) return null;
+            const showDivider = !arrangeMode && !hasCustomOrder && item.groupEnd && idx < renderIds.length - 1;
+            return (
+              <React.Fragment key={id}>
+                {arrangeMode ? (
+                  <div
+                    ref={(el) => { arrangeItemRefs.current[id] = el; }}
+                    onPointerDown={(e) => onArrangeDragStart(e, id)}
+                    className={`relative rounded-xl cursor-grab active:cursor-grabbing transition-shadow ${dragToolId === id ? 'ring-2 ring-emerald-400/70 bg-slate-800/80 z-10' : 'ring-1 ring-slate-700/60 hover:ring-slate-500/70'}`}
+                  >
+                    <div className="pointer-events-none">{item.node}</div>
+                  </div>
+                ) : (
+                  item.node
+                )}
+                {showDivider && <div className="w-8 h-px bg-slate-700/60 rounded-full my-1.5" />}
+              </React.Fragment>
+            );
+          })}
+          {arrangeMode && (
             <button
-              onClick={() => setShowAssetLibrary(true)}
-              className={`p-3 mx-2 rounded-xl transition-all duration-300 group relative ${
-                showAssetLibrary
-                  ? 'text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 shadow-[0_0_12px_rgba(52,211,153,0.15)]'
-                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/80 border border-transparent'
-              }`}
-              aria-label="Asset Library"
+              onClick={() => updatePrefs({ toolboxOrder: null })}
+              title="Reset to default order"
+              className="mt-1 p-1.5 rounded-lg text-slate-500 hover:text-amber-300 hover:bg-slate-800/80 transition-colors"
             >
-              <Package className="w-5 h-5" />
+              <RotateCcw className="w-3.5 h-3.5" />
             </button>
-            <div className="absolute left-full top-1/2 -translate-y-1/2 ml-4 px-3 py-1.5 bg-slate-800/90 border border-slate-700 text-slate-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 backdrop-blur-md shadow-xl">
-              Asset Library
-              <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-2 bg-slate-800/90 border-l border-b border-slate-700 rotate-45" />
-            </div>
-          </div>
-        </div>
-
-        <div className="w-8 h-px bg-slate-700/60 rounded-full" />
-
-        <div className="py-1.5">
-          <ToolButton
-            id="add_dimension"
-            icon={<Ruler className="w-5 h-5" />}
-            label="Dimension"
-            active={activeTool === 'add_dimension'}
-            onClick={() => setActiveTool('add_dimension')}
-          />
-
-          <ToolButton
-            id="add_label"
-            icon={<Type className="w-5 h-5" />}
-            label="Label"
-            active={activeTool === 'add_label'}
-            onClick={() => setActiveTool('add_label')}
-          />
-
-          <ToolButton
-            id="room_detect"
-            icon={<ScanLine className="w-5 h-5" />}
-            label="Detect Rooms"
-            active={activeTool === 'room_detect'}
-            onClick={() => setActiveTool('room_detect')}
-            glimmer={guidanceHint === 'cad_detect_rooms'}
-          />
-
-          {/* Building Science — thermal interop */}
-          <div className="relative group">
-            <button
-              onClick={() => setShowBuildingScience(v => !v)}
-              className={`p-3 mx-2 rounded-xl transition-all duration-300 group relative ${showBuildingScience ? 'text-amber-50 bg-amber-500/20 border border-amber-500/50 shadow-[0_0_20px_rgba(245,158,11,0.3)]' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/80 border border-transparent'}`}
-              aria-label="Building Science"
-            >
-              <Thermometer className="w-5 h-5" />
-            </button>
-            <div className="absolute left-full top-1/2 -translate-y-1/2 ml-4 px-3 py-1.5 bg-slate-800/90 border border-slate-700 text-slate-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 backdrop-blur-md shadow-xl">
-              Building Science
-              <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-2 bg-slate-800/90 border-l border-b border-slate-700 rotate-45" />
-            </div>
-          </div>
-        </div>
-
-        <div className="w-8 h-px bg-slate-700/60 rounded-full" />
-
-        {/* Import blueprint / image + scale calibration */}
-        <div className="py-1.5">
-          <div className="relative group">
-            <button
-              onClick={handleImportImage}
-              className="p-3 mx-2 rounded-xl transition-all duration-300 group relative text-slate-400 hover:text-slate-100 hover:bg-slate-800/80 border border-transparent"
-              aria-label="Import Blueprint (PDF or Image)"
-            >
-              <ImagePlus className="w-5 h-5" />
-            </button>
-            <div className="absolute left-full top-1/2 -translate-y-1/2 ml-4 px-3 py-1.5 bg-slate-800/90 border border-slate-700 text-slate-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 backdrop-blur-md shadow-xl">
-              Import Blueprint (PDF / Image)
-              <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-2 bg-slate-800/90 border-l border-b border-slate-700 rotate-45" />
-            </div>
-          </div>
-
-          <ToolButton
-            id="calibrate_scale"
-            icon={<Crosshair className="w-5 h-5" />}
-            label="Calibrate Scale"
-            active={activeTool === 'calibrate_scale'}
-            onClick={() => setActiveTool('calibrate_scale')}
-            glimmer={guidanceHint === 'cad_calibrate_scale'}
-          />
-
-          {/* AI takeoff — Claude-vision room extraction with human review */}
-          <div className="relative group">
-            <button
-              onClick={handleAiExtract}
-              className={`p-3 mx-2 rounded-xl transition-all duration-300 group relative text-slate-400 hover:text-slate-100 hover:bg-slate-800/80 border border-transparent${glimmerClass('cad_ai_extract', guidanceHint)}`}
-              aria-label="AI Extract Rooms (review before import)"
-            >
-              <Sparkles className="w-5 h-5" />
-            </button>
-            <div className="absolute left-full top-1/2 -translate-y-1/2 ml-4 px-3 py-1.5 bg-slate-800/90 border border-slate-700 text-slate-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 backdrop-blur-md shadow-xl">
-              AI Extract Rooms
-              <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-2 bg-slate-800/90 border-l border-b border-slate-700 rotate-45" />
-            </div>
-          </div>
+          )}
         </div>
 
         <input

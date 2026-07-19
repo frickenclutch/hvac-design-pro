@@ -53,6 +53,10 @@ export interface UserPreferences {
   // CAD panel sizing
   panelSizes: PanelSizes;
 
+  /** Custom toolbox tool order (rail ids, top→bottom). null = default
+   *  grouped layout. Set from the toolbox's arrange mode. */
+  toolboxOrder: string[] | null;
+
   // PDF & Print Customization
   pdfIncludeDrawing: boolean;
   pdfIncludeRoomSchedule: boolean;
@@ -102,6 +106,7 @@ const defaults: UserPreferences = {
   autosave: true,
   animationsEnabled: true,
   panelSizes: { ...DEFAULT_PANEL_SIZES },
+  toolboxOrder: null,
   pdfIncludeDrawing: true,
   pdfIncludeRoomSchedule: true,
   pdfIncludeOpeningSchedule: true,
