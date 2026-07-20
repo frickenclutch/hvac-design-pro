@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Sun, AlertTriangle, CheckCircle, FileDown, Printer, BarChart3, PenTool, Thermometer } from 'lucide-react';
 import { calculateAed, extractGlassGroups, type GlassGroup, type AedResult } from '../engines/aed';
 import { type Exposure, roundForDisplay } from '../engines/manualJ';
+import { wallExposure } from '../engines/orientation';
 import ProjectContextBar from '../components/ProjectContextBar';
 import ProjectGateDialog from '../components/ProjectGateDialog';
 import Mason from '../components/Mason';
@@ -103,26 +104,16 @@ function tryImportFromCad(): GlassGroup[] | null {
         const areaFt2 = (opening.widthIn * opening.heightIn) / 144;
         if (areaFt2 <= 0) continue;
 
-        // Estimate orientation from parent wall's geometry angle
+        // Orientation of the wall this glass sits in. Shared with the CAD →
+        // Manual J path so both surfaces agree on which way a wall faces.
         const wall = floor.walls.find(w => w.id === opening.wallId);
-        let orientation: Exposure = 'S'; // default fallback
+        let orientation: Exposure = 'S'; // only when the wall is missing entirely
         if (wall) {
-          const dx = wall.x2 - wall.x1;
-          const dy = wall.y2 - wall.y1;
-          // Wall faces perpendicular to its length. Convert to compass bearing.
-          // Canvas Y increases downward; negate to get math convention.
-          const angleDeg = (Math.atan2(-dy, dx) * 180 / Math.PI + 360) % 360;
-          // Rotate 90° to get the wall's outward normal (assume exterior is "right" of wall)
-          const bearing = (angleDeg + 90) % 360;
-          // Map to 8-point compass
-          if (bearing >= 337.5 || bearing < 22.5) orientation = 'E';
-          else if (bearing < 67.5) orientation = 'NE';
-          else if (bearing < 112.5) orientation = 'N';
-          else if (bearing < 157.5) orientation = 'NW';
-          else if (bearing < 202.5) orientation = 'W';
-          else if (bearing < 247.5) orientation = 'SW';
-          else if (bearing < 292.5) orientation = 'S';
-          else orientation = 'SE';
+          // A wall has two normals; the room's centroid says which faces out.
+          // Without it the helper falls back to the previous winding
+          // assumption, which is wrong for rooms drawn the other way round.
+          const owningRoom = floor.rooms.find(r => r.wallIds.includes(wall.id));
+          orientation = wallExposure(wall, owningRoom?.centroid) ?? orientation;
         }
 
         allOpenings.push({

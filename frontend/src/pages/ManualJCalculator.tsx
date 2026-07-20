@@ -237,6 +237,19 @@ export default function ManualJCalculator() {
     const converted = convertAllFloorsToManualJ(floorsWithRooms);
     setRooms(converted);
     setWholeHouse(null);
+
+    // Solar exposure now comes from the drawn walls. Say so when a room's
+    // direction could NOT be read off exterior geometry — that room's solar
+    // gain rests on a weak assumption and wants a look before it reaches a
+    // permit document.
+    const weak = converted.filter(r => r.exposureBasis === 'longest_wall' || r.exposureBasis === 'undeterminable');
+    if (weak.length > 0) {
+      toast.warning(
+        `Orientation set from the floor plan. ${weak.length} room${weak.length === 1 ? '' : 's'} ` +
+        `(${weak.map(r => r.name).join(', ')}) had no exterior wall to read it from — check the exposure before calculating.`,
+      );
+    }
+
     // Rooms are in — next ideal action is running the load calc
     useGuidanceStore.getState().setHint('mj_calculate');
   };
