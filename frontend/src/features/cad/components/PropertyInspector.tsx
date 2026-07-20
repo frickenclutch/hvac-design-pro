@@ -128,7 +128,19 @@ export default function PropertyInspector() {
   }
 
   return (
-    <div className="absolute right-6 top-24 bottom-6 z-10 pointer-events-none" style={{ width: panelWidth, transform: `scale(${propertiesScale})`, transformOrigin: 'top right' }}>
+    // Stop above the Layers panel rather than running under it — otherwise the
+    // "Delete Selected" button at the bottom of this panel is covered and
+    // unclickable. LayerManager publishes its measured height as --cad-layers-h
+    // (0px when it is closed or hidden in 3D).
+    <div
+      className="absolute right-6 top-24 z-10 pointer-events-none"
+      style={{
+        width: panelWidth,
+        bottom: 'calc(1.5rem + var(--cad-layers-h, 0px) + 0.75rem)',
+        transform: `scale(${propertiesScale})`,
+        transformOrigin: 'top right',
+      }}
+    >
       <div className="h-full glass-panel rounded-2xl flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.6)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/70 overflow-hidden pointer-events-auto transition-[background,border,shadow] duration-500 transform origin-right relative">
         <PanelResizeHandle edge="left" currentWidth={panelWidth} onResize={handleResize} minWidth={220} maxWidth={520} />
 

@@ -382,14 +382,98 @@ const createDefaultFloor = (): Floor => ({
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 let floorCounter = 1;
 
+/**
+ * Floor collections that undo/redo restores.
+ *
+ * Snapshots are cheap: every mutation replaces the array rather than mutating
+ * it, so an entry holds a handful of references to arrays that already exist,
+ * not deep copies. Only the collections that actually changed are captured,
+ * and `undo` merges the partial back over the floor.
+ */
+const HISTORY_KEYS = [
+  'walls', 'openings', 'rooms', 'hvacUnits', 'pipes',
+  'ductSegments', 'ductFittings', 'ductSystems',
+  'radiantZones', 'annotations', 'underlays',
+] as const satisfies readonly (keyof Floor)[];
+
+/** Depth of the undo stack. Entries are reference-cheap; this is a guard
+ *  against an unbounded stack over a long drawing session, not a memory fix. */
+const HISTORY_LIMIT = 200;
+
+/**
+ * Did this collection actually change?
+ *
+ * Array identity is not enough: the update actions are written as
+ * `f.walls.map(w => w.id === id ? {...w, ...patch} : w)`, and `.map` allocates
+ * a fresh array even when no element matched. Comparing references alone would
+ * therefore score a no-op update as a change and burn an undo slot, so Ctrl+Z
+ * would look broken while quietly draining the stack. Unmatched elements keep
+ * their identity, so an element-wise reference scan is both correct and cheap.
+ */
+const collectionChanged = (a: readonly unknown[], b: readonly unknown[]): boolean => {
+  if (a === b) return false;
+  if (a.length !== b.length) return true;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return true;
+  return false;
+};
+
+/**
+ * Apply `updater` to the active floor, recording an undo entry for whatever it
+ * changed.
+ *
+ * History is recorded here rather than at each call site because every
+ * user-facing mutation (add/update/remove, across all eleven entity types)
+ * funnels through this one helper. It previously did not record anything, and
+ * the only code that ever pushed history covered `add_wall` alone — so placing
+ * a window, duct, pipe, register or label, and *every deletion*, was silently
+ * not undoable despite the toolbar offering Undo.
+ *
+ * Callers that must not create an undo step (bulk hydration, derived
+ * re-assignment) should not route through here.
+ */
 const updateActiveFloor = (
   state: CadState,
   updater: (floor: Floor) => Floor,
+  historyType = 'edit',
 ): Partial<CadState> => {
+  const floors = state.floors.map((f) =>
+    f.id === state.activeFloorId ? updater(f) : f,
+  );
+
+  const before = state.floors.find((f) => f.id === state.activeFloorId);
+  const after = floors.find((f) => f.id === state.activeFloorId);
+  if (!before || !after) return { floors };
+
+  const changedBefore: Partial<Floor> = {};
+  const changedAfter: Partial<Floor> = {};
+  let changed = false;
+  for (const key of HISTORY_KEYS) {
+    if (collectionChanged(before[key] ?? [], after[key] ?? [])) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (changedBefore as any)[key] = before[key];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (changedAfter as any)[key] = after[key];
+      changed = true;
+    }
+  }
+
+  // A no-op edit (same references back out) must not consume an undo slot,
+  // otherwise Ctrl+Z appears to do nothing while silently draining the stack.
+  if (!changed) return { floors };
+
+  const entry: HistoryEntry = {
+    type: historyType,
+    floorId: state.activeFloorId,
+    before: changedBefore,
+    after: changedAfter,
+    timestamp: Date.now(),
+  };
+
   return {
-    floors: state.floors.map((f) =>
-      f.id === state.activeFloorId ? updater(f) : f,
-    ),
+    floors,
+    undoStack: [...state.undoStack, entry].slice(-HISTORY_LIMIT),
+    // Any fresh edit invalidates the redo branch.
+    redoStack: [],
   };
 };
 
