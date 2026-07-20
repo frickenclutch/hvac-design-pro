@@ -89,7 +89,7 @@ session read-only, and `users.status='active'` gates every auth path except one 
 | `/api/projects` | any member | **tech+** (`projects.ts:47,87`) | **admin** (`:145`) | Matrix says engineer for create/update — decide (F-16). No ownership checks; org-scoped only |
 | `/api/calculations` | any member | **tech+** (`calculations.ts:29`) | — (append-only) | Verifies project ∈ org |
 | `/api/cad` | any member | **tech+** (`cad.ts:154,222`) | **admin** (`:274`) | Versions: `versionView` policy (default viewer); restore: `versionRestore` (default admin) |
-| `/api/uploads` | any member | **NONE — any member** | **NONE — any member** (`uploads.ts:113`) | **F-1: viewer can upload & delete files** |
+| `/api/uploads` | any member | **tech+** (`uploads.ts`) | **admin** (`uploads.ts`) | F-1 ✅ RESOLVED 2026-07-20 — gated via `roleSatisfies`, mirrors projects/cad |
 | `/api/feedback` | any member (all org feedback) | any member | — | Uses `as any` on user (type smell) |
 | `/api/org` team/authority/policy/domain/invites/subdivisions/reparent/role-change | roster & config readable by **any member** (F-15) | **admin** (raw `role!=='admin'` checks throughout org.ts) | admin | org.ts ignores `isPlatformAdmin` except access-policy PUT (F-22) |
 | `/api/permits` | party-gated (`isParty`) | **NO role gate** — any member of party org (F-2) | — | Authority actions require `is_permit_authority`; submitter actions any role |
@@ -106,10 +106,14 @@ Severity: **P0** fix before wider tenant onboarding · **P1** next hardening uni
 
 ### Security & audit integrity
 
-- **F-1 (P0) Uploads have no role gate at all.** Every `uploads.ts` endpoint — including
-  `DELETE /:id` which removes the R2 object + D1 row — requires only authentication. A
-  `viewer` can upload and destroy files. Recommend: write = tech+, delete = admin (mirroring
-  projects/cad).
+- **F-1 (P0) ✅ RESOLVED 2026-07-20.** Uploads had no role gate at all — every `uploads.ts`
+  endpoint, including `DELETE /:id` (removes the R2 object + D1 row), required only
+  authentication, so a `viewer` could upload and destroy files. Fixed by mirroring
+  projects/cad via `roleSatisfies`: `POST /` = **tech+**, `DELETE /:id` = **admin**; reads
+  stay open to any org member (org-scoped); L0 always passes. Regression cover:
+  `workers/test/uploads-role-gate.test.ts` (viewer 403 on upload+delete, tech upload 201 /
+  tech delete 403, admin delete 200, L0-viewer upload 201, reads open). Permit-side (F-2)
+  and `verify-email` (F-8) remain open — see Unit A.
 - **F-2 (P0) Permit actions have no submitter-side role gate.** `POST /submit`
   (`permits.ts:92`), `withdraw` (`:367`), comments (`:608`) accept any org member incl.
   viewer. Submitting a permit exposes the full project + calc outputs cross-tenant — the
@@ -203,9 +207,11 @@ Severity: **P0** fix before wider tenant onboarding · **P1** next hardening uni
 
 ## 5. Proposed remediation units (clean, self-contained)
 
-1. **Unit A — Role-gate the ungated (P0):** uploads write/delete thresholds, permit
-   submit/withdraw/comment threshold, `verify-email` status gate. Blocked on the F-16/F-2/F-15
-   "what is tech/viewer for" decision — one decision, three call sites.
+1. **Unit A — Role-gate the ungated (P0):** ~~uploads write/delete thresholds~~ (✅ DONE
+   2026-07-20: write = tech+, delete = admin), permit submit/withdraw/comment threshold,
+   `verify-email` status gate. The uploads slice shipped on the settled "tech creates, admin
+   deletes" reading (matches projects/cad); the permit-side threshold (F-2) still rides the
+   F-16/F-15 "what is tech/viewer for" decision.
 2. **Unit B — Audit integrity (P0/P1):** `setAudit` on all L0 GETs + a read-audit line for
    impersonated requests; fix impersonation attribution (`is_platform_action`, actor-org
    routing); `recordTransition` + required reason on `set_expiration`.

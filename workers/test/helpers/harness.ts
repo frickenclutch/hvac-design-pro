@@ -456,16 +456,22 @@ export async function seedPlanEntitlement(
 }
 
 /** Dispatch an actual Request through the REAL Hono app + REAL authMiddleware.
- *  `token` is the RAW bearer (omit for an unauthenticated request). */
+ *  `token` is the RAW bearer (omit for an unauthenticated request).
+ *  Pass `formData` (mutually exclusive with `body`) to send a real multipart
+ *  request — the runtime stamps the `multipart/form-data; boundary=…`
+ *  Content-Type itself, so we must NOT set it by hand (that's why the upload
+ *  route's `c.req.formData()` parses correctly here). */
 export async function call(
   method: string,
   path: string,
-  opts: { token?: string; body?: unknown } = {},
+  opts: { token?: string; body?: unknown; formData?: FormData } = {},
 ): Promise<Response> {
   const headers: Record<string, string> = {};
   if (opts.token) headers['Authorization'] = `Bearer ${opts.token}`;
-  let body: string | undefined;
-  if (opts.body !== undefined) {
+  let body: BodyInit | undefined;
+  if (opts.formData !== undefined) {
+    body = opts.formData;
+  } else if (opts.body !== undefined) {
     headers['Content-Type'] = 'application/json';
     body = JSON.stringify(opts.body);
   }
@@ -487,7 +493,7 @@ export async function call(
 export async function callJson(
   method: string,
   path: string,
-  opts: { token?: string; body?: unknown } = {},
+  opts: { token?: string; body?: unknown; formData?: FormData } = {},
 ): Promise<{ status: number; json: any }> {
   const res = await call(method, path, opts);
   let json: any = null;

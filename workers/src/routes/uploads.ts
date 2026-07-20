@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { generateId } from '../utils/id';
 import { setAudit } from '../middleware/audit';
+import { roleSatisfies } from '../utils/accessPolicy';
 
 interface Env {
   DB: D1Database;
@@ -12,6 +13,12 @@ export const uploadRoutes = new Hono<{ Bindings: Env }>();
 // Upload a file to R2
 uploadRoutes.post('/', async (c) => {
   const user = c.get('user');
+  // CLAUDE.md §5 matrix: viewers are view-only. Uploading a floor plan or
+  // AHRI cert is a create action — tech+ (matches project/calc/cad write).
+  // (L0 always passes via roleSatisfies.)
+  if (!roleSatisfies(user.role, 'tech', user.isPlatformAdmin)) {
+    return c.json({ error: 'Your role cannot upload files' }, 403);
+  }
   const formData = await c.req.formData();
   const file = formData.get('file') as unknown as File;
   const purpose = (formData.get('purpose') as string) || 'attachment';
@@ -112,6 +119,11 @@ uploadRoutes.get('/project/:projectId', async (c) => {
 // Delete a file
 uploadRoutes.delete('/:id', async (c) => {
   const user = c.get('user');
+  // Destructive: removes the R2 object + D1 row. Mirror project delete —
+  // admin only (L0 always passes via roleSatisfies).
+  if (!roleSatisfies(user.role, 'admin', user.isPlatformAdmin)) {
+    return c.json({ error: 'Only admins can delete files' }, 403);
+  }
   const id = c.req.param('id');
 
   const record = await c.env.DB.prepare(
