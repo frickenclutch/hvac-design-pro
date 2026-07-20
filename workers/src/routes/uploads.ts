@@ -10,6 +10,12 @@ interface Env {
 
 export const uploadRoutes = new Hono<{ Bindings: Env }>();
 
+// Allowed `purpose` values — MUST stay in sync with the file_uploads.purpose
+// CHECK constraint (migrations/0001_init.sql). Validated up front so a bad
+// value fails with a clean 400 BEFORE the R2 put, instead of a CHECK-violation
+// 500 that lands AFTER the object is written (orphaning it).
+const UPLOAD_PURPOSES = new Set(['attachment', 'underlay', 'export', 'logo', 'avatar']);
+
 // Upload a file to R2
 uploadRoutes.post('/', async (c) => {
   const user = c.get('user');
@@ -25,6 +31,9 @@ uploadRoutes.post('/', async (c) => {
   const projectId = formData.get('projectId') as string | null;
 
   if (!file) return c.json({ error: 'No file provided' }, 400);
+  if (!UPLOAD_PURPOSES.has(purpose)) {
+    return c.json({ error: `Invalid purpose '${purpose}'` }, 400);
+  }
 
   const id = generateId();
   const ext = file.name.split('.').pop() || 'bin';
@@ -36,11 +45,18 @@ uploadRoutes.post('/', async (c) => {
     customMetadata: { uploadedBy: user.id, originalName: file.name },
   });
 
-  // Record in D1
-  await c.env.DB.prepare(
-    `INSERT INTO file_uploads (id, org_id, project_id, r2_key, filename, content_type, size_bytes, purpose, uploaded_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(id, user.orgId, projectId, r2Key, file.name, file.type, file.size, purpose, user.id).run();
+  // Record in D1. If this fails for any reason, delete the R2 object we just
+  // wrote — R2 and D1 aren't one transaction, so without this a failed insert
+  // leaves an orphaned, unreferenced blob (a slow storage leak).
+  try {
+    await c.env.DB.prepare(
+      `INSERT INTO file_uploads (id, org_id, project_id, r2_key, filename, content_type, size_bytes, purpose, uploaded_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(id, user.orgId, projectId, r2Key, file.name, file.type, file.size, purpose, user.id).run();
+  } catch (e) {
+    await c.env.STORAGE.delete(r2Key).catch(() => { /* best-effort cleanup */ });
+    throw e;
+  }
 
   setAudit(c, {
     action: `file.upload.${purpose}`,

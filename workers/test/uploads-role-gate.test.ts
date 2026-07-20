@@ -101,6 +101,21 @@ describe('POST /api/uploads (write = tech+)', () => {
     expect(status).toBe(201);
     expect(json.id).toBeTruthy();
   });
+
+  // Regression: an invalid `purpose` must be rejected up front (400), NOT hit
+  // the file_uploads CHECK and 500 AFTER the R2 put (which orphaned the blob).
+  // 'blueprint' is the exact value the CAD blueprint importer used to send.
+  it('tech, invalid purpose → 400 (rejected before the R2 write)', async () => {
+    const fd = new FormData();
+    fd.append('file', new File(['x'], 'plan.pdf', { type: 'application/pdf' }));
+    fd.append('purpose', 'blueprint'); // not in the file_uploads CHECK set
+    const { status, json } = await callJson('POST', '/api/uploads', {
+      token: techU.token,
+      formData: fd,
+    });
+    expect(status).toBe(400);
+    expect(json.error).toContain('Invalid purpose');
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
