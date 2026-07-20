@@ -8,7 +8,7 @@ import { api } from '../../../lib/api';
 // Shared underlay import pipeline — used by both the Toolbox "Import Image"
 // button and drag-and-drop onto the canvas. Images become underlays directly;
 // PDFs are rasterized page-by-page via lazy-loaded pdf.js (never in the main
-// bundle). The original file is also persisted to R2 (purpose 'blueprint')
+// bundle). The original file is also persisted to R2 (purpose 'underlay')
 // when a project is active — best-effort, offline-first.
 
 // Vector tracing needs the original PDF, which is far too large to persist in
@@ -190,7 +190,11 @@ function placeUnderlay(dataUrl: string, name: string, naturalW: number, naturalH
 function persistBlueprint(file: File): void {
   const projectId = useProjectStore.getState().activeProjectId;
   if (!projectId) return; // draft mode — local only
-  api.uploadFile(file, 'blueprint', projectId)
+  // purpose MUST be one of the file_uploads CHECK values
+  // (attachment|underlay|export|logo|avatar) — 'underlay' is the right bucket
+  // for a blueprint underlay. (A prior 'blueprint' value failed the CHECK, so
+  // every persist silently 500'd and orphaned the R2 object.)
+  api.uploadFile(file, 'underlay', projectId)
     .then(() => toast.info('Blueprint saved to project files.'))
     .catch(() => { /* offline or auth lapse — underlay still works locally */ });
 }
