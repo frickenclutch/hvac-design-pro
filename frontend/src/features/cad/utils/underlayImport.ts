@@ -11,6 +11,16 @@ import { api } from '../../../lib/api';
 // bundle). The original file is also persisted to R2 (purpose 'blueprint')
 // when a project is active — best-effort, offline-first.
 
+// Vector tracing needs the original PDF, which is far too large to persist in
+// the drawing. Keep the imported file in memory for this session and key it by
+// the underlay it produced; a reload simply means the user re-imports the PDF
+// to trace it, which the UI states plainly rather than failing obscurely.
+const pdfSources = new Map<string, { file: File; pageNum: number }>();
+
+export function getPdfSource(underlayId: string): { file: File; pageNum: number } | undefined {
+  return pdfSources.get(underlayId);
+}
+
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/svg+xml'];
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_PDF_BYTES = 25 * 1024 * 1024;
@@ -40,7 +50,8 @@ async function importSingleFile(file: File): Promise<void> {
     try {
       const raster = await rasterizePdf(file);
       if (!raster) return; // user cancelled page selection
-      placeUnderlay(raster.dataUrl, file.name, raster.width, raster.height);
+      const id = placeUnderlay(raster.dataUrl, file.name, raster.width, raster.height);
+      pdfSources.set(id, { file, pageNum: raster.pageNum });
       persistBlueprint(file);
       toast.success(`Imported "${file.name}" — use Calibrate Scale to set real-world dimensions.`);
     } catch {
@@ -76,7 +87,7 @@ async function importSingleFile(file: File): Promise<void> {
 }
 
 // ── PDF rasterization (lazy pdf.js) ─────────────────────────────────────────
-async function rasterizePdf(file: File): Promise<{ dataUrl: string; width: number; height: number } | null> {
+async function rasterizePdf(file: File): Promise<{ dataUrl: string; width: number; height: number; pageNum: number } | null> {
   const pdfjs = await import('pdfjs-dist');
   const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;
   pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -108,7 +119,7 @@ async function rasterizePdf(file: File): Promise<{ dataUrl: string; width: numbe
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     await page.render({ canvas, viewport }).promise;
-    return { dataUrl: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height };
+    return { dataUrl: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height, pageNum };
   } finally {
     void loadingTask.destroy();
   }
@@ -120,7 +131,7 @@ async function rasterizePdf(file: File): Promise<{ dataUrl: string; width: numbe
 // across multiple files must land side-by-side, never invisibly stacked.
 const TILE_GAP_PX = 40;
 
-function placeUnderlay(dataUrl: string, name: string, naturalW: number, naturalH: number): void {
+function placeUnderlay(dataUrl: string, name: string, naturalW: number, naturalH: number): string {
   let w = naturalW;
   let h = naturalH;
   const maxW = 600;
@@ -172,6 +183,7 @@ function placeUnderlay(dataUrl: string, name: string, naturalW: number, naturalH
   // Next ideal action: let the AI do the heavy lifting on the takeoff.
   // (Calibrate Scale becomes the hinted fallback if AI is skipped or fails.)
   useGuidanceStore.getState().setHint('cad_ai_extract');
+  return underlay.id;
 }
 
 // ── R2 persistence (best-effort, never blocks the local-first flow) ─────────

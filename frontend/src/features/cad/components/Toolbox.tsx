@@ -204,7 +204,23 @@ export default function Toolbox() {
     const sheets = underlays.slice(0, 6);
     if (underlays.length > 6) toast.warning('Using the first 6 sheets — the AI takeoff caps at 6 per pass.');
     const name = sheets.length === 1 ? sheets[0].name : `${sheets[0].name} (+${sheets.length - 1} more sheet${sheets.length > 2 ? 's' : ''})`;
-    state.setAiExtractRequest({ underlayName: name, dataUrls: sheets.map(u => u.dataUrl) });
+    state.setAiExtractRequest({ underlayName: name, dataUrls: sheets.map(u => u.dataUrl), underlayIds: sheets.map(u => u.id) });
+  };
+
+  // ── Vector trace ─────────────────────────────────────────────────────────
+  // Exact geometry straight out of a CAD-plotted PDF. Operates on ONE sheet
+  // (each page has its own vector space), so it takes the most recent import.
+  const handleVectorTrace = () => {
+    useGuidanceStore.getState().clearHint('cad_');
+    const state = useCadStore.getState();
+    const floor = state.floors.find(f => f.id === state.activeFloorId);
+    const underlays = floor?.underlays ?? [];
+    if (underlays.length === 0) {
+      toast.warning('Import a blueprint PDF first, then trace its vector geometry.');
+      return;
+    }
+    const sheet = underlays[underlays.length - 1];
+    state.setVectorTraceRequest({ underlayId: sheet.id, underlayName: sheet.name });
   };
 
   // ── Image import ────────────────────────────────────────────────────────
@@ -292,6 +308,23 @@ export default function Toolbox() {
       )
     },
     { id: 'calibrate_scale', node: <ToolButton id="calibrate_scale" icon={<Crosshair className="w-5 h-5" />} label="Calibrate Scale" active={activeTool === 'calibrate_scale'} onClick={() => setActiveTool('calibrate_scale')} glimmer={guidanceHint === 'cad_calibrate_scale'} /> },
+    {
+      id: 'vector_trace', node: (
+        <div className="relative group">
+          <button
+            onClick={handleVectorTrace}
+            className="p-3 mx-2 rounded-xl transition-all duration-300 relative hover:bg-slate-800/80 border border-transparent min-h-[44px] min-w-[44px]"
+            aria-label="Trace vector geometry from a CAD-plotted PDF"
+          >
+            <Ruler className="w-5 h-5 text-slate-300 group-hover:text-sky-300 transition-colors" />
+          </button>
+          <div className="absolute left-full top-1/2 -translate-y-1/2 ml-4 px-3 py-1.5 bg-slate-800/90 border border-slate-700 text-slate-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 backdrop-blur-md shadow-xl">
+            Trace Vector Geometry — exact, from the PDF's own lines
+            <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-2 bg-slate-800/90 border-l border-b border-slate-700 rotate-45" />
+          </div>
+        </div>
+      )
+    },
     {
       id: 'ai_extract', node: (
         <div className="relative group">

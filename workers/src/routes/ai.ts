@@ -53,9 +53,30 @@ const EXTRACTION_SCHEMA = {
             enum: ['high', 'medium', 'low'],
             description: 'high = dimensions read directly from printed strings; medium = scaled/inferred; low = guessed from proportions',
           },
+          polygon: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                x: { type: 'number', description: 'Horizontal position normalized to the sheet image width: 0 = left edge, 1 = right edge' },
+                y: { type: 'number', description: 'Vertical position normalized to the sheet image height: 0 = top edge, 1 = bottom edge (y increases DOWNWARD)' },
+              },
+              required: ['x', 'y'],
+              additionalProperties: false,
+            },
+            description: 'The room boundary traced on the sheet as an ordered vertex loop (3-24 points, do not repeat the first point at the end). Trace wall centerlines where discernible, else the visible wall lines. Where the plan is orthogonal, keep corners at right angles. Omit ONLY if the outline genuinely cannot be located on the sheet.',
+          },
+          imageIndex: {
+            type: 'integer',
+            description: '0-based index of the provided sheet this room (and its polygon) was read from. Always emit it — 0 when only one sheet was provided.',
+          },
           notes: { type: 'string', description: 'Anything the reviewer should check (illegible text, assumed scale, partial view)' },
         },
-        required: ['name', 'lengthFt', 'widthFt', 'confidence'],
+        // imageIndex is REQUIRED (not advisory): an omitted index would be
+        // silently read as sheet 0 client-side, which on a multi-sheet set
+        // places geometry on the wrong drawing. Constrained decoding only
+        // guarantees emission for required fields.
+        required: ['name', 'lengthFt', 'widthFt', 'confidence', 'imageIndex'],
         additionalProperties: false,
       },
     },
@@ -76,6 +97,7 @@ Rules:
 - Treat all provided sheets as one building. Merge the room schedule across sheets and deduplicate: a room visible on two sheets (overlap regions, match lines, key plans) appears ONCE in the output.
 - Prefer printed dimension strings (e.g. 12'-6") over measuring the drawing. Report in decimal feet.
 - Never invent data. If a value isn't on the plan, omit the optional field and lower the confidence.
+- For EVERY room, also trace its boundary as a polygon in normalized sheet coordinates (x: 0=left to 1=right, y: 0=top to 1=bottom of that image). This is how the room lands at its TRUE position in the CAD workspace — the layout must match the drawing, not an idealized arrangement. Trace wall centerlines, keep orthogonal corners square, order the vertices around the loop, and make the polygon's proportions agree with the printed dimensions you report. Set imageIndex to the sheet you traced on. Omit the polygon only when the room's outline genuinely cannot be located.
 - Every extraction is reviewed by a licensed professional before use — your job is a faithful first pass, not a final answer.
 - Only include actual conditioned rooms (bedrooms, kitchens, offices, halls...). Skip garages, decks, and exterior features unless clearly conditioned.
 - If the plan is commercial/assembly occupancy, still extract the spaces but set buildingType to "commercial" and add a warning that Manual J is residential-only.`;
@@ -127,32 +149,60 @@ aiRoutes.post('/blueprint-extract', async (c) => {
 
   const client = new Anthropic({ apiKey });
 
-  const response = await client.messages.create({
-    model: 'claude-opus-4-8',
-    max_tokens: 8000,
-    thinking: { type: 'adaptive' },
-    system: SYSTEM_PROMPT,
-    output_config: {
-      format: { type: 'json_schema', schema: EXTRACTION_SCHEMA as unknown as Record<string, unknown> },
-    },
-    messages: [
-      {
-        role: 'user',
-        content: [
-          ...images.map((img) => ({
-            type: 'image' as const,
-            source: { type: 'base64' as const, media_type: img.mediaType, data: img.data },
-          })),
-          {
-            type: 'text' as const,
-            text: images.length === 1
-              ? 'Extract the room schedule from this blueprint page.'
-              : `These ${images.length} sheets belong to the same plan set. Extract ONE merged, deduplicated room schedule covering the whole building.`,
-          },
-        ],
+  let response: Anthropic.Message;
+  try {
+    // Streamed, not `create`: max_tokens is a hard cap on TOTAL output —
+    // adaptive thinking shares the budget with the JSON — and polygons roughly
+    // double the per-room output. A large plan set needs well past the ~16k
+    // non-streaming ceiling, and only streaming avoids the HTTP timeout at
+    // that size. `finalMessage()` collects the whole response, so the rest of
+    // this handler is unchanged.
+    const stream = client.messages.stream({
+      model: 'claude-opus-4-8',
+      max_tokens: 64000,
+      thinking: { type: 'adaptive' },
+      system: SYSTEM_PROMPT,
+      output_config: {
+        format: { type: 'json_schema', schema: EXTRACTION_SCHEMA as unknown as Record<string, unknown> },
       },
-    ],
-  });
+      messages: [
+        {
+          role: 'user',
+          content: [
+            ...images.map((img) => ({
+              type: 'image' as const,
+              source: { type: 'base64' as const, media_type: img.mediaType, data: img.data },
+            })),
+            {
+              type: 'text' as const,
+              text: images.length === 1
+                ? 'Extract the room schedule from this blueprint page.'
+                : `These ${images.length} sheets belong to the same plan set. Extract ONE merged, deduplicated room schedule covering the whole building.`,
+            },
+          ],
+        },
+      ],
+    });
+    response = await stream.finalMessage();
+  } catch (err) {
+    // Upstream AI failures must stay actionable, not become bare 500s: a 429
+    // (org rate limit) or 529 (overloaded) is transient — tell the user to
+    // wait, and return 429 so the frontend's 5xx retry does NOT re-fire this
+    // expensive multi-image vision request. Other API errors → 502.
+    if (err instanceof Anthropic.APIError) {
+      if (err.status === 429 || err.status === 529) {
+        return c.json({ error: 'The AI service is busy right now — wait a minute and try the takeoff again.' }, 429);
+      }
+      // Other 4xx are our bug or our config (bad request, auth, payload) and
+      // will fail identically on replay — return 4xx so the frontend's 5xx
+      // retry does NOT re-send this expensive multi-image request.
+      if (err.status && err.status >= 400 && err.status < 500) {
+        return c.json({ error: 'The AI extraction request was rejected. This is a configuration problem, not a transient one — please report it.' }, 422);
+      }
+      return c.json({ error: 'The AI service returned an error — try the takeoff again shortly.' }, 502);
+    }
+    throw err;
+  }
 
   if (response.stop_reason === 'refusal') {
     return c.json({ error: 'The AI declined to process this image.' }, 422);

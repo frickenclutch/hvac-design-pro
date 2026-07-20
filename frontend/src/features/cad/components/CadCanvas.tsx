@@ -64,6 +64,26 @@ const PIPE_COLORS: Record<PipeMaterial, string> = {
 const DUCT_SUPPLY_COLOR = '#3b82f6';
 const DUCT_RETURN_COLOR = '#ef4444';
 const DUCT_FITTING_COLOR = '#8b5cf6';
+
+/**
+ * Extra grab margin around thin run geometry, in SCREEN pixels.
+ *
+ * A pipe is stroked at `diameterIn * 4`, so a 3/4" line is 3 scene px — well
+ * under a screen pixel once a whole floor plan is in view — and Fabric's hit
+ * test requires the pointer inside the object's selection area. Pipes were
+ * therefore effectively unselectable, and walls were awkward when zoomed out.
+ *
+ * Fabric divides `padding` by the viewport zoom when computing that area
+ * (`_pointIsInObjectSelectionArea`), so this reads as a constant on-screen
+ * margin rather than shrinking with the drawing. These objects set
+ * `hasBorders: false`, so widening the selection area costs nothing visually.
+ *
+ * Note for anyone tempted by `perPixelTargetFind` + `targetFindTolerance`:
+ * those make hit-testing STRICTER, not more forgiving. Fabric only consults
+ * them after the pointer already passed the selection-area test, so they
+ * cannot rescue geometry that is too thin to hit in the first place.
+ */
+const GRAB_PADDING_PX = 8;
 // Radiant system color — used when radiant tools are added
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export const DUCT_RADIANT_COLOR = '#f97316';
@@ -255,6 +275,7 @@ export default function CadCanvas() {
       hasBorders: false,
       lockMovementX: true,
       lockMovementY: true,
+      padding: GRAB_PADDING_PX,
     });
   }, []);
 
@@ -490,6 +511,7 @@ export default function CadCanvas() {
       hasBorders: false,
       lockMovementX: true,
       lockMovementY: true,
+      padding: GRAB_PADDING_PX,
     });
   }, []);
 
@@ -511,6 +533,7 @@ export default function CadCanvas() {
       hasBorders: false,
       lockMovementX: true,
       lockMovementY: true,
+      padding: GRAB_PADDING_PX,
     });
     if (dashArray) line.set({ strokeDashArray: dashArray });
 
@@ -683,7 +706,10 @@ export default function CadCanvas() {
     // element has loaded bakes in naturalWidth=0 and renders nothing — so the
     // fabric object is added on load, with a same-name sweep to dedupe
     // overlapping syncs.
-    if (underlayLayer?.visible && floor.underlays) {
+    // Sheets stay hidden while a legacy drawing awaits the re-anchor decision:
+    // drawing them first would show the blueprint half a sheet off from the
+    // geometry traced against it.
+    if (underlayLayer?.visible && floor.underlays && !state.underlayMigration) {
       for (const u of floor.underlays) {
         const objName = `${PREFIX.underlay}${u.id}`;
         const imgEl = new Image();
@@ -694,6 +720,14 @@ export default function CadCanvas() {
           const fImg = new fabric.FabricImage(imgEl, {
             left: u.x,
             top: u.y,
+            // UnderlayImage.x/y are the sheet's TOP-LEFT everywhere else —
+            // import placement, Calibrate Scale, the object:modified sync-back,
+            // and the blueprint→CAD mapper all assume it. Fabric's default
+            // origin is the object's CENTER, which drew every sheet offset by
+            // half its size from where the data said it was: traced geometry
+            // and the drawing it came from could never line up. Pin the origin.
+            originX: 'left',
+            originY: 'top',
             scaleX: u.width / imgEl.naturalWidth,
             scaleY: u.height / imgEl.naturalHeight,
             angle: u.rotation,
@@ -993,10 +1027,17 @@ export default function CadCanvas() {
         perimeterFt: perim / pxPerFt,
         centroid: { x: cx, y: cy },
         color: colors[i % colors.length],
+        // The outline the area and centroid were derived from. Keeping it is
+        // what lets duct segments be placed by containment instead of by
+        // proximity guessing — copied to bare {x,y} so the graph nodes' `edges`
+        // arrays never reach persisted state.
+        polygon: points.map(p => ({ x: p.x, y: p.y })),
       };
     });
 
     useCadStore.getState().setDetectedRooms(detectedRooms);
+    // Ducts drawn BEFORE detection now have rooms to land in.
+    useCadStore.getState().reassignDuctRooms();
     if (fabricRef.current) syncFloorToCanvas(fabricRef.current);
 
     // Next ideal action: pull the detected rooms into the Manual J calculator
@@ -1078,18 +1119,6 @@ export default function CadCanvas() {
       return ghost;
     };
 
-    // ── Push undo history wrapper ────────────────────────────────────────
-    const pushWallHistory = (type: string, before: WallSegment[], after: WallSegment[]) => {
-      const state = useCadStore.getState();
-      state.pushHistory({
-        type,
-        floorId: state.activeFloorId,
-        before: { walls: before },
-        after: { walls: after },
-        timestamp: Date.now(),
-      });
-    };
-
     // ── Zoom ──────────────────────────────────────────────────────────────
     canvas.on('mouse:wheel', (opt) => {
       const delta = opt.e.deltaY;
@@ -1163,8 +1192,6 @@ export default function CadCanvas() {
 
           if (lengthFt >= 0.1) {
             const wallId = `wall-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-            const floor = state.floors.find(f => f.id === state.activeFloorId);
-            const wallsBefore = floor ? [...floor.walls] : [];
 
             const newWall: WallSegment = {
               id: wallId,
@@ -1178,12 +1205,10 @@ export default function CadCanvas() {
               fabricId: wallId,
             };
 
+            // `addWall` records its own undo entry, as every store mutation now
+            // does — pushing one here too would take two Ctrl+Z to undo one wall.
             state.addWall(newWall);
             state.markDirty();
-
-            // Push history
-            const updatedFloor = useCadStore.getState().floors.find(f => f.id === state.activeFloorId);
-            pushWallHistory('add_wall', wallsBefore, updatedFloor?.walls ?? []);
 
             // Re-sync canvas
             syncFloorToCanvas(canvas);
@@ -1307,6 +1332,9 @@ export default function CadCanvas() {
             };
 
             state.addDuctSegment(newDuct);
+            // Ducts drawn AFTER detection get their room immediately, so the
+            // Manual D takeoff sees them without a manual re-detect.
+            state.reassignDuctRooms();
             state.markDirty();
             syncFloorToCanvas(canvas);
 
@@ -1790,6 +1818,8 @@ export default function CadCanvas() {
               cfm: 400,
               fabricId: `${PREFIX.duct}${ductId}`,
             });
+            // Same as the chain-draw path: place the new run in its room now.
+            state.reassignDuctRooms();
           }
           state.markDirty();
         }
@@ -1994,7 +2024,11 @@ export default function CadCanvas() {
         state.activeFloorId !== prevState.activeFloorId ||
         state.floors !== prevState.floors ||
         state.layers !== prevState.layers ||
-        state.thermalOverlayEnabled !== prevState.thermalOverlayEnabled
+        state.thermalOverlayEnabled !== prevState.thermalOverlayEnabled ||
+        // Resolving the legacy-sheet prompt un-hides the underlays. The 'keep'
+        // branch leaves `floors` untouched, so without this the sheets would
+        // stay invisible until some unrelated edit forced a re-sync.
+        state.underlayMigration !== prevState.underlayMigration
       ) {
         syncFloorToCanvas(canvas);
       }

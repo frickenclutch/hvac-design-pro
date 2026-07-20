@@ -128,7 +128,19 @@ export default function PropertyInspector() {
   }
 
   return (
-    <div className="absolute right-6 top-24 bottom-6 z-10 pointer-events-none" style={{ width: panelWidth, transform: `scale(${propertiesScale})`, transformOrigin: 'top right' }}>
+    // Stop above the Layers panel rather than running under it — otherwise the
+    // "Delete Selected" button at the bottom of this panel is covered and
+    // unclickable. LayerManager publishes its measured height as --cad-layers-h
+    // (0px when it is closed or hidden in 3D).
+    <div
+      className="absolute right-6 top-24 z-10 pointer-events-none"
+      style={{
+        width: panelWidth,
+        bottom: 'calc(1.5rem + var(--cad-layers-h, 0px) + 0.75rem)',
+        transform: `scale(${propertiesScale})`,
+        transformOrigin: 'top right',
+      }}
+    >
       <div className="h-full glass-panel rounded-2xl flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.6)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/70 overflow-hidden pointer-events-auto transition-[background,border,shadow] duration-500 transform origin-right relative">
         <PanelResizeHandle edge="left" currentWidth={panelWidth} onResize={handleResize} minWidth={220} maxWidth={520} />
 
@@ -694,6 +706,22 @@ function DuctSegmentPanel({ duct, onUpdate }: { duct: DuctSegment; onUpdate: (pa
   const [localHeight, setLocalHeight] = useState((duct.heightIn ?? 8).toString());
   const [localCfm, setLocalCfm] = useState((duct.cfm ?? 0).toString());
 
+  // Rooms available to serve, from the floor this segment lives on.
+  const cadState = useCadStore.getState();
+  const floorRooms = cadState.floors.find(f => f.id === cadState.activeFloorId)?.rooms ?? [];
+
+  // Choosing a room by hand pins it: `roomAssignedManually` stops the geometric
+  // assignment from overwriting the designer's call on the next redraw.
+  // Choosing "Auto" releases the pin and re-runs assignment immediately.
+  const handleRoomChange = (value: string) => {
+    if (value === '') {
+      onUpdate({ roomId: undefined, roomAssignedManually: false });
+      useCadStore.getState().reassignDuctRooms();
+    } else {
+      onUpdate({ roomId: value, roomAssignedManually: true });
+    }
+  };
+
   return (
     <div className="space-y-6 animate-in slide-in-from-right-4 duration-300 fade-in">
       <div>
@@ -786,6 +814,25 @@ function DuctSegmentPanel({ duct, onUpdate }: { duct: DuctSegment; onUpdate: (pa
               <option key={m} value={m}>{DUCT_MATERIAL_LABELS[m]}</option>
             ))}
           </select>
+        </div>
+
+        {/* Serves room — the join Manual D measures drawn runs through */}
+        <div className="mb-4">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Serves Room</label>
+          <select value={duct.roomId ?? ''} onChange={e => handleRoomChange(e.target.value)}
+            className="w-full min-h-[44px] bg-slate-950/80 border border-slate-700 text-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500/50 transition-colors">
+            <option value="">Auto (unassigned)</option>
+            {floorRooms.map(r => (
+              <option key={r.id} value={r.id}>{r.name}</option>
+            ))}
+          </select>
+          <p className="text-[10px] text-slate-500 mt-1.5 ml-1">
+            {duct.roomAssignedManually
+              ? 'Set by hand — auto-assignment will not change it.'
+              : duct.roomId
+                ? 'Assigned from drawn geometry.'
+                : 'No room matched — this run is excluded from the Manual D takeoff.'}
+          </p>
         </div>
       </div>
 

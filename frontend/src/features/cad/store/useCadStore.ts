@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import * as fabric from 'fabric';
 import { scopedKey } from '../../../utils/storage';
+import { applyDuctRoomAssignments } from '../../../engines/ductRoomAssign';
 
 // ── Tool Types ──────────────────────────────────────────────────────────────────
 export type ToolType =
@@ -107,7 +108,13 @@ export interface DuctSegment {
   frictionRateInwg100?: number;
   systemId?: string;
   parentSegmentId?: string;
+  /** Room this run serves. Populated by `reassignDuctRooms()` (geometry) or by
+   *  the properties panel (by hand). Manual D measures drawn runs per room, so
+   *  a segment with no roomId is not counted anywhere. */
   roomId?: string;
+  /** True when the designer picked the room by hand. Auto-assignment skips
+   *  these — their judgement outranks the geometry heuristic. */
+  roomAssignedManually?: boolean;
   fabricId: string;
 }
 
@@ -172,6 +179,11 @@ export interface DetectedRoom {
   perimeterFt: number;
   centroid: { x: number; y: number };
   color: string;
+  /** Ordered outline in canvas px, straight from the wall-cycle walk that
+   *  produced the area and centroid. OPTIONAL: drawings saved before this was
+   *  persisted have rooms without it, and every consumer must degrade rather
+   *  than assume it (duct assignment falls back to centroid proximity). */
+  polygon?: { x: number; y: number }[];
 }
 
 // ── Annotations ─────────────────────────────────────────────────────────────────
@@ -281,10 +293,28 @@ export interface CalibrationRequest {
 
 // AI extraction: the active floor's blueprint sheets queued for Claude-vision
 // room takeoff (multi-sheet plan sets are merged into one schedule). The
-// dialog owns the request → review → confirm lifecycle.
+// dialog owns the request → review → confirm lifecycle. underlayIds parallels
+// dataUrls — extracted polygons carry an imageIndex that resolves through it
+// back to the source sheet's placement rect.
 export interface AiExtractRequest {
   underlayName: string;
   dataUrls: string[];
+  underlayIds: string[];
+}
+
+// A drawing saved before the underlay-origin fix has been loaded. Its sheets
+// are NOT rendered until the user resolves this — showing them first would
+// display the blueprint half a sheet away from the geometry traced against it,
+// which is exactly the confusion the fix removes.
+export interface UnderlayMigrationRequest {
+  sheetCount: number;
+}
+
+// Vector trace: pull the true line geometry out of a CAD-plotted PDF and
+// convert it to CAD walls. Exact by construction — no vision model involved.
+export interface VectorTraceRequest {
+  underlayId: string;
+  underlayName: string;
 }
 
 // ── Serialized drawing ────────────────────────────────────────────────────────────
@@ -295,6 +325,11 @@ export interface AiExtractRequest {
 export interface SerializedDrawing {
   floors: Floor[];
   activeFloorId: string;
+  /** Schema marker: sheets authored after the underlay-origin fix, where
+   *  UnderlayImage.x/y is the sheet's top-left (as every consumer assumes).
+   *  Absent on drawings saved while sheets were rendered centered on x/y —
+   *  those need the one-time re-anchor prompt before they are shown. */
+  underlayOrigin?: 'top-left';
   layers: Layer[];
   projectScale: ProjectScale;
   gridSnapEnabled: boolean;
@@ -347,14 +382,98 @@ const createDefaultFloor = (): Floor => ({
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 let floorCounter = 1;
 
+/**
+ * Floor collections that undo/redo restores.
+ *
+ * Snapshots are cheap: every mutation replaces the array rather than mutating
+ * it, so an entry holds a handful of references to arrays that already exist,
+ * not deep copies. Only the collections that actually changed are captured,
+ * and `undo` merges the partial back over the floor.
+ */
+const HISTORY_KEYS = [
+  'walls', 'openings', 'rooms', 'hvacUnits', 'pipes',
+  'ductSegments', 'ductFittings', 'ductSystems',
+  'radiantZones', 'annotations', 'underlays',
+] as const satisfies readonly (keyof Floor)[];
+
+/** Depth of the undo stack. Entries are reference-cheap; this is a guard
+ *  against an unbounded stack over a long drawing session, not a memory fix. */
+const HISTORY_LIMIT = 200;
+
+/**
+ * Did this collection actually change?
+ *
+ * Array identity is not enough: the update actions are written as
+ * `f.walls.map(w => w.id === id ? {...w, ...patch} : w)`, and `.map` allocates
+ * a fresh array even when no element matched. Comparing references alone would
+ * therefore score a no-op update as a change and burn an undo slot, so Ctrl+Z
+ * would look broken while quietly draining the stack. Unmatched elements keep
+ * their identity, so an element-wise reference scan is both correct and cheap.
+ */
+const collectionChanged = (a: readonly unknown[], b: readonly unknown[]): boolean => {
+  if (a === b) return false;
+  if (a.length !== b.length) return true;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return true;
+  return false;
+};
+
+/**
+ * Apply `updater` to the active floor, recording an undo entry for whatever it
+ * changed.
+ *
+ * History is recorded here rather than at each call site because every
+ * user-facing mutation (add/update/remove, across all eleven entity types)
+ * funnels through this one helper. It previously did not record anything, and
+ * the only code that ever pushed history covered `add_wall` alone — so placing
+ * a window, duct, pipe, register or label, and *every deletion*, was silently
+ * not undoable despite the toolbar offering Undo.
+ *
+ * Callers that must not create an undo step (bulk hydration, derived
+ * re-assignment) should not route through here.
+ */
 const updateActiveFloor = (
   state: CadState,
   updater: (floor: Floor) => Floor,
+  historyType = 'edit',
 ): Partial<CadState> => {
+  const floors = state.floors.map((f) =>
+    f.id === state.activeFloorId ? updater(f) : f,
+  );
+
+  const before = state.floors.find((f) => f.id === state.activeFloorId);
+  const after = floors.find((f) => f.id === state.activeFloorId);
+  if (!before || !after) return { floors };
+
+  const changedBefore: Partial<Floor> = {};
+  const changedAfter: Partial<Floor> = {};
+  let changed = false;
+  for (const key of HISTORY_KEYS) {
+    if (collectionChanged(before[key] ?? [], after[key] ?? [])) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (changedBefore as any)[key] = before[key];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (changedAfter as any)[key] = after[key];
+      changed = true;
+    }
+  }
+
+  // A no-op edit (same references back out) must not consume an undo slot,
+  // otherwise Ctrl+Z appears to do nothing while silently draining the stack.
+  if (!changed) return { floors };
+
+  const entry: HistoryEntry = {
+    type: historyType,
+    floorId: state.activeFloorId,
+    before: changedBefore,
+    after: changedAfter,
+    timestamp: Date.now(),
+  };
+
   return {
-    floors: state.floors.map((f) =>
-      f.id === state.activeFloorId ? updater(f) : f,
-    ),
+    floors,
+    undoStack: [...state.undoStack, entry].slice(-HISTORY_LIMIT),
+    // Any fresh edit invalidates the redo branch.
+    redoStack: [],
   };
 };
 
@@ -428,6 +547,12 @@ interface CadState {
   setCalibrationRequest: (req: CalibrationRequest | null) => void;
   aiExtractRequest: AiExtractRequest | null;
   setAiExtractRequest: (req: AiExtractRequest | null) => void;
+  vectorTraceRequest: VectorTraceRequest | null;
+  setVectorTraceRequest: (req: VectorTraceRequest | null) => void;
+  underlayMigration: UnderlayMigrationRequest | null;
+  /** 'reanchor' keeps each sheet exactly where it was displayed before the fix
+   *  (x -= width/2); 'keep' leaves the stored coordinates untouched. */
+  resolveUnderlayMigration: (mode: 'reanchor' | 'keep') => void;
 
   // ── Multi-floor system ──────────────────────────────────────────────────────
   floors: Floor[];
@@ -490,6 +615,10 @@ interface CadState {
   addDuctSegment: (segment: DuctSegment) => void;
   updateDuctSegment: (id: string, patch: Partial<DuctSegment>) => void;
   removeDuctSegment: (id: string) => void;
+  /** Re-run geometric duct→room assignment over the active floor. Safe to call
+   *  repeatedly; leaves hand-picked assignments alone and no-ops when nothing
+   *  resolves differently. */
+  reassignDuctRooms: () => void;
 
   // ── Duct Fittings ─────────────────────────────────────────────────────────
   addDuctFitting: (fitting: DuctFitting) => void;
@@ -616,6 +745,43 @@ export const useCadStore = create<CadState>((set, get) => {
     setCalibrationRequest: (req) => set({ calibrationRequest: req }),
     aiExtractRequest: null,
     setAiExtractRequest: (req) => set({ aiExtractRequest: req }),
+
+    vectorTraceRequest: null,
+    setVectorTraceRequest: (req) => set({ vectorTraceRequest: req }),
+
+    underlayMigration: null,
+    resolveUnderlayMigration: (mode) => {
+      if (mode === 'keep') {
+        set({ underlayMigration: null, isDirty: true });
+        return;
+      }
+      // Pre-fix, a sheet stored at (x, y) was drawn CENTERED there, occupying
+      // [x - w/2, x + w/2]. Now it is drawn from its top-left. Subtracting half
+      // its size reproduces the box the user last saw, so any walls they traced
+      // against it stay aligned.
+      //
+      // Rotation matters: Fabric rotates about the origin point, so moving the
+      // origin from centre to top-left also moves the pivot. The rendered centre
+      // becomes (x, y) + R(angle)·(w/2, h/2), and the inverse that holds the
+      // sheet still is therefore (x, y) − R(angle)·(w/2, h/2). At rotation 0
+      // this is exactly the plain half-size subtraction above.
+      set((s) => ({
+        floors: s.floors.map(f => ({
+          ...f,
+          underlays: (f.underlays ?? []).map(u => {
+            const t = ((u.rotation ?? 0) * Math.PI) / 180;
+            const cos = Math.cos(t), sin = Math.sin(t);
+            return {
+              ...u,
+              x: u.x - (u.width / 2) * cos + (u.height / 2) * sin,
+              y: u.y - (u.width / 2) * sin - (u.height / 2) * cos,
+            };
+          }),
+        })),
+        underlayMigration: null,
+        isDirty: true,
+      }));
+    },
 
     // ── Multi-floor system ────────────────────────────────────────────────────
     floors: [defaultFloor],
@@ -924,6 +1090,29 @@ export const useCadStore = create<CadState>((set, get) => {
         isDirty: true,
       })),
 
+    // Geometry decides which room each drawn run serves. Without this the
+    // segments carry no roomId and cadToManualD measures nothing, which is what
+    // told users to "draw ducts first" after they had just drawn them.
+    reassignDuctRooms: () =>
+      set((s) => {
+        const floor = s.floors.find((f) => f.id === s.activeFloorId);
+        if (!floor) return {};
+        const { segments, changed } = applyDuctRoomAssignments(
+          floor.ductSegments ?? [],
+          floor.rooms ?? [],
+          { pxPerFt: s.projectScale.pxPerFt },
+        );
+        // Bail without touching `floors` when nothing moved — the auto-save
+        // subscription keys off floors identity, so a no-op stays a no-op.
+        if (!changed) return {};
+        return {
+          floors: s.floors.map((f) =>
+            f.id === s.activeFloorId ? { ...f, ductSegments: segments } : f,
+          ),
+          isDirty: true,
+        };
+      }),
+
     // ── Duct Fittings ────────────────────────────────────────────────────────
     addDuctFitting: (fitting) =>
       set((s) => ({
@@ -1111,6 +1300,7 @@ export const useCadStore = create<CadState>((set, get) => {
         panelFloors: s.panelFloors,
         panelNavBar: s.panelNavBar,
         ghostingEnabled: s.ghostingEnabled,
+        underlayOrigin: 'top-left',
       };
     },
 
@@ -1141,6 +1331,10 @@ export const useCadStore = create<CadState>((set, get) => {
         ductSystems: f.ductSystems ?? [],
         radiantZones: f.radiantZones ?? [],
       }));
+
+      const legacySheetCount = d.underlayOrigin === 'top-left'
+        ? 0
+        : floors.reduce((n, f) => n + (f.underlays?.length ?? 0), 0);
 
       // Sync floorCounter to highest existing floor index so addFloor()
       // never creates a duplicate ID that collides with a loaded floor.
@@ -1173,6 +1367,9 @@ export const useCadStore = create<CadState>((set, get) => {
         isDirty: false,
         undoStack: [],
         redoStack: [],
+        // Drawings saved before the origin fix carry no marker. If any sheets
+        // are present, hold them back and ask first — see UnderlayMigrationRequest.
+        underlayMigration: legacySheetCount > 0 ? { sheetCount: legacySheetCount } : null,
       });
     },
   };

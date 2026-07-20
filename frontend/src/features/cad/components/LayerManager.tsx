@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useCadStore } from '../store/useCadStore';
 import { Eye, EyeOff, Lock, Unlock, Layers, Target, Circle, CheckCircle2, Minus, Plus } from 'lucide-react';
 import { usePreferencesStore } from '../../../stores/usePreferencesStore';
@@ -33,6 +33,28 @@ export default function LayerManager() {
     updatePrefs({ panelSizes: { ...ps, layersScale: next } });
   }, [updatePrefs]);
 
+  // This panel and the Properties panel share the right rail, both anchored to
+  // `right-6` at the same z-index. Layers renders later, so it painted OVER the
+  // bottom of Properties — which is where "Delete Selected" sits, making delete
+  // unreachable without closing Layers first. Publishing our measured height
+  // lets Properties end above us instead of running underneath. Measured rather
+  // than assumed because this panel is both user-resizable and user-scalable.
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const visible = !is3DViewOpen && open;
+  useEffect(() => {
+    const root = document.documentElement;
+    const clear = () => root.style.setProperty('--cad-layers-h', '0px');
+    if (!visible) { clear(); return clear; }
+
+    const el = panelRef.current;
+    if (!el) return clear;
+    const observer = new ResizeObserver(() => {
+      root.style.setProperty('--cad-layers-h', `${Math.round(el.getBoundingClientRect().height)}px`);
+    });
+    observer.observe(el);
+    return () => { observer.disconnect(); clear(); };
+  }, [visible]);
+
   // ---- Hidden in 3D view ----
   if (is3DViewOpen) return null;
 
@@ -51,7 +73,7 @@ export default function LayerManager() {
 
   // ---- Expanded panel ----
   return (
-    <div className="absolute right-6 bottom-6 z-10 pointer-events-auto" style={{ width: panelWidth, transform: `scale(${layersScale})`, transformOrigin: 'bottom right' }}>
+    <div ref={panelRef} className="absolute right-6 bottom-6 z-10 pointer-events-auto" style={{ width: panelWidth, transform: `scale(${layersScale})`, transformOrigin: 'bottom right' }}>
       <div className="glass-panel rounded-2xl flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.6)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/70 overflow-hidden transition-[background,border,shadow] duration-500 relative">
         <PanelResizeHandle edge="left" currentWidth={panelWidth} onResize={handleResize} minWidth={220} maxWidth={520} />
 

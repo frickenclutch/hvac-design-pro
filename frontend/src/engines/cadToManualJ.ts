@@ -6,6 +6,8 @@
 import type { Floor } from '../features/cad/store/useCadStore';
 import type { RoomInput } from './manualJ';
 import { type RoomType, ROOM_TYPE_PRESETS, APPLIANCE_LIBRARY, type ApplianceEntry } from './manualJ';
+import { roomExposure, exteriorWallIds } from './orientation';
+import type { RoomExposure } from './orientation';
 
 /**
  * Guess room type from its name for auto-populating internal load presets.
@@ -34,7 +36,12 @@ export interface ConvertedRoom extends RoomInput {
   cadRoomId: string; // back-reference to the CAD detected room
   floorId: string;
   floorName: string;
+  /** How exposureDirection was arrived at, so the UI can flag weak cases. */
+  exposureBasis: RoomExposure['basis'];
 }
+
+/** Used only when a room's geometry cannot yield any direction at all. */
+const FALLBACK_EXPOSURE = 'S' as const;
 
 /**
  * Convert detected rooms from the active floor into Manual J room inputs.
@@ -43,6 +50,10 @@ export interface ConvertedRoom extends RoomInput {
 export function convertCadRoomsToManualJ(
   floor: Floor,
 ): ConvertedRoom[] {
+  // Which walls face outdoors is a floor-level question — a wall is a partition
+  // when two detected rooms both claim it — so resolve it once, not per room.
+  const exteriorIds = exteriorWallIds(floor.rooms);
+
   return floor.rooms.map((room, idx) => {
     // Gather walls belonging to this room
     const roomWalls = floor.walls.filter(w => room.wallIds.includes(w.id));
@@ -90,8 +101,29 @@ export function convertCadRoomsToManualJ(
       widthFt = lengthFt;
     }
 
-    // Count exterior walls (heuristic: all walls in room are exterior by default)
-    const exteriorWalls = roomWalls.length;
+    // Only walls not shared with another room face outdoors. Counting every
+    // wall as exterior (the previous behaviour) inflated envelope load on any
+    // room bounded by partitions.
+    const exteriorWalls = roomWalls.filter(w => exteriorIds.has(w.id)).length;
+
+    // Solar exposure from the drawn geometry rather than a fixed constant.
+    // Manual J applies the irradiance for this face to the room's entire glass
+    // area, so stamping every room 'S' overstated gain on north-facing rooms
+    // and understated it on south-facing ones — silently, on a document that
+    // goes out for permit.
+    const windowAreaByWallId = new Map<string, number>();
+    for (const w of windows) {
+      const areaFt2 = (w.widthIn * w.heightIn) / 144;
+      if (areaFt2 > 0) {
+        windowAreaByWallId.set(w.wallId, (windowAreaByWallId.get(w.wallId) ?? 0) + areaFt2);
+      }
+    }
+    const exposure = roomExposure({
+      walls: roomWalls,
+      exteriorWallIds: exteriorIds,
+      windowAreaByWallId,
+      interiorPoint: room.centroid,
+    });
 
     return {
       cadRoomId: room.id,
@@ -115,7 +147,8 @@ export function convertCadRoomsToManualJ(
       ceilingRValue: 38,
       floorRValue: 19,
       floorType: 'crawlspace' as const,
-      exposureDirection: 'S' as const,
+      exposureDirection: exposure.exposure ?? FALLBACK_EXPOSURE,
+      exposureBasis: exposure.basis,
       // Internal loads from guessed room type
       roomType: guessRoomType(room.name),
       occupantCount: Math.max(ROOM_TYPE_PRESETS[guessRoomType(room.name)].occupants, Math.round(area / 200)),

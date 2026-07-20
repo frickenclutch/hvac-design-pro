@@ -47,7 +47,7 @@ const sections: HelpSection[] = [
       },
       {
         title: 'AI Extract Rooms',
-        desc: 'The sparkles button sends every sheet on the floor to the AI as one plan set (up to 6) and proposes a merged room schedule. Everything lands in a review dialog — edit or uncheck any room, then confirm: the plan is drawn as real CAD geometry on a new "AI Takeoff" floor for finalizing and stamping, and the rooms go to Manual J. Nothing is applied without your review; you are the engineer of record.',
+        desc: 'The sparkles button sends every sheet on the floor to the AI as one plan set (up to 6) and proposes a merged room schedule WITH each room\'s outline traced on the sheet. Everything lands in a review panel — dashed green previews show where rooms will land on the blueprint itself, measurement for measurement. Confirming draws the walls at their true positions on the active floor and auto-calibrates the sheet scale from the printed dimensions; the rooms also go to Manual J. Nothing is applied without your review; you are the engineer of record.',
       },
       {
         title: 'Glimmer hints',
