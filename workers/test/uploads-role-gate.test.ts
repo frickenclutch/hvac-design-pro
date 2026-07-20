@@ -37,11 +37,13 @@ let l0ViewerU: SeededTenant; // role=viewer BUT is_platform_admin → always pas
 let rows: SeededOrgRows;
 
 /** A minimal but valid multipart upload body. The runtime stamps the
- *  multipart Content-Type + boundary itself (see harness `call`). */
+ *  multipart Content-Type + boundary itself (see harness `call`).
+ *  `purpose` must satisfy the file_uploads CHECK
+ *  (attachment|underlay|export|logo|avatar) or the INSERT 500s. */
 function fileForm(projectId?: string): FormData {
   const fd = new FormData();
   fd.append('file', new File(['hello world'], 'plan.pdf', { type: 'application/pdf' }));
-  fd.append('purpose', 'blueprint');
+  fd.append('purpose', 'underlay');
   if (projectId) fd.append('projectId', projectId);
   return fd;
 }
