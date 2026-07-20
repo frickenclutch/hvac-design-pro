@@ -13,7 +13,7 @@ import type { AiBlueprintExtraction, AiExtractedRoom } from '../../../lib/api';
 import { createDefaultRoom, createDefaultConditions } from '../../../engines/manualJ';
 import type { RoomInput, DesignConditions } from '../../../engines/manualJ';
 import { generateCadFloorFromManualJ } from '../../../engines/manualJToCad';
-import { buildGeometryTakeoff, sanitizePolygon } from '../../../engines/blueprintToCad';
+import { buildGeometryTakeoff, sanitizePolygon, impliesRescale } from '../../../engines/blueprintToCad';
 import type { GeometryRoom, NormalizedPoint, UnderlayRect } from '../../../engines/blueprintToCad';
 import { segmentsToWalls } from '../../../engines/pdfVector';
 import type { VectorSegment } from '../../../engines/pdfVector';
@@ -281,7 +281,12 @@ function VectorTrace() {
         setResult(res);
         setPhase(res.segments.length > 0 ? 'review' : 'error');
         if (res.segments.length === 0) {
-          setError('No vector geometry found on this sheet. It is most likely a scan or a photo — use the AI takeoff instead.');
+          // A refused sheet is empty for the opposite reason to a scan — it
+          // carried too much geometry, not none. Saying "probably a scan" there
+          // would send the user to the AI takeoff for no reason.
+          setError(res.capped && res.notice
+            ? res.notice
+            : 'No vector geometry found on this sheet. It is most likely a scan or a photo — use the AI takeoff instead.');
         }
       })
       .catch((err: unknown) => {
@@ -557,8 +562,9 @@ function AiExtract() {
   // Geometry dry-run over the included rooms: powers the on-canvas ghost
   // preview, the implied-scale readout, and the reviewer warnings. Alignment
   // against the sheets is scale-invariant, so the preview always maps through
-  // the CURRENT placement (applyScale false) — on confirm the sheet and walls
-  // resize together.
+  // the CURRENT placement (applyScale false) — on confirm the sheet resizes
+  // together with the NEW walls this takeoff produces. Walls already on the
+  // floor are not carried along.
   const [autoScale, setAutoScale] = useState(true);
   const pxPerFt = useCadStore(s => s.projectScale.pxPerFt);
   // Subscribing to floors keeps the ghost preview honest if the user moves or
@@ -589,7 +595,10 @@ function AiExtract() {
   }, [phase, rooms, request, pxPerFt, autoScale, floors]);
 
   const implied = geometryPreview?.impliedPxPerFt ?? null;
-  const scaleMismatch = implied !== null && Math.abs(implied - pxPerFt) / pxPerFt > 0.02;
+  // Ask the engine, don't re-derive: a local 2% gate used to call a 0.5%
+  // mismatch a "no-op" while the engine still rescaled and re-tiled every
+  // sheet, silently discarding a hand-made arrangement.
+  const willRescale = impliesRescale(implied, pxPerFt);
 
   // Ghost the proposed rooms on the canvas behind the review panel.
   useEffect(() => {
@@ -618,7 +627,14 @@ function AiExtract() {
   }, [geometryPreview]);
 
   const confirm = () => {
-    const checked = rooms.filter(r => r.included && r.name.trim());
+    // Every checked room is imported. A reviewer who blanks a name has not
+    // asked to discard the room — dropping it here would lose an engineering
+    // input the button already counted, with nothing said. Blank names fall
+    // back to the default below, the same way the ghost preview does. Keeping
+    // this filter identical to the preview's is also what makes `rejected`
+    // below honest: checked === includedCount, so the only rooms unaccounted
+    // for are the ones the dimension band actually rejected.
+    const checked = rooms.filter(r => r.included);
     const selected = checked.filter(dimsUsable);
     if (selected.length === 0) {
       toast.warning(
@@ -641,15 +657,19 @@ function AiExtract() {
     try { existing = JSON.parse(localStorage.getItem(key) ?? 'null'); } catch { /* corrupt — start fresh */ }
     const baseRooms: RoomInput[] = Array.isArray(existing?.rooms) ? existing.rooms : [];
 
-    const newRooms: RoomInput[] = selected.map((r, i) => ({
-      ...createDefaultRoom(baseRooms.length + i),
-      name: r.name.trim(),
-      lengthFt: r.lengthFt,
-      widthFt: r.widthFt,
-      ...(r.ceilingHeightFt ? { ceilingHeightFt: r.ceilingHeightFt } : {}),
-      ...(r.windowCount != null ? { windowCount: r.windowCount } : {}),
-      ...(r.exposureDirection ? { exposureDirection: r.exposureDirection } : {}),
-    }));
+    const newRooms: RoomInput[] = selected.map((r, i) => {
+      const base = createDefaultRoom(baseRooms.length + i);
+      return {
+        ...base,
+        // Blank name → keep the default "Room N" rather than dropping the room.
+        name: r.name.trim() || base.name,
+        lengthFt: r.lengthFt,
+        widthFt: r.widthFt,
+        ...(r.ceilingHeightFt ? { ceilingHeightFt: r.ceilingHeightFt } : {}),
+        ...(r.windowCount != null ? { windowCount: r.windowCount } : {}),
+        ...(r.exposureDirection ? { exposureDirection: r.exposureDirection } : {}),
+      };
+    });
 
     try {
       localStorage.setItem(key, JSON.stringify({
@@ -676,7 +696,9 @@ function AiExtract() {
       const geomRooms: GeometryRoom[] = geom.map(g => {
         const idx = selected.indexOf(g.src);
         return {
-          name: g.src.name.trim(),
+          // Read the name back off the Manual J row so the CAD room and the
+          // load-calc row can never disagree, including on the blank fallback.
+          name: newRooms[idx].name,
           lengthFt: g.src.lengthFt,
           widthFt: g.src.widthFt,
           wallRValue: newRooms[idx].wallRValue,
@@ -820,9 +842,9 @@ function AiExtract() {
               <span className="text-xs text-slate-300">
                 Auto-calibrate sheet scale from printed dimensions
                 <span className="block text-slate-500 mt-0.5">
-                  {scaleMismatch
-                    ? `The sheet currently reads ≈ ${implied.toFixed(1)} px/ft; the project scale is ${pxPerFt} px/ft. The sheet and traced walls will be resized together so lengths read in true feet.`
-                    : 'The sheet already matches the project scale — this will be a no-op.'}
+                  {willRescale
+                    ? `The sheet currently reads ≈ ${implied.toFixed(1)} px/ft; the project scale is ${pxPerFt} px/ft. The sheet will be resized — and repositioned alongside any other sheets — together with the new walls from this takeoff, so those read in true feet. Walls you traced by hand earlier are not moved and will no longer line up with the sheet.`
+                    : 'The sheet already matches the project scale — nothing will be moved or resized.'}
                 </span>
               </span>
             </label>

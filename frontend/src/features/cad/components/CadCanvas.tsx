@@ -1004,10 +1004,17 @@ export default function CadCanvas() {
         perimeterFt: perim / pxPerFt,
         centroid: { x: cx, y: cy },
         color: colors[i % colors.length],
+        // The outline the area and centroid were derived from. Keeping it is
+        // what lets duct segments be placed by containment instead of by
+        // proximity guessing — copied to bare {x,y} so the graph nodes' `edges`
+        // arrays never reach persisted state.
+        polygon: points.map(p => ({ x: p.x, y: p.y })),
       };
     });
 
     useCadStore.getState().setDetectedRooms(detectedRooms);
+    // Ducts drawn BEFORE detection now have rooms to land in.
+    useCadStore.getState().reassignDuctRooms();
     if (fabricRef.current) syncFloorToCanvas(fabricRef.current);
 
     // Next ideal action: pull the detected rooms into the Manual J calculator
@@ -1318,6 +1325,9 @@ export default function CadCanvas() {
             };
 
             state.addDuctSegment(newDuct);
+            // Ducts drawn AFTER detection get their room immediately, so the
+            // Manual D takeoff sees them without a manual re-detect.
+            state.reassignDuctRooms();
             state.markDirty();
             syncFloorToCanvas(canvas);
 
@@ -1801,6 +1811,8 @@ export default function CadCanvas() {
               cfm: 400,
               fabricId: `${PREFIX.duct}${ductId}`,
             });
+            // Same as the chain-draw path: place the new run in its room now.
+            state.reassignDuctRooms();
           }
           state.markDirty();
         }

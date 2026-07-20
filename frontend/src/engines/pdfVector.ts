@@ -91,6 +91,15 @@ export interface OpsCodes {
   fillStroke: number;
   eoFillStroke: number;
   closeFillStroke: number;
+  /**
+   * pdf.js carries a form XObject's `/Matrix` ONLY on this opcode — it is never
+   * re-emitted as a separate `transform`. Ignoring it draws every form's
+   * contents at the wrong scale and position, so it must be composed into the
+   * CTM. pdf.js's own canvas backend does an implicit save here, and the
+   * matching End does the restore; this walker mirrors that exactly.
+   */
+  paintFormXObjectBegin: number;
+  paintFormXObjectEnd: number;
 }
 
 export interface OperatorList {
@@ -199,6 +208,19 @@ export function extractVectorSegments(
   let lineWidth = 1;
   const lineWidthStack: number[] = [];
 
+  // Graphics-state push/pop, shared by q/Q and by form XObject begin/end so the
+  // two can nest in any combination without diverging.
+  const pushState = () => {
+    stack.push([...ctm] as Matrix);
+    lineWidthStack.push(lineWidth);
+  };
+  const popState = () => {
+    const m = stack.pop();
+    if (m) ctm = m;
+    const lw = lineWidthStack.pop();
+    if (lw !== undefined) lineWidth = lw;
+  };
+
   const segments: VectorSegment[] = [];
   let curveCount = 0;
   const { width: vw, height: vh } = viewport;
@@ -209,13 +231,23 @@ export function extractVectorSegments(
     const args = opList.argsArray[i] as unknown[];
 
     if (fn === OPS.save) {
-      stack.push([...ctm] as Matrix);
-      lineWidthStack.push(lineWidth);
+      pushState();
     } else if (fn === OPS.restore) {
-      const m = stack.pop();
-      if (m) ctm = m;
-      const lw = lineWidthStack.pop();
-      if (lw !== undefined) lineWidth = lw;
+      popState();
+    } else if (fn === OPS.paintFormXObjectBegin) {
+      // args = [matrix, bbox]. pdf.js's canvas backend saves the graphics state
+      // here and concatenates the form matrix onto the CTM, so the same
+      // composition order as OPS.transform applies. Nesting falls out of the
+      // shared save/restore stacks.
+      pushState();
+      const raw = args?.[0];
+      // A missing or malformed /Matrix means identity — never a guessed scale.
+      if (Array.isArray(raw) && raw.length >= 6) {
+        const m = (raw as number[]).slice(0, 6);
+        if (m.every(Number.isFinite)) ctm = matMul(ctm, m as Matrix);
+      }
+    } else if (fn === OPS.paintFormXObjectEnd) {
+      popState();
     } else if (fn === OPS.transform) {
       const a = args as unknown as number[];
       if (a && a.length >= 6) ctm = matMul(ctm, a.slice(0, 6) as Matrix);
@@ -298,21 +330,143 @@ export function segmentsToWalls(
 }
 
 /**
+ * Above this many raw segments the tracer refuses the sheet outright rather
+ * than converting part of it. See {@link dedupeSegmentsWithReport}.
+ */
+export const MAX_TRACEABLE_SEGMENTS = 250_000;
+
+export interface DedupeReport {
+  /** Deduped runs — EMPTY when `capped` is true. Never a partial trace. */
+  segments: VectorSegment[];
+  /** Raw segments handed in, before deduping. */
+  inputCount: number;
+  /** Runs kept after deduping (0 when capped). */
+  keptCount: number;
+  /** True when `inputCount` exceeded the cap and nothing was traced. */
+  capped: boolean;
+  /** User-facing explanation when `capped`, else null. Callers MUST show it. */
+  notice: string | null;
+}
+
+export interface DedupeOptions {
+  /** Endpoint match distance in normalized sheet units. */
+  tolerance?: number;
+  /** Refuse the sheet above this many raw segments. Infinity disables the cap. */
+  maxSegments?: number;
+}
+
+const groupDigits = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+/**
  * Collapse duplicate and overlapping collinear runs.
  * CAD exports routinely stroke the same line more than once (layer overprint,
  * hatch boundaries), and a wall drawn as a closed rectangle contributes each
  * edge twice. Deduping here keeps the converted drawing from carrying two or
  * three coincident walls everywhere.
+ *
+ * Implementation note: the pairwise scan this replaces was O(n²) on the main
+ * thread and froze the UI for seconds on a dense commercial sheet. Candidates
+ * are now bucketed in a spatial hash keyed on BOTH endpoints quantized to
+ * `tolerance`, which makes the scan ~O(n).
+ *
+ * The subtle part: two coordinates a hair either side of a cell boundary (say
+ * 0.9999·tolerance and 1.0001·tolerance) are within tolerance of each other but
+ * land in ADJACENT buckets. Probing only the exact bucket would silently stop
+ * deduping those pairs and change the output, so every probe sweeps the full
+ * ±1 neighbourhood in each of the four coordinates. Results are therefore
+ * identical to the pairwise scan, including the reversed-endpoint match.
  */
 export function dedupeSegments(segments: VectorSegment[], tolerance = 0.0008): VectorSegment[] {
-  const out: VectorSegment[] = [];
-  const near = (a: number, b: number) => Math.abs(a - b) <= tolerance;
-  for (const s of segments) {
-    const dup = out.some(o =>
-      (near(o.x1, s.x1) && near(o.y1, s.y1) && near(o.x2, s.x2) && near(o.y2, s.y2)) ||
-      (near(o.x1, s.x2) && near(o.y1, s.y2) && near(o.x2, s.x1) && near(o.y2, s.y1)),
-    );
-    if (!dup) out.push(s);
+  // The legacy signature never caps — its behaviour is exactly the old scan.
+  return dedupeSegmentsWithReport(segments, { tolerance, maxSegments: Infinity }).segments;
+}
+
+/**
+ * `dedupeSegments` plus an honest account of whether the sheet was traced.
+ *
+ * A sheet denser than `maxSegments` is REFUSED, not truncated: `segments` comes
+ * back empty with `capped: true` and a `notice` to show the user. A partial
+ * trace is indistinguishable from a complete one once it is on the canvas, and
+ * this platform's output ends up on permit applications — half a floor plan
+ * that looks whole is worse than an explicit refusal.
+ */
+export function dedupeSegmentsWithReport(
+  segments: VectorSegment[],
+  options: DedupeOptions = {},
+): DedupeReport {
+  const tolerance = options.tolerance ?? 0.0008;
+  const maxSegments = options.maxSegments ?? MAX_TRACEABLE_SEGMENTS;
+  const inputCount = segments.length;
+
+  if (inputCount > maxSegments) {
+    return {
+      segments: [],
+      inputCount,
+      keptCount: 0,
+      capped: true,
+      notice:
+        `This sheet is too dense to trace: it holds ${groupDigits(inputCount)} vector runs, ` +
+        `beyond the ${groupDigits(maxSegments)} this tracer converts. Nothing was traced — ` +
+        `no geometry has been dropped or partially converted. Try a single-floor sheet, or a ` +
+        `plot with the hatching and detail layers turned off.`,
+    };
   }
-  return out;
+
+  const near = (a: number, b: number) => Math.abs(a - b) <= tolerance;
+  // Cell width == tolerance, so two segments sharing a cell are within tolerance
+  // on all four coordinates and are therefore duplicates: a bucket holds at most
+  // one survivor, which is what bounds the per-segment work.
+  const cell = tolerance > 0 && Number.isFinite(tolerance) ? tolerance : 0;
+  const q = (v: number) => (cell > 0 ? Math.floor(v / cell) : v);
+  const OFFSETS = cell > 0 ? [-1, 0, 1] : [0];
+
+  // Two levels: the outer map is keyed by the START endpoint's cell, the inner
+  // by the END endpoint's cell. The outer level is where the ±1 sweep usually
+  // misses outright, so the inner sweep runs only on the rare cells that hold
+  // anything — that is what keeps the constant factor small enough to stay off
+  // the UI thread's critical path.
+  const index = new Map<string, Map<string, VectorSegment[]>>();
+  const out: VectorSegment[] = [];
+
+  // A cell holds at most one survivor (see above), so the inner list is tiny and
+  // this stays O(1) per probe even on a degenerate fan of coincident endpoints.
+  const collides = (a: number, b: number, c: number, d: number, s: VectorSegment) => {
+    for (const da of OFFSETS) {
+      for (const db of OFFSETS) {
+        const inner = index.get(`${a + da}|${b + db}`);
+        if (!inner) continue;
+        for (const dc of OFFSETS) {
+          for (const dd of OFFSETS) {
+            const hits = inner.get(`${c + dc}|${d + dd}`);
+            if (!hits) continue;
+            for (const o of hits) {
+              if (
+                (near(o.x1, s.x1) && near(o.y1, s.y1) && near(o.x2, s.x2) && near(o.y2, s.y2)) ||
+                (near(o.x1, s.x2) && near(o.y1, s.y2) && near(o.x2, s.x1) && near(o.y2, s.y1))
+              ) return true;
+            }
+          }
+        }
+      }
+    }
+    return false;
+  };
+
+  for (const s of segments) {
+    const kx1 = q(s.x1), ky1 = q(s.y1), kx2 = q(s.x2), ky2 = q(s.y2);
+    // Forward: a stored run starting near s's start. Reversed: one starting near
+    // s's end. Together these cover both arms of the pairwise predicate.
+    if (collides(kx1, ky1, kx2, ky2, s) || collides(kx2, ky2, kx1, ky1, s)) continue;
+
+    out.push(s);
+    const outerKey = `${kx1}|${ky1}`;
+    let inner = index.get(outerKey);
+    if (!inner) { inner = new Map(); index.set(outerKey, inner); }
+    const innerKey = `${kx2}|${ky2}`;
+    const bucket = inner.get(innerKey);
+    if (bucket) bucket.push(s);
+    else inner.set(innerKey, [s]);
+  }
+
+  return { segments: out, inputCount, keptCount: out.length, capped: false, notice: null };
 }

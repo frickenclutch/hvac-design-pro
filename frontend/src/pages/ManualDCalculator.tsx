@@ -458,9 +458,11 @@ export default function ManualDCalculator() {
     const cad = useCadStore.getState();
     let updated = 0;
     for (const run of result.runs) {
-      // Duct segments store the BARE CAD room id, while a run carries the
-      // Manual J id (cad-room-<id>). Comparing them directly never matched,
-      // which surfaced as "draw ducts first" even when ducts were drawn.
+      // A run carries the Manual J id (cad-room-<id>); duct segments store the
+      // BARE CAD room id, so translate before comparing. (This translation was
+      // never the reason "draw ducts first" appeared — DuctSegment.roomId was
+      // simply never populated by anything, so no segment could match any id.
+      // It is populated now: see engines/ductRoomAssign.ts.)
       const targetRoomId = cadRoomId(run.roomId) ?? run.roomId;
       const segs = cad.floors.flatMap(f => (f.ductSegments ?? []).filter(d => d.roomId === targetRoomId));
       for (const seg of segs) {

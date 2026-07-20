@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildGeometryTakeoff, sanitizePolygon } from '../blueprintToCad';
+import { buildGeometryTakeoff, sanitizePolygon, impliesRescale } from '../blueprintToCad';
 import type { GeometryRoom, UnderlayRect } from '../blueprintToCad';
 
 // A 600×400 px sheet placed at (100, 200), unrotated — the shape an imported
@@ -49,6 +49,34 @@ describe('sanitizePolygon', () => {
   it('drops an explicit closing vertex', () => {
     const out = sanitizePolygon([{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }, { x: 0.9, y: 0.9 }, { x: 0.1, y: 0.1 }]);
     expect(out).toHaveLength(3);
+  });
+});
+
+// The predicate the review UI reads to decide whether to promise the user that
+// auto-calibrate will do something. It must never report "no-op" for a scale
+// the engine would act on — that is what orphans hand-traced walls.
+describe('impliesRescale', () => {
+  it('reports action for any mismatch the engine acts on, including the old dead band', () => {
+    expect(impliesRescale(40.4, 40)).toBe(true);   // 1% — under the old 2% gate
+    expect(impliesRescale(39.6, 40)).toBe(true);   // 1% the other way
+    expect(impliesRescale(40.001, 40)).toBe(true); // 0.0025%
+    expect(impliesRescale(10, 40)).toBe(true);     // uncalibrated sheet
+  });
+
+  it('reports no-op only when the sheet is already true', () => {
+    expect(impliesRescale(40, 40)).toBe(false);
+    expect(impliesRescale(null, 40)).toBe(false);
+  });
+
+  it('reports no-op for a scale outside the sanity band, matching the engine', () => {
+    // The engine refuses these and leaves the sheet alone, so the label must
+    // not promise a resize that will not happen.
+    expect(impliesRescale(0.1, 40)).toBe(false);    // factor 400
+    expect(impliesRescale(1_000_000, 40)).toBe(false); // factor 4e-5
+    expect(impliesRescale(0, 40)).toBe(false);
+    expect(impliesRescale(-5, 40)).toBe(false);
+    expect(impliesRescale(NaN, 40)).toBe(false);
+    expect(impliesRescale(40.4, 0)).toBe(false);
   });
 });
 
@@ -154,6 +182,33 @@ describe('buildGeometryTakeoff — auto-scale', () => {
     const res = buildGeometryTakeoff([r], [SHEET], PX_PER_FT, { applyScale: true });
     expect(res.underlayPatches).toHaveLength(0);
     expect(res.warnings.some(w => w.includes('implausible scale'))).toBe(true);
+  });
+
+  it('acts on a sub-2% mismatch — the band the review UI used to call a no-op', () => {
+    // Regression: the checkbox label gated on |implied - pxPerFt|/pxPerFt > 2%
+    // while the engine acted on anything past 1e-6. In between, the user was
+    // told the action was a no-op and the engine still rescaled AND re-tiled
+    // the sheets, discarding a hand-made multi-sheet arrangement.
+    const IMPLIED = 40.4; // 1% off the 40 px/ft project scale
+    const r = room({ lengthFt: 240 / IMPLIED, widthFt: 200 / IMPLIED });
+    const res = buildGeometryTakeoff([r], [SHEET], PX_PER_FT, { applyScale: true });
+
+    expect(res.impliedPxPerFt).toBeCloseTo(IMPLIED, 9);
+    // The engine acts...
+    expect(res.underlayPatches).toHaveLength(1);
+    expect(res.underlayPatches[0].width).toBeCloseTo(600 * (PX_PER_FT / IMPLIED), 9);
+    // ...so the shared predicate the UI reads MUST agree that it acts.
+    expect(impliesRescale(res.impliedPxPerFt, PX_PER_FT)).toBe(true);
+    // The 2% rule that used to guard the label would have said otherwise.
+    expect(Math.abs(IMPLIED - PX_PER_FT) / PX_PER_FT).toBeLessThan(0.02);
+  });
+
+  it('leaves an already-true sheet untouched, and says so', () => {
+    // 240×200 px against 6×5 ft is exactly 40 px/ft — factor 1, no patch.
+    const res = buildGeometryTakeoff([room({})], [SHEET], PX_PER_FT, { applyScale: true });
+    expect(res.impliedPxPerFt).toBeCloseTo(PX_PER_FT, 9);
+    expect(res.underlayPatches).toHaveLength(0);
+    expect(impliesRescale(res.impliedPxPerFt, PX_PER_FT)).toBe(false);
   });
 
   it('re-tiles multiple sheets left-to-right after scaling so they cannot overlap', () => {

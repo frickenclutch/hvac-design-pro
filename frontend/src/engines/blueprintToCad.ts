@@ -78,6 +78,27 @@ const DIM_MISMATCH_FRAC = 0.15; // drawn-vs-printed disagreement worth flagging
 const MAX_POLYGON_POINTS = 32;
 const SCALE_FACTOR_MIN = 0.05; // sanity band — an implied scale outside this is a misread, not a calibration
 const SCALE_FACTOR_MAX = 100;
+/**
+ * Relative tolerance below which a scale factor counts as already true. This is
+ * the ONLY threshold that decides whether auto-calibrate touches the sheets, and
+ * it is exported so the review UI cannot describe the action with a looser rule
+ * than the engine applies. A UI gate wider than this would label a real rescale
+ * a "no-op" and the user would lose their sheet arrangement without warning.
+ */
+export const SCALE_TRUE_EPSILON = 1e-6;
+
+/**
+ * Would auto-calibrate actually move anything at this implied scale? Pure
+ * predicate over the same factor the engine computes, including the sanity
+ * band — outside it the engine leaves the sheet alone, so this reports false.
+ */
+export function impliesRescale(impliedPxPerFt: number | null, pxPerFt: number): boolean {
+  if (impliedPxPerFt === null || !Number.isFinite(impliedPxPerFt) || impliedPxPerFt <= 0) return false;
+  if (!Number.isFinite(pxPerFt) || pxPerFt <= 0) return false;
+  const f = pxPerFt / impliedPxPerFt;
+  if (f < SCALE_FACTOR_MIN || f > SCALE_FACTOR_MAX) return false;
+  return Math.abs(f - 1) > SCALE_TRUE_EPSILON;
+}
 
 /** Clamp/validate a model-proposed outline. Returns null when unusable. */
 export function sanitizePolygon(raw: Array<{ x: number; y: number }> | undefined): NormalizedPoint[] | null {
@@ -253,7 +274,7 @@ export function buildGeometryTakeoff(
     factors.set(u.id, factor);
   }
 
-  const anyScaled = [...factors.values()].some(f => Math.abs(f - 1) > 1e-6);
+  const anyScaled = [...factors.values()].some(f => Math.abs(f - 1) > SCALE_TRUE_EPSILON);
   const effectiveRects: UnderlayRect[] = [];
   const underlayPatches: UnderlayPatch[] = [];
   if (anyScaled) {

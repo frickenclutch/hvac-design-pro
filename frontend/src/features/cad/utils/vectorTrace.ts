@@ -1,4 +1,4 @@
-import { extractVectorSegments, dedupeSegments } from '../../../engines/pdfVector';
+import { extractVectorSegments, dedupeSegmentsWithReport } from '../../../engines/pdfVector';
 import type { VectorSegment, OpsCodes } from '../../../engines/pdfVector';
 import { getPdfSource } from './underlayImport';
 
@@ -12,6 +12,12 @@ export interface VectorTraceResult {
   curveCount: number;
   pageWidthPt: number;
   pageHeightPt: number;
+  /** True when the sheet was too dense to trace and was REFUSED outright.
+   *  `segments` is empty — never a partial trace, because half a floor plan
+   *  looks identical to a whole one once it is on the canvas. */
+  capped: boolean;
+  /** User-facing explanation when `capped`. The caller must show it. */
+  notice: string | null;
 }
 
 export class NoVectorSourceError extends Error {
@@ -42,13 +48,15 @@ export async function traceUnderlayVectors(underlayId: string): Promise<VectorTr
       pdfjs.OPS as unknown as OpsCodes,
       { width: viewport.width, height: viewport.height, transform: viewport.transform },
     );
-    const deduped = dedupeSegments(sheet.segments);
+    const report = dedupeSegmentsWithReport(sheet.segments);
     return {
-      segments: deduped,
+      segments: report.segments,
       rawCount: sheet.segments.length,
       curveCount: sheet.curveCount,
       pageWidthPt: sheet.pageWidthPt,
       pageHeightPt: sheet.pageHeightPt,
+      capped: report.capped,
+      notice: report.notice,
     };
   } finally {
     void loadingTask.destroy();

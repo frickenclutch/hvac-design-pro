@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import * as fabric from 'fabric';
 import { scopedKey } from '../../../utils/storage';
+import { applyDuctRoomAssignments } from '../../../engines/ductRoomAssign';
 
 // ── Tool Types ──────────────────────────────────────────────────────────────────
 export type ToolType =
@@ -107,7 +108,13 @@ export interface DuctSegment {
   frictionRateInwg100?: number;
   systemId?: string;
   parentSegmentId?: string;
+  /** Room this run serves. Populated by `reassignDuctRooms()` (geometry) or by
+   *  the properties panel (by hand). Manual D measures drawn runs per room, so
+   *  a segment with no roomId is not counted anywhere. */
   roomId?: string;
+  /** True when the designer picked the room by hand. Auto-assignment skips
+   *  these — their judgement outranks the geometry heuristic. */
+  roomAssignedManually?: boolean;
   fabricId: string;
 }
 
@@ -172,6 +179,11 @@ export interface DetectedRoom {
   perimeterFt: number;
   centroid: { x: number; y: number };
   color: string;
+  /** Ordered outline in canvas px, straight from the wall-cycle walk that
+   *  produced the area and centroid. OPTIONAL: drawings saved before this was
+   *  persisted have rooms without it, and every consumer must degrade rather
+   *  than assume it (duct assignment falls back to centroid proximity). */
+  polygon?: { x: number; y: number }[];
 }
 
 // ── Annotations ─────────────────────────────────────────────────────────────────
@@ -519,6 +531,10 @@ interface CadState {
   addDuctSegment: (segment: DuctSegment) => void;
   updateDuctSegment: (id: string, patch: Partial<DuctSegment>) => void;
   removeDuctSegment: (id: string) => void;
+  /** Re-run geometric duct→room assignment over the active floor. Safe to call
+   *  repeatedly; leaves hand-picked assignments alone and no-ops when nothing
+   *  resolves differently. */
+  reassignDuctRooms: () => void;
 
   // ── Duct Fittings ─────────────────────────────────────────────────────────
   addDuctFitting: (fitting: DuctFitting) => void;
@@ -989,6 +1005,29 @@ export const useCadStore = create<CadState>((set, get) => {
         })),
         isDirty: true,
       })),
+
+    // Geometry decides which room each drawn run serves. Without this the
+    // segments carry no roomId and cadToManualD measures nothing, which is what
+    // told users to "draw ducts first" after they had just drawn them.
+    reassignDuctRooms: () =>
+      set((s) => {
+        const floor = s.floors.find((f) => f.id === s.activeFloorId);
+        if (!floor) return {};
+        const { segments, changed } = applyDuctRoomAssignments(
+          floor.ductSegments ?? [],
+          floor.rooms ?? [],
+          { pxPerFt: s.projectScale.pxPerFt },
+        );
+        // Bail without touching `floors` when nothing moved — the auto-save
+        // subscription keys off floors identity, so a no-op stays a no-op.
+        if (!changed) return {};
+        return {
+          floors: s.floors.map((f) =>
+            f.id === s.activeFloorId ? { ...f, ductSegments: segments } : f,
+          ),
+          isDirty: true,
+        };
+      }),
 
     // ── Duct Fittings ────────────────────────────────────────────────────────
     addDuctFitting: (fitting) =>
