@@ -53,6 +53,8 @@ export interface UserPreferences {
   /** Titles of Settings sections the user has collapsed (persisted so the
    *  workbench stays how they left it). */
   settingsCollapsed: string[];
+  /** Last-open Settings category id — re-entry lands where you left off. */
+  settingsLastCategory: string;
   sidebarCollapsed: boolean;
   gridSnap: boolean;
   gridSpacing: number;       // px per foot
@@ -120,6 +122,7 @@ const defaults: UserPreferences = {
   accent: 'emerald',
   metalFinish: 'steel',
   settingsCollapsed: [],
+  settingsLastCategory: '',
   sidebarCollapsed: false,
   gridSnap: true,
   gridSpacing: 40,

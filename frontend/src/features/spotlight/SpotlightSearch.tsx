@@ -148,6 +148,7 @@ function searchAll(
   query: string,
   navigate: (path: string) => void,
   isPlatformAdmin: boolean,
+  role?: string,
 ): SearchResult[] {
   if (!query.trim()) return [];
 
@@ -331,24 +332,30 @@ function searchAll(
     }
   } catch { /* */ }
 
-  // 9. Settings sections
-  const settingsSections = [
-    { q: 'theme dark light midnight appearance', title: 'Appearance Settings', sub: 'Theme, density, animations' },
-    { q: 'units imperial metric measurement', title: 'Units & Defaults', sub: 'Unit system and default values' },
-    { q: 'pdf print watermark stamp seal', title: 'PDF & Print Settings', sub: 'Page size, sections, watermark, stamps' },
-    { q: 'firm stamp pe seal notary', title: 'Blueprint Stamps', sub: 'Upload PE seal and notary stamp' },
-    { q: 'grid snap autosave cad workspace', title: 'CAD Workspace Settings', sub: 'Grid, snap, auto-save' },
-    { q: 'accessibility a11y', title: 'Accessibility', sub: 'Screen reader and visual accessibility' },
+  // 9. Settings categories — registry-aligned + deep-linked (/settings#<id>).
+  // Mirrors the category rail in SettingsPage.tsx; gated the same way.
+  const settingsCategories = [
+    { id: 'account', title: 'Account', kw: 'account profile name avatar photo phone email' },
+    { id: 'security', title: 'Security', kw: '2fa totp mfa authenticator otp two factor access policy permissions audit' },
+    { id: 'appearance', title: 'Appearance', kw: 'theme dark light midnight density metal finish animation tooltip color' },
+    { id: 'workspace', title: 'Workspace', kw: 'units imperial metric ceiling r-value u-value grid snap spacing autosave cad defaults' },
+    { id: 'accessibility', title: 'Accessibility', kw: 'motion contrast focus text size font neural prosthetic haptic a11y' },
+    { id: 'reports', title: 'Reports & Output', kw: 'pdf print export page size orientation watermark stamp seal pe notary attestation signature' },
+    { id: 'engine', title: 'Calculation Engine', kw: 'engine manual j cert shadow legacy calculation', gate: 'l0' as const },
+    { id: 'organization', title: 'Organization', kw: 'organisation organization company tenant backup synology nas archive authority permit jurisdiction', gate: 'admin' as const },
+    { id: 'system', title: 'System', kw: 'version storage clear data reset about system' },
   ];
-  settingsSections.forEach(s => {
-    if (fuzzyMatch(q, `${s.q} ${s.title} settings preferences config`)) {
+  settingsCategories.forEach(s => {
+    if (s.gate === 'admin' && role !== 'admin') return;
+    if (s.gate === 'l0' && !isPlatformAdmin) return;
+    if (fuzzyMatch(q, `${s.title} ${s.kw} settings preferences config`)) {
       results.push({
-        id: `settings-${s.title}`,
+        id: `settings-${s.id}`,
         category: 'page',
-        title: s.title,
-        subtitle: s.sub,
+        title: `Settings: ${s.title}`,
+        subtitle: 'Jump to this settings category',
         icon: <Settings className="w-4 h-4" />,
-        action: () => navigate('/settings'),
+        action: () => navigate(`/settings#${s.id}`),
       });
     }
   });
@@ -383,10 +390,11 @@ export default function SpotlightSearch() {
   const listRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const isPlatformAdmin = useAuthStore((s) => !!s.user?.isPlatformAdmin);
+  const role = useAuthStore((s) => s.user?.role);
 
   const results = useMemo(
-    () => searchAll(query, navigate, isPlatformAdmin),
-    [query, navigate, isPlatformAdmin],
+    () => searchAll(query, navigate, isPlatformAdmin, role),
+    [query, navigate, isPlatformAdmin, role],
   );
 
   // Keyboard shortcut: Cmd+K / Ctrl+K

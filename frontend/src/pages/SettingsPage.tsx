@@ -1,6 +1,7 @@
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
 import { usePreferencesStore, type ThemeMode, type UIDensity, type UnitSystem, type EngineVersion, type MetalFinish } from '../stores/usePreferencesStore';
-import { Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle, Pencil, HardDrive, ChevronDown } from 'lucide-react';
+import { Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle, Pencil, HardDrive, ChevronDown, Search, X } from 'lucide-react';
 import { api } from '../lib/api';
 import A11yPanel from '../components/accessibility/A11yPanel';
 import TotpQr from '../components/TotpQr';
@@ -13,12 +14,64 @@ import { toast } from '../stores/useToastStore';
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
 export default function SettingsPage() {
-  const prefs = usePreferencesStore();
   const { user, organisation, token } = useAuthStore();
+  const settingsLastCategory = usePreferencesStore((s) => s.settingsLastCategory);
+  const updatePrefs = usePreferencesStore((s) => s.update);
+
+  // Registry → only categories with at least one section visible to this viewer.
+  const categories = useMemo(
+    () => buildSettingsCategories({ user, organisation, token })
+      .map((c) => ({ ...c, sections: c.sections.filter((s) => s.visible) }))
+      .filter((c) => c.sections.length > 0),
+    [user, organisation, token],
+  );
+
+  // Active category: URL hash → last-open pref → first visible.
+  const [active, setActive] = useState<string>(() => {
+    const hash = typeof window !== 'undefined' ? window.location.hash.replace('#', '') : '';
+    return hash || settingsLastCategory || '';
+  });
+  const [query, setQuery] = useState('');
+  const activeCat = categories.find((c) => c.id === active) ?? categories[0];
+  useEffect(() => {
+    if (activeCat && activeCat.id !== active) setActive(activeCat.id);
+  }, [activeCat, active]);
+
+  // Follow deep-links (Cmd+K jumps, back/forward). useLocation catches
+  // react-router navigations (pushState) that a window 'hashchange' listener
+  // would miss; fresh loads read the hash in the initial state above.
+  const location = useLocation();
+  useEffect(() => {
+    const h = location.hash.replace('#', '');
+    if (h) { setActive(h); setQuery(''); }
+  }, [location.hash]);
+
+  const selectCategory = (id: string) => {
+    setActive(id);
+    updatePrefs({ settingsLastCategory: id });
+    if (typeof window !== 'undefined') window.history.replaceState(null, '', `#${id}`);
+  };
+
+  // ── Live search over the registry (Phase 2) ──────────────────────────────
+  const q = query.trim().toLowerCase();
+  const searching = q.length > 0;
+  const searchResults = useMemo(() => {
+    if (!q) return [] as { category: SettingsCategoryEntry; section: SettingsSectionEntry }[];
+    const out: { category: SettingsCategoryEntry; section: SettingsSectionEntry }[] = [];
+    for (const c of categories) {
+      for (const s of c.sections) {
+        if (`${s.title} ${s.keywords.join(' ')} ${c.title}`.toLowerCase().includes(q)) {
+          out.push({ category: c, section: s });
+        }
+      }
+    }
+    return out;
+  }, [q, categories]);
+  const pickCategory = (id: string) => { setQuery(''); selectCategory(id); };
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-3xl mx-auto px-4 py-6 pt-8 pb-24 md:p-8 md:pt-12 md:pb-24">
+      <div className="max-w-6xl mx-auto px-4 py-6 pt-8 pb-24 md:p-8 md:pt-12 md:pb-24">
         {/* Portal-reflected hero — stepping into Settings is stepping through
             the Creation Portal: the same black-hole emblem, brushed-steel
             plate, and engraved ink. */}
@@ -39,336 +92,398 @@ export default function SettingsPage() {
           </div>
         </header>
 
-        <div className="space-y-8">
-          {/* Organisation Profile */}
-          <OrgProfileSection token={token} orgId={organisation?.id} />
-
-          {/* Authority Profile — admin-gated, sits next to Org Profile.
-              Shows whenever the user is an admin so they can configure
-              their tenant as a permit authority. */}
-          {user?.role === 'admin' && <AuthorityProfileSection />}
-
-          {/* Access Policy — who in the tenant can see audit/version
-              surfaces. Admin + L0 only. */}
-          {(user?.role === 'admin' || user?.isPlatformAdmin) && <AccessPolicySection />}
-
-          {/* Legacy Archive & Backup (Synology NAS) — tenant-admin config for
-              routing records to the org's own NAS. Higher-tier capability. */}
-          {user?.role === 'admin' && <SynologyBackupSection orgId={organisation?.id} />}
-
-          {/* User Profile */}
-          <UserProfileSection token={token} user={user} />
-
-          {/* Multi-factor authentication — the session user manages their OWN
-              second factor. Admins/L0 see a "required" banner. */}
-          <MfaSection requiredForRole={user?.role === 'admin' || !!user?.isPlatformAdmin} />
-
-          {/* Appearance */}
-          <Section icon={<Palette className="w-5 h-5 text-violet-400" />} title="Appearance">
-            <OptionGroup label="Theme">
-              <ToggleRow
-                options={[
-                  { value: 'midnight', label: 'Midnight' },
-                  { value: 'dark', label: 'Dark' },
-                  { value: 'light', label: 'Light' },
-                ]}
-                value={prefs.theme}
-                onChange={(v) => prefs.update({ theme: v as ThemeMode })}
-              />
-            </OptionGroup>
-
-            <OptionGroup label="UI Density">
-              <ToggleRow
-                options={[
-                  { value: 'compact', label: 'Compact' },
-                  { value: 'comfortable', label: 'Comfortable' },
-                  { value: 'spacious', label: 'Spacious' },
-                ]}
-                value={prefs.density}
-                onChange={(v) => prefs.update({ density: v as UIDensity })}
-              />
-            </OptionGroup>
-
-            <SwitchOption
-              label="Animations"
-              description="Smooth transitions and motion effects"
-              checked={prefs.animationsEnabled}
-              onChange={(v) => prefs.update({ animationsEnabled: v })}
-            />
-
-            <SwitchOption
-              label="Tooltips"
-              description="Show helpful tooltips on hover"
-              checked={prefs.showTooltips}
-              onChange={(v) => prefs.update({ showTooltips: v })}
-            />
-
-            <div className="pt-4 border-t border-slate-800/60">
-              <MetalFinishPicker />
-            </div>
-          </Section>
-
-          {/* Units & Defaults */}
-          <Section icon={<Ruler className="w-5 h-5 text-sky-400" />} title="Units & Defaults">
-            <OptionGroup label="Unit System">
-              <ToggleRow
-                options={[
-                  { value: 'imperial', label: 'Imperial (ft, °F)' },
-                  { value: 'metric', label: 'Metric (m, °C)' },
-                ]}
-                value={prefs.units}
-                onChange={(v) => prefs.update({ units: v as UnitSystem })}
-              />
-            </OptionGroup>
-
-            <NumberOption
-              label="Default Ceiling Height"
-              suffix={prefs.units === 'imperial' ? 'ft' : 'm'}
-              value={prefs.defaultCeilingHeight}
-              onChange={(v) => prefs.update({ defaultCeilingHeight: v })}
-            />
-
-            <NumberOption
-              label="Default Wall R-Value"
-              value={prefs.defaultWallRValue}
-              onChange={(v) => prefs.update({ defaultWallRValue: v })}
-            />
-
-            <NumberOption
-              label="Default Window U-Value"
-              value={prefs.defaultWindowUValue}
-              onChange={(v) => prefs.update({ defaultWindowUValue: v })}
-              step={0.1}
-            />
-          </Section>
-
-          {/* CAD Workspace */}
-          <Section icon={<Grid3X3 className="w-5 h-5 text-emerald-400" />} title="CAD Workspace">
-            <SwitchOption
-              label="Grid Snap"
-              description="Snap drawing endpoints to the grid"
-              checked={prefs.gridSnap}
-              onChange={(v) => prefs.update({ gridSnap: v })}
-            />
-
-            <NumberOption
-              label="Grid Spacing"
-              suffix="px/ft"
-              value={prefs.gridSpacing}
-              onChange={(v) => prefs.update({ gridSpacing: v })}
-            />
-
-            <SwitchOption
-              label="Autosave"
-              description="Automatically save your work periodically"
-              checked={prefs.autosave}
-              onChange={(v) => prefs.update({ autosave: v })}
-            />
-          </Section>
-
-          {/* Accessibility */}
-          <Section icon={<Accessibility className="w-5 h-5 text-cyan-400" />} title="Accessibility">
-            <A11yPanel />
-          </Section>
-
-          {/* PDF & Print Settings */}
-          <Section icon={<FileText className="w-5 h-5 text-orange-400" />} title="PDF & Print Settings">
-            <p className="text-xs text-slate-500 mb-4">Choose which sections to include when exporting PDF reports and blueprints.</p>
-
-            <SwitchOption label="Floor Plan Drawing" description="Canvas plot on cover page" checked={prefs.pdfIncludeDrawing} onChange={(v) => prefs.update({ pdfIncludeDrawing: v })} />
-            <SwitchOption label="Room & Wall Schedules" description="Room areas, wall lengths, R-values" checked={prefs.pdfIncludeRoomSchedule} onChange={(v) => prefs.update({ pdfIncludeRoomSchedule: v })} />
-            <SwitchOption label="Opening & HVAC Schedules" description="Windows, doors, equipment tables" checked={prefs.pdfIncludeOpeningSchedule} onChange={(v) => prefs.update({ pdfIncludeOpeningSchedule: v })} />
-            <SwitchOption label="Manual J Load Summary" description="Heating/cooling calculations (if available)" checked={prefs.pdfIncludeLoadSummary} onChange={(v) => prefs.update({ pdfIncludeLoadSummary: v })} />
-            <SwitchOption label="Notes & Codes Page" description="Standard disclaimers and code references" checked={prefs.pdfIncludeNotes} onChange={(v) => prefs.update({ pdfIncludeNotes: v })} />
-
-            <OptionGroup label="Page Size">
-              <ToggleRow
-                options={[
-                  { value: 'letter', label: 'Letter' },
-                  { value: 'a4', label: 'A4' },
-                  { value: 'tabloid', label: 'Tabloid' },
-                ]}
-                value={prefs.pdfPageSize}
-                onChange={(v) => prefs.update({ pdfPageSize: v as 'letter' | 'a4' | 'tabloid' })}
-              />
-            </OptionGroup>
-
-            <OptionGroup label="Orientation">
-              <ToggleRow
-                options={[
-                  { value: 'landscape', label: 'Landscape' },
-                  { value: 'portrait', label: 'Portrait' },
-                ]}
-                value={prefs.pdfOrientation}
-                onChange={(v) => prefs.update({ pdfOrientation: v as 'landscape' | 'portrait' })}
-              />
-            </OptionGroup>
-
-            <OptionGroup label="Watermark Text">
+        <div className="flex flex-col md:flex-row gap-6">
+          {/* Search + category rail — registry-driven; only categories with a
+              section visible to this viewer appear. Horizontal-scroll rail on
+              mobile, sticky vertical list on desktop. */}
+          <nav className="md:w-56 md:shrink-0 md:sticky md:top-4 self-start w-full" aria-label="Settings categories">
+            <div className="relative mb-3">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
               <input
-                type="text"
-                value={prefs.pdfWatermarkText}
-                onChange={(e) => prefs.update({ pdfWatermarkText: e.target.value })}
-                placeholder="Custom watermark text"
-                className="w-full bg-slate-800/60 border border-slate-700/50 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search settings…"
+                aria-label="Search settings"
+                className="w-full bg-slate-900/70 border border-slate-700/50 rounded-xl pl-9 pr-8 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 min-h-[44px]"
               />
-            </OptionGroup>
-          </Section>
-
-          {/* Blueprint Stamps */}
-          <Section icon={<Stamp className="w-5 h-5 text-pink-400" />} title="Blueprint Stamps">
-            <p className="text-xs text-slate-500 mb-4">Upload your firm's PE seal or notary stamp to automatically include on exported blueprints.</p>
-
-            <StampUpload
-              label="Firm / PE Seal"
-              dataUrl={prefs.firmStampDataUrl}
-              onUpload={(url) => prefs.update({ firmStampDataUrl: url })}
-              onClear={() => prefs.update({ firmStampDataUrl: '' })}
-            />
-
-            {prefs.firmStampDataUrl && (
-              <OptionGroup label="Stamp Position">
-                <ToggleRow
-                  options={[
-                    { value: 'top-left', label: 'Top Left' },
-                    { value: 'top-right', label: 'Top Right' },
-                    { value: 'bottom-left', label: 'Bottom Left' },
-                    { value: 'bottom-right', label: 'Bottom Right' },
-                  ]}
-                  value={prefs.firmStampPosition}
-                  onChange={(v) => prefs.update({ firmStampPosition: v as 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' })}
-                />
-              </OptionGroup>
-            )}
-
-            <div className="my-3 border-t border-slate-800/40" />
-
-            <StampUpload
-              label="Notary Stamp"
-              dataUrl={prefs.notaryStampDataUrl}
-              onUpload={(url) => prefs.update({ notaryStampDataUrl: url })}
-              onClear={() => prefs.update({ notaryStampDataUrl: '' })}
-            />
-          </Section>
-
-          {/* Professional Engineer (PE) Stamp & Attestation */}
-          <Section icon={<BadgeCheck className="w-5 h-5 text-amber-400" />} title="PE Stamp & Attestation">
-            <p className="text-xs text-slate-500 mb-4">
-              Configure your Professional Engineer credentials and signature for the permit-ready attestation page on
-              combined reports. The attestation page appears <span className="font-semibold text-slate-400">only</span> when
-              both your name and a signature image are set — otherwise combined reports export exactly as before. These outputs
-              remain a calculation aid requiring your independent professional review; you sign as the responsible engineer of record.
-            </p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <ProfileInput
-                label="Engineer Name"
-                value={prefs.peName}
-                onChange={(v) => prefs.update({ peName: v })}
-                placeholder="John A. Smith, PE"
-              />
-              <ProfileInput
-                label="PE License Number"
-                value={prefs.peLicenseNumber}
-                onChange={(v) => prefs.update({ peLicenseNumber: v })}
-                placeholder="M-12345"
-              />
-              <ProfileInput
-                label="Jurisdiction"
-                value={prefs.peJurisdiction}
-                onChange={(v) => prefs.update({ peJurisdiction: v })}
-                placeholder="Maryland"
-              />
-            </div>
-
-            <div className="my-3 border-t border-slate-800/40" />
-
-            <StampUpload
-              label="PE Signature Image"
-              dataUrl={prefs.peSignatureDataUrl}
-              onUpload={(url) => prefs.update({ peSignatureDataUrl: url })}
-              onClear={() => prefs.update({ peSignatureDataUrl: '' })}
-            />
-
-            {prefs.peName && prefs.peLicenseNumber && prefs.peSignatureDataUrl ? (
-              <div className="flex items-start gap-2 px-3 py-2 mt-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300">
-                <BadgeCheck className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                <span>Attestation page is active. Combined reports will include a signed PE attestation with a SHA-256 content hash for tamper-evidence.</span>
-              </div>
-            ) : (
-              <div className="flex items-start gap-2 px-3 py-2 mt-3 rounded-lg bg-slate-800/40 border border-slate-700/40 text-xs text-slate-400">
-                <BadgeCheck className="w-4 h-4 text-slate-500 flex-shrink-0 mt-0.5" />
-                <span>Set an engineer name, PE license number, and a signature image to enable the attestation page. Until then, combined reports stay unchanged.</span>
-              </div>
-            )}
-          </Section>
-
-          {/* Calculation Engine — gated to platform admins until ACCA cert review approves and Phase 2 cutover ships */}
-          {user?.isPlatformAdmin && (
-            <Section icon={<BadgeCheck className="w-5 h-5 text-amber-400" />} title="Calculation Engine (Beta)">
-              <p className="text-xs text-slate-500 mb-4">
-                Cert-grade Manual J 8th Ed v2.50 engine — currently shadow-running alongside the legacy engine in production. Gated to platform admins until ACCA cert review approves. See <a href="/guide" className="text-amber-400 hover:underline">User Guide → Cert-Grade Manual J Engine</a> for the full rollout plan.
-              </p>
-
-              <OptionGroup label="Active Engine">
-                <ToggleRow
-                  options={[
-                    { value: 'legacy', label: 'Legacy (per-room)' },
-                    { value: 'manualJ8', label: 'Cert-grade (whole-house)' },
-                  ]}
-                  value={prefs.engineVersion}
-                  onChange={(v) => prefs.update({ engineVersion: v as EngineVersion })}
-                />
-              </OptionGroup>
-
-              <SwitchOption
-                label="Shadow-run cert engine on every calc"
-                description="Runs the cert-grade engine alongside legacy and logs [engine drift] to console. Off by default for non-admins; on for telemetry collection."
-                checked={prefs.shadowRunManualJ8}
-                onChange={(v) => prefs.update({ shadowRunManualJ8: v })}
-              />
-
-              {prefs.engineVersion === 'manualJ8' && (
-                <div className="flex items-start gap-2 px-3 py-2 mt-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300">
-                  <span className="font-bold uppercase tracking-wider text-[10px] flex-shrink-0">Heads up</span>
-                  <span>Cert-grade engine selected. Display flips to cert-grade results on the next calc. Phase 2 inverse-adapter for per-room display is not yet shipped — room cards may show approximated loads. Switch back to legacy if results look off.</span>
-                </div>
+              {query && (
+                <button onClick={() => setQuery('')} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-slate-300">
+                  <X className="w-4 h-4" />
+                </button>
               )}
-            </Section>
-          )}
-
-          {/* System */}
-          <Section icon={<Monitor className="w-5 h-5 text-amber-400" />} title="System">
-            <div className="flex items-center justify-between py-3">
-              <div>
-                <p className="text-sm font-semibold text-white">App Version</p>
-                <p className="text-xs text-slate-500">HVAC DesignPro PWA</p>
-              </div>
-              <span className="text-xs font-mono text-slate-500 bg-slate-800 px-3 py-1 rounded-lg">v1.0.0</span>
             </div>
+            <SettingsRail categories={categories} active={searching ? '' : (activeCat?.id ?? '')} onSelect={pickCategory} />
+          </nav>
 
-            <div className="flex items-center justify-between py-3">
-              <div>
-                <p className="text-sm font-semibold text-white">Storage Used</p>
-                <p className="text-xs text-slate-500">Projects, preferences, and cached assets</p>
-              </div>
-              <button
-                onClick={() => { if (confirm('Clear all local data?')) { localStorage.clear(); location.reload(); } }}
-                className="text-xs font-bold text-red-400 hover:text-red-300 transition-colors"
-              >
-                Clear Data
-              </button>
-            </div>
-
-            <button
-              onClick={prefs.reset}
-              className="mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-slate-800/50 border border-slate-700/30 text-slate-400 hover:text-white hover:border-slate-600 transition-all text-sm font-semibold"
-            >
-              <RotateCcw className="w-4 h-4" /> Reset All Preferences
-            </button>
-          </Section>
+          {/* Detail pane — search results across all categories, or the active
+              category's sections. Each keeps its collapsible card; #id anchors
+              make sections deep-linkable. */}
+          <div className="flex-1 min-w-0 space-y-6">
+            {searching ? (
+              searchResults.length === 0 ? (
+                <p className="text-sm text-slate-500 py-10 text-center">No settings match “{query}”.</p>
+              ) : (
+                searchResults.map(({ category, section }) => (
+                  <div key={section.id} id={section.id} className="scroll-mt-24">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1.5 ml-1">{category.title}</p>
+                    {section.node}
+                  </div>
+                ))
+              )
+            ) : (
+              activeCat?.sections.map((s) => (
+                <div key={s.id} id={s.id} className="scroll-mt-24">{s.node}</div>
+              ))
+            )}
+          </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// SETTINGS REGISTRY — single source of truth for structure / nav / (later) search
+// Each preference-only section is extracted into its own component (reads prefs
+// itself) so the registry can render it; the standalone sections (Org, MFA, …)
+// are referenced directly. See docs/SETTINGS_REORG_SPEC_2026-07-21.md.
+// ══════════════════════════════════════════════════════════════════════════
+
+function AppearanceSection() {
+  const prefs = usePreferencesStore();
+  return (
+    <Section icon={<Palette className="w-5 h-5 text-violet-400" />} title="Appearance">
+      <OptionGroup label="Theme">
+        <ToggleRow
+          options={[
+            { value: 'midnight', label: 'Midnight' },
+            { value: 'dark', label: 'Dark' },
+            { value: 'light', label: 'Light' },
+          ]}
+          value={prefs.theme}
+          onChange={(v) => prefs.update({ theme: v as ThemeMode })}
+        />
+      </OptionGroup>
+      <OptionGroup label="UI Density">
+        <ToggleRow
+          options={[
+            { value: 'compact', label: 'Compact' },
+            { value: 'comfortable', label: 'Comfortable' },
+            { value: 'spacious', label: 'Spacious' },
+          ]}
+          value={prefs.density}
+          onChange={(v) => prefs.update({ density: v as UIDensity })}
+        />
+      </OptionGroup>
+      <SwitchOption label="Animations" description="Smooth transitions and motion effects" checked={prefs.animationsEnabled} onChange={(v) => prefs.update({ animationsEnabled: v })} />
+      <SwitchOption label="Tooltips" description="Show helpful tooltips on hover" checked={prefs.showTooltips} onChange={(v) => prefs.update({ showTooltips: v })} />
+      <div className="pt-4 border-t border-slate-800/60">
+        <MetalFinishPicker />
+      </div>
+    </Section>
+  );
+}
+
+function UnitsSection() {
+  const prefs = usePreferencesStore();
+  return (
+    <Section icon={<Ruler className="w-5 h-5 text-sky-400" />} title="Units & Defaults">
+      <OptionGroup label="Unit System">
+        <ToggleRow
+          options={[
+            { value: 'imperial', label: 'Imperial (ft, °F)' },
+            { value: 'metric', label: 'Metric (m, °C)' },
+          ]}
+          value={prefs.units}
+          onChange={(v) => prefs.update({ units: v as UnitSystem })}
+        />
+      </OptionGroup>
+      <NumberOption label="Default Ceiling Height" suffix={prefs.units === 'imperial' ? 'ft' : 'm'} value={prefs.defaultCeilingHeight} onChange={(v) => prefs.update({ defaultCeilingHeight: v })} />
+      <NumberOption label="Default Wall R-Value" value={prefs.defaultWallRValue} onChange={(v) => prefs.update({ defaultWallRValue: v })} />
+      <NumberOption label="Default Window U-Value" value={prefs.defaultWindowUValue} onChange={(v) => prefs.update({ defaultWindowUValue: v })} step={0.1} />
+    </Section>
+  );
+}
+
+function CadWorkspaceSection() {
+  const prefs = usePreferencesStore();
+  return (
+    <Section icon={<Grid3X3 className="w-5 h-5 text-emerald-400" />} title="CAD Workspace">
+      <SwitchOption label="Grid Snap" description="Snap drawing endpoints to the grid" checked={prefs.gridSnap} onChange={(v) => prefs.update({ gridSnap: v })} />
+      <NumberOption label="Grid Spacing" suffix="px/ft" value={prefs.gridSpacing} onChange={(v) => prefs.update({ gridSpacing: v })} />
+      <SwitchOption label="Autosave" description="Automatically save your work periodically" checked={prefs.autosave} onChange={(v) => prefs.update({ autosave: v })} />
+    </Section>
+  );
+}
+
+function AccessibilitySection() {
+  return (
+    <Section icon={<Accessibility className="w-5 h-5 text-cyan-400" />} title="Accessibility">
+      <A11yPanel />
+    </Section>
+  );
+}
+
+function PdfSection() {
+  const prefs = usePreferencesStore();
+  return (
+    <Section icon={<FileText className="w-5 h-5 text-orange-400" />} title="PDF & Print Settings">
+      <p className="text-xs text-slate-500 mb-4">Choose which sections to include when exporting PDF reports and blueprints.</p>
+      <SwitchOption label="Floor Plan Drawing" description="Canvas plot on cover page" checked={prefs.pdfIncludeDrawing} onChange={(v) => prefs.update({ pdfIncludeDrawing: v })} />
+      <SwitchOption label="Room & Wall Schedules" description="Room areas, wall lengths, R-values" checked={prefs.pdfIncludeRoomSchedule} onChange={(v) => prefs.update({ pdfIncludeRoomSchedule: v })} />
+      <SwitchOption label="Opening & HVAC Schedules" description="Windows, doors, equipment tables" checked={prefs.pdfIncludeOpeningSchedule} onChange={(v) => prefs.update({ pdfIncludeOpeningSchedule: v })} />
+      <SwitchOption label="Manual J Load Summary" description="Heating/cooling calculations (if available)" checked={prefs.pdfIncludeLoadSummary} onChange={(v) => prefs.update({ pdfIncludeLoadSummary: v })} />
+      <SwitchOption label="Notes & Codes Page" description="Standard disclaimers and code references" checked={prefs.pdfIncludeNotes} onChange={(v) => prefs.update({ pdfIncludeNotes: v })} />
+      <OptionGroup label="Page Size">
+        <ToggleRow
+          options={[
+            { value: 'letter', label: 'Letter' },
+            { value: 'a4', label: 'A4' },
+            { value: 'tabloid', label: 'Tabloid' },
+          ]}
+          value={prefs.pdfPageSize}
+          onChange={(v) => prefs.update({ pdfPageSize: v as 'letter' | 'a4' | 'tabloid' })}
+        />
+      </OptionGroup>
+      <OptionGroup label="Orientation">
+        <ToggleRow
+          options={[
+            { value: 'landscape', label: 'Landscape' },
+            { value: 'portrait', label: 'Portrait' },
+          ]}
+          value={prefs.pdfOrientation}
+          onChange={(v) => prefs.update({ pdfOrientation: v as 'landscape' | 'portrait' })}
+        />
+      </OptionGroup>
+      <OptionGroup label="Watermark Text">
+        <input
+          type="text"
+          value={prefs.pdfWatermarkText}
+          onChange={(e) => prefs.update({ pdfWatermarkText: e.target.value })}
+          placeholder="Custom watermark text"
+          className="w-full bg-slate-800/60 border border-slate-700/50 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+        />
+      </OptionGroup>
+    </Section>
+  );
+}
+
+function BlueprintStampsSection() {
+  const prefs = usePreferencesStore();
+  return (
+    <Section icon={<Stamp className="w-5 h-5 text-pink-400" />} title="Blueprint Stamps">
+      <p className="text-xs text-slate-500 mb-4">Upload your firm's PE seal or notary stamp to automatically include on exported blueprints.</p>
+      <StampUpload
+        label="Firm / PE Seal"
+        dataUrl={prefs.firmStampDataUrl}
+        onUpload={(url) => prefs.update({ firmStampDataUrl: url })}
+        onClear={() => prefs.update({ firmStampDataUrl: '' })}
+      />
+      {prefs.firmStampDataUrl && (
+        <OptionGroup label="Stamp Position">
+          <ToggleRow
+            options={[
+              { value: 'top-left', label: 'Top Left' },
+              { value: 'top-right', label: 'Top Right' },
+              { value: 'bottom-left', label: 'Bottom Left' },
+              { value: 'bottom-right', label: 'Bottom Right' },
+            ]}
+            value={prefs.firmStampPosition}
+            onChange={(v) => prefs.update({ firmStampPosition: v as 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' })}
+          />
+        </OptionGroup>
+      )}
+      <div className="my-3 border-t border-slate-800/40" />
+      <StampUpload
+        label="Notary Stamp"
+        dataUrl={prefs.notaryStampDataUrl}
+        onUpload={(url) => prefs.update({ notaryStampDataUrl: url })}
+        onClear={() => prefs.update({ notaryStampDataUrl: '' })}
+      />
+    </Section>
+  );
+}
+
+function PeStampSection() {
+  const prefs = usePreferencesStore();
+  return (
+    <Section icon={<BadgeCheck className="w-5 h-5 text-amber-400" />} title="PE Stamp & Attestation">
+      <p className="text-xs text-slate-500 mb-4">
+        Configure your Professional Engineer credentials and signature for the permit-ready attestation page on
+        combined reports. The attestation page appears <span className="font-semibold text-slate-400">only</span> when
+        both your name and a signature image are set — otherwise combined reports export exactly as before. These outputs
+        remain a calculation aid requiring your independent professional review; you sign as the responsible engineer of record.
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <ProfileInput label="Engineer Name" value={prefs.peName} onChange={(v) => prefs.update({ peName: v })} placeholder="John A. Smith, PE" />
+        <ProfileInput label="PE License Number" value={prefs.peLicenseNumber} onChange={(v) => prefs.update({ peLicenseNumber: v })} placeholder="M-12345" />
+        <ProfileInput label="Jurisdiction" value={prefs.peJurisdiction} onChange={(v) => prefs.update({ peJurisdiction: v })} placeholder="Maryland" />
+      </div>
+      <div className="my-3 border-t border-slate-800/40" />
+      <StampUpload
+        label="PE Signature Image"
+        dataUrl={prefs.peSignatureDataUrl}
+        onUpload={(url) => prefs.update({ peSignatureDataUrl: url })}
+        onClear={() => prefs.update({ peSignatureDataUrl: '' })}
+      />
+      {prefs.peName && prefs.peLicenseNumber && prefs.peSignatureDataUrl ? (
+        <div className="flex items-start gap-2 px-3 py-2 mt-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300">
+          <BadgeCheck className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <span>Attestation page is active. Combined reports will include a signed PE attestation with a SHA-256 content hash for tamper-evidence.</span>
+        </div>
+      ) : (
+        <div className="flex items-start gap-2 px-3 py-2 mt-3 rounded-lg bg-slate-800/40 border border-slate-700/40 text-xs text-slate-400">
+          <BadgeCheck className="w-4 h-4 text-slate-500 flex-shrink-0 mt-0.5" />
+          <span>Set an engineer name, PE license number, and a signature image to enable the attestation page. Until then, combined reports stay unchanged.</span>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function EngineSection() {
+  const prefs = usePreferencesStore();
+  return (
+    <Section icon={<BadgeCheck className="w-5 h-5 text-amber-400" />} title="Calculation Engine (Beta)">
+      <p className="text-xs text-slate-500 mb-4">
+        Cert-grade Manual J 8th Ed v2.50 engine — currently shadow-running alongside the legacy engine in production. Gated to platform admins until ACCA cert review approves. See <a href="/guide" className="text-amber-400 hover:underline">User Guide → Cert-Grade Manual J Engine</a> for the full rollout plan.
+      </p>
+      <OptionGroup label="Active Engine">
+        <ToggleRow
+          options={[
+            { value: 'legacy', label: 'Legacy (per-room)' },
+            { value: 'manualJ8', label: 'Cert-grade (whole-house)' },
+          ]}
+          value={prefs.engineVersion}
+          onChange={(v) => prefs.update({ engineVersion: v as EngineVersion })}
+        />
+      </OptionGroup>
+      <SwitchOption
+        label="Shadow-run cert engine on every calc"
+        description="Runs the cert-grade engine alongside legacy and logs [engine drift] to console. Off by default for non-admins; on for telemetry collection."
+        checked={prefs.shadowRunManualJ8}
+        onChange={(v) => prefs.update({ shadowRunManualJ8: v })}
+      />
+      {prefs.engineVersion === 'manualJ8' && (
+        <div className="flex items-start gap-2 px-3 py-2 mt-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300">
+          <span className="font-bold uppercase tracking-wider text-[10px] flex-shrink-0">Heads up</span>
+          <span>Cert-grade engine selected. Display flips to cert-grade results on the next calc. Phase 2 inverse-adapter for per-room display is not yet shipped — room cards may show approximated loads. Switch back to legacy if results look off.</span>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function SystemSection() {
+  const prefs = usePreferencesStore();
+  return (
+    <Section icon={<Monitor className="w-5 h-5 text-amber-400" />} title="System">
+      <div className="flex items-center justify-between py-3">
+        <div>
+          <p className="text-sm font-semibold text-white">App Version</p>
+          <p className="text-xs text-slate-500">HVAC DesignPro PWA</p>
+        </div>
+        <span className="text-xs font-mono text-slate-500 bg-slate-800 px-3 py-1 rounded-lg">v1.0.0</span>
+      </div>
+      <div className="flex items-center justify-between py-3">
+        <div>
+          <p className="text-sm font-semibold text-white">Storage Used</p>
+          <p className="text-xs text-slate-500">Projects, preferences, and cached assets</p>
+        </div>
+        <button
+          onClick={() => { if (confirm('Clear all local data?')) { localStorage.clear(); location.reload(); } }}
+          className="text-xs font-bold text-red-400 hover:text-red-300 transition-colors"
+        >
+          Clear Data
+        </button>
+      </div>
+      <button
+        onClick={prefs.reset}
+        className="mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-slate-800/50 border border-slate-700/30 text-slate-400 hover:text-white hover:border-slate-600 transition-all text-sm font-semibold"
+      >
+        <RotateCcw className="w-4 h-4" /> Reset All Preferences
+      </button>
+    </Section>
+  );
+}
+
+export interface SettingsSectionEntry {
+  id: string;
+  title: string;
+  icon: React.ReactNode;
+  keywords: string[];
+  visible: boolean;
+  node: React.ReactNode;
+}
+export interface SettingsCategoryEntry {
+  id: string;
+  title: string;
+  icon: React.ReactNode;
+  sections: SettingsSectionEntry[];
+}
+interface RegistryCtx {
+  user: ReturnType<typeof useAuthStore.getState>['user'];
+  organisation: ReturnType<typeof useAuthStore.getState>['organisation'];
+  token: string | null;
+}
+
+function buildSettingsCategories(ctx: RegistryCtx): SettingsCategoryEntry[] {
+  const isAdmin = ctx.user?.role === 'admin';
+  const isL0 = !!ctx.user?.isPlatformAdmin;
+  return [
+    { id: 'account', title: 'Account', icon: <User className="w-4 h-4" />, sections: [
+      { id: 'user-profile', title: 'User Profile', icon: <User className="w-5 h-5 text-sky-400" />, keywords: ['name', 'avatar', 'photo', 'phone', 'email', 'profile'], visible: !!ctx.user, node: <UserProfileSection token={ctx.token} user={ctx.user} /> },
+    ] },
+    { id: 'security', title: 'Security', icon: <ShieldCheck className="w-4 h-4" />, sections: [
+      { id: 'two-factor', title: 'Two-Factor Authentication', icon: <ShieldCheck className="w-5 h-5 text-emerald-400" />, keywords: ['2fa', 'totp', 'mfa', 'authenticator', 'otp', 'security', 'two factor'], visible: !!ctx.user, node: <MfaSection requiredForRole={isAdmin || isL0} /> },
+      { id: 'access-policy', title: 'Access Policy', icon: <Lock className="w-5 h-5 text-amber-400" />, keywords: ['access', 'audit', 'version history', 'roles', 'permissions', 'policy'], visible: isAdmin || isL0, node: <AccessPolicySection /> },
+    ] },
+    { id: 'appearance', title: 'Appearance', icon: <Palette className="w-4 h-4" />, sections: [
+      { id: 'appearance', title: 'Appearance', icon: <Palette className="w-5 h-5 text-violet-400" />, keywords: ['theme', 'dark', 'light', 'midnight', 'density', 'metal', 'finish', 'animation', 'tooltip', 'color'], visible: true, node: <AppearanceSection /> },
+    ] },
+    { id: 'workspace', title: 'Workspace', icon: <Grid3X3 className="w-4 h-4" />, sections: [
+      { id: 'units', title: 'Units & Defaults', icon: <Ruler className="w-5 h-5 text-sky-400" />, keywords: ['units', 'imperial', 'metric', 'ceiling', 'r-value', 'u-value', 'defaults'], visible: true, node: <UnitsSection /> },
+      { id: 'cad', title: 'CAD Workspace', icon: <Grid3X3 className="w-5 h-5 text-emerald-400" />, keywords: ['grid', 'snap', 'spacing', 'autosave', 'cad'], visible: true, node: <CadWorkspaceSection /> },
+    ] },
+    { id: 'accessibility', title: 'Accessibility', icon: <Accessibility className="w-4 h-4" />, sections: [
+      { id: 'accessibility', title: 'Accessibility', icon: <Accessibility className="w-5 h-5 text-cyan-400" />, keywords: ['motion', 'contrast', 'focus', 'text size', 'font', 'neural', 'prosthetic', 'haptic', 'a11y'], visible: true, node: <AccessibilitySection /> },
+    ] },
+    { id: 'reports', title: 'Reports & Output', icon: <FileText className="w-4 h-4" />, sections: [
+      { id: 'pdf', title: 'PDF & Print Settings', icon: <FileText className="w-5 h-5 text-orange-400" />, keywords: ['pdf', 'print', 'export', 'page size', 'orientation', 'watermark'], visible: true, node: <PdfSection /> },
+      { id: 'stamps', title: 'Blueprint Stamps', icon: <Stamp className="w-5 h-5 text-pink-400" />, keywords: ['stamp', 'seal', 'pe seal', 'notary', 'firm'], visible: true, node: <BlueprintStampsSection /> },
+      { id: 'pe-stamp', title: 'PE Stamp & Attestation', icon: <BadgeCheck className="w-5 h-5 text-amber-400" />, keywords: ['pe', 'engineer', 'attestation', 'signature', 'license', 'jurisdiction'], visible: true, node: <PeStampSection /> },
+    ] },
+    { id: 'engine', title: 'Calculation Engine', icon: <BadgeCheck className="w-4 h-4" />, sections: [
+      { id: 'engine', title: 'Calculation Engine (Beta)', icon: <BadgeCheck className="w-5 h-5 text-amber-400" />, keywords: ['engine', 'manual j', 'cert', 'shadow', 'legacy', 'calculation'], visible: isL0, node: <EngineSection /> },
+    ] },
+    { id: 'organization', title: 'Organization', icon: <Building2 className="w-4 h-4" />, sections: [
+      { id: 'org-profile', title: 'Organisation Profile', icon: <Building2 className="w-5 h-5 text-emerald-400" />, keywords: ['organisation', 'organization', 'company', 'tenant', 'profile'], visible: true, node: <OrgProfileSection token={ctx.token} orgId={ctx.organisation?.id} /> },
+      { id: 'backup', title: 'Legacy Archive & Backup', icon: <HardDrive className="w-5 h-5 text-amber-400" />, keywords: ['backup', 'archive', 'synology', 'nas', 'webhook'], visible: isAdmin, node: <SynologyBackupSection orgId={ctx.organisation?.id} /> },
+      { id: 'authority', title: 'Authority Profile', icon: <ShieldCheck className="w-5 h-5 text-amber-400" />, keywords: ['authority', 'permit', 'jurisdiction', 'inspector', 'reviewer'], visible: isAdmin, node: <AuthorityProfileSection /> },
+    ] },
+    { id: 'system', title: 'System', icon: <Monitor className="w-4 h-4" />, sections: [
+      { id: 'system', title: 'System', icon: <Monitor className="w-5 h-5 text-amber-400" />, keywords: ['version', 'storage', 'clear data', 'reset', 'about', 'system'], visible: true, node: <SystemSection /> },
+    ] },
+  ];
+}
+
+function SettingsRail({ categories, active, onSelect }: { categories: SettingsCategoryEntry[]; active: string; onSelect: (id: string) => void }) {
+  return (
+    <div className="flex md:flex-col gap-1 overflow-x-auto md:overflow-visible pb-2 md:pb-0 -mx-1 px-1 md:mx-0 md:px-0">
+      {categories.map((c) => {
+        const isActive = c.id === active;
+        return (
+          <button
+            key={c.id}
+            onClick={() => onSelect(c.id)}
+            aria-current={isActive ? 'page' : undefined}
+            className={`shrink-0 md:w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all min-h-[44px] whitespace-nowrap ${isActive ? 'bg-slate-800/80 text-white border border-slate-700/60 shadow-inner' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'}`}
+          >
+            <span className={isActive ? 'text-emerald-400' : 'text-slate-500'}>{c.icon}</span>
+            {c.title}
+          </button>
+        );
+      })}
     </div>
   );
 }
