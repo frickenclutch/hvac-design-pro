@@ -5,7 +5,7 @@
 // takeoff — no vision model, no estimation, no scaling error — so a plan set
 // can be converted in full and the sheet image discarded afterwards.
 //
-// Output is in the same normalized [0,1] sheet space the AI takeoff produces,
+// Output is in the same normalized [0,1] sheet space Logarithmic Extraction produces,
 // so both feed the identical mapper in blueprintToCad.ts. The normalization
 // uses the page viewport, which is also what the rasterizer used to build the
 // underlay, so extracted geometry lands exactly on the displayed sheet.
@@ -293,7 +293,7 @@ export function extractVectorSegments(
 /**
  * Map extracted segments onto the placed sheet and convert them to CAD walls.
  * Reuses the underlay rect exactly as blueprintToCad's mapper does, so vector
- * and AI takeoffs land in the same place.
+ * and Logarithmic Extraction lands in the same place.
  *
  * `pxPerFt` is only used to express wall lengths; positions come straight from
  * the sheet, which is what makes this measurement-for-measurement.

@@ -5,7 +5,7 @@ import { setAudit } from '../middleware/audit';
 interface Env {
   DB: D1Database;
   /** Anthropic API key — set via `wrangler secret put ANTHROPIC_API_KEY`.
-   *  Unset → the AI extraction endpoints return 503 (feature not configured)
+   *  Unset → the Logarithmic Extraction endpoints return 503 (feature not configured)
    *  rather than failing opaquely. */
   ANTHROPIC_API_KEY?: string;
 }
@@ -109,7 +109,7 @@ aiRoutes.post('/blueprint-extract', async (c) => {
 
   const apiKey = c.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return c.json({ error: 'AI extraction is not configured on this deployment (ANTHROPIC_API_KEY missing).' }, 503);
+    return c.json({ error: 'Logarithmic Extraction is not configured on this deployment (ANTHROPIC_API_KEY missing).' }, 503);
   }
 
   let body: { imageDataUrls?: string[]; imageDataUrl?: string; projectId?: string; fileName?: string };
@@ -132,13 +132,13 @@ aiRoutes.post('/blueprint-extract', async (c) => {
     return c.json({ error: `Too many sheets — send at most ${MAX_IMAGES} images per extraction.` }, 400);
   }
   if (dataUrls.reduce((n, d) => n + d.length, 0) > MAX_TOTAL_B64_CHARS) {
-    return c.json({ error: 'Plan set too large for AI extraction (~18MB total). Re-import the sheets at a lower resolution.' }, 413);
+    return c.json({ error: 'Plan set too large for Logarithmic Extraction (~18MB total). Re-import the sheets at a lower resolution.' }, 413);
   }
 
   const images: Array<{ mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'; data: string }> = [];
   for (const dataUrl of dataUrls) {
     if (dataUrl.length > MAX_IMAGE_B64_CHARS) {
-      return c.json({ error: 'One of the sheets is too large for AI extraction (max ~7.5MB each).' }, 413);
+      return c.json({ error: 'One of the sheets is too large for Logarithmic Extraction (max ~7.5MB each).' }, 413);
     }
     const match = DATA_URL_RE.exec(dataUrl);
     if (!match) {
@@ -197,7 +197,7 @@ aiRoutes.post('/blueprint-extract', async (c) => {
       // will fail identically on replay — return 4xx so the frontend's 5xx
       // retry does NOT re-send this expensive multi-image request.
       if (err.status && err.status >= 400 && err.status < 500) {
-        return c.json({ error: 'The AI extraction request was rejected. This is a configuration problem, not a transient one — please report it.' }, 422);
+        return c.json({ error: 'The Logarithmic Extraction request was rejected. This is a configuration problem, not a transient one — please report it.' }, 422);
       }
       return c.json({ error: 'The AI service returned an error — try the takeoff again shortly.' }, 502);
     }

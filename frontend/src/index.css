@@ -353,6 +353,63 @@ body {
   box-shadow: 0 0 26px rgb(214 150 110 / 0.5), 0 0 10px rgb(226 232 240 / 0.25), 0 4px 15px rgb(0 0 0 / 0.4);
 }
 
+/* ── Metal finish (configurable in Accessibility) ───────────────────────────
+   Each finish washes the shared brushed-steel texture with a translucent tint
+   and picks an engraved-ink color for strong contrast on THAT finish — so the
+   text stays legible to human eyes and to machine vision (OCR/CV). Default
+   (steel) is the untinted plate. Applied via <html data-metal="…">. */
+:root {
+  --metal-tint: transparent;
+  --metal-ink: #0a0f1a;
+  --metal-ink-shadow: rgba(255, 255, 255, 0.5);
+}
+:root[data-metal='steel'] {
+  --metal-tint: transparent;
+  --metal-ink: #0a0f1a;
+  --metal-ink-shadow: rgba(255, 255, 255, 0.5);
+}
+:root[data-metal='aluminum'] {
+  --metal-tint: rgba(224, 230, 236, 0.4);
+  --metal-ink: #111827;
+  --metal-ink-shadow: rgba(255, 255, 255, 0.6);
+}
+:root[data-metal='brass'] {
+  --metal-tint: rgba(201, 161, 58, 0.52);
+  --metal-ink: #20180a;
+  --metal-ink-shadow: rgba(255, 244, 214, 0.55);
+}
+:root[data-metal='bronze'] {
+  --metal-tint: rgba(74, 46, 24, 0.75);
+  --metal-ink: #f5ead9;
+  --metal-ink-shadow: rgba(0, 0, 0, 0.5);
+}
+:root[data-metal='galvanized'] {
+  --metal-tint: rgba(150, 165, 180, 0.42);
+  --metal-ink: #0b1220;
+  --metal-ink-shadow: rgba(255, 255, 255, 0.5);
+}
+:root[data-metal='copper'] {
+  --metal-tint: rgba(183, 79, 45, 0.6);
+  --metal-ink: #2a1006;
+  --metal-ink-shadow: rgba(255, 235, 215, 0.5);
+}
+:root[data-metal='cast-iron'] {
+  --metal-tint: rgba(34, 36, 40, 0.78);
+  --metal-ink: #e8eaed;
+  --metal-ink-shadow: rgba(0, 0, 0, 0.55);
+}
+
+/* Engraved ink that follows the finish — high contrast on every plate. */
+.metal-ink {
+  color: var(--metal-ink);
+  text-shadow: 0 1px 0 var(--metal-ink-shadow);
+}
+.metal-ink-soft {
+  color: var(--metal-ink);
+  opacity: 0.82;
+  text-shadow: 0 1px 0 var(--metal-ink-shadow);
+}
+
 /* Sheet-metal menu — a machined brushed-steel plate. The fill is the panel
    artwork's interior melted to a soft light-field; the edge is a simple
    machined bevel (top-light, bottom-shadow inset ring). Text renders
@@ -362,8 +419,9 @@ body {
   border: 1px solid rgb(71 85 105 / 0.8);
   border-radius: 1rem;
   overflow: hidden;
-  background: #c3c7cd url('./assets/brand/portal-menu-steel.webp');
-  background-size: 100% 100%;
+  background-color: #c3c7cd;
+  background-image: linear-gradient(var(--metal-tint, transparent), var(--metal-tint, transparent)), url('./assets/brand/portal-menu-steel.webp');
+  background-size: 100% 100%, 100% 100%;
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.5),
     inset 0 -1px 0 rgb(0 0 0 / 0.35),
@@ -371,6 +429,23 @@ body {
     inset -1px 0 0 rgb(0 0 0 / 0.2),
     0 20px 60px rgb(0 0 0 / 0.75),
     0 0 24px rgb(196 130 92 / 0.15);
+}
+
+/* Brushed-steel surface for portal-styled panels elsewhere in the app
+   (the Settings "control room" reflects the Creation Portal). Same machined
+   plate + bevel as .portal-menu-metal, minus the dropdown's heavy launch
+   shadow, so it sits flush as a page header or section strip. Pair with
+   .portal-menu-sheen for the living specular light and engrave text as
+   dark ink with a bottom-light letterpress shadow. */
+.portal-plate {
+  background-color: #c3c7cd;
+  background-image: linear-gradient(var(--metal-tint, transparent), var(--metal-tint, transparent)), url('./assets/brand/portal-menu-steel.webp');
+  background-size: 100% 100%, 100% 100%;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.5),
+    inset 0 -1px 0 rgb(0 0 0 / 0.35),
+    inset 1px 0 0 rgb(255 255 255 / 0.2),
+    inset -1px 0 0 rgb(0 0 0 / 0.2);
 }
 
 /* Living light on the aluminum plate — a slow specular band glides across
@@ -456,4 +531,69 @@ body {
   .portal-implode {
     animation: none;
   }
+}
+
+/* ── Logarithmic Extraction Tool — transform scanner ────────────────────────
+   Shown during the LET "reading" phase. Underneath sits the raw imported plan
+   (faint, gray, slightly skewed — it was created elsewhere). A scan line
+   sweeps left→right and, in its wake, the geometry snaps into the platform's
+   own crisp format, then cross-fades back and loops. Deliberately subtle:
+   low-contrast and never pulls focus — it just says "we're ripping this into
+   our format." */
+.let-scan-stage {
+  position: relative;
+  width: 224px;
+  height: 140px;
+  overflow: hidden;
+  border-radius: 0.75rem;
+}
+.let-scan-src,
+.let-scan-out {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+/* The platform-format layer is revealed left→right in step with the scan line,
+   held, then faded back to the raw source so the loop has no hard cut. */
+.let-scan-out {
+  clip-path: inset(0 100% 0 0);
+  animation: let-scan-reveal 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes let-scan-reveal {
+  0%   { clip-path: inset(0 100% 0 0); opacity: 1; }
+  50%  { clip-path: inset(0 0 0 0);    opacity: 1; }
+  78%  { clip-path: inset(0 0 0 0);    opacity: 1; }
+  100% { clip-path: inset(0 0 0 0);    opacity: 0; }
+}
+.let-scan-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: 100%;
+  background: linear-gradient(to bottom, transparent, rgba(52, 211, 153, 0.9), transparent);
+  box-shadow: 0 0 10px 1px rgba(52, 211, 153, 0.5);
+  opacity: 0;
+  animation: let-scan-line 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes let-scan-line {
+  0%   { transform: translateX(0);     opacity: 0; }
+  6%   { opacity: 1; }
+  50%  { transform: translateX(222px); opacity: 1; }
+  58%  { transform: translateX(222px); opacity: 0; }
+  100% { transform: translateX(222px); opacity: 0; }
+}
+/* Reduced motion: no sweep — a still, half-converted split states the same
+   idea (raw on the right, platform format on the left). The global
+   .reduce-motion rule already freezes the animations; pin an explicit static
+   frame so it reads as a transform, not a stall. */
+.reduce-motion .let-scan-out {
+  clip-path: inset(0 42% 0 0) !important;
+  opacity: 1 !important;
+}
+.reduce-motion .let-scan-line { display: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .let-scan-out { clip-path: inset(0 42% 0 0); opacity: 1; animation: none; }
+  .let-scan-line { display: none; animation: none; }
 }

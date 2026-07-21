@@ -596,7 +596,7 @@ Ways to import:
 
 **Next steps:**
 - **Calibrate Scale** (crosshair tool) — click both ends of a printed dimension so traced walls read in real feet
-- **AI Extract Rooms** (sparkles) — have the AI propose a room schedule you review before it goes to Manual J
+- **Logarithmic Extraction (LET)** — the extractor proposes a room schedule you review before it goes to Manual J (walls + dimensions only; you enter windows per room)
 
 **Tip:** the softly glowing toolbar button is the suggested next step in this workflow.`,
   },
@@ -1166,7 +1166,7 @@ Then replace the seeded numbers with your actual candidate equipment's expanded-
   },
 
   // ══════════════════════════════════════════════════════════════════════════
-  // BLUEPRINT INTAKE, AI TAKEOFF & GUIDED WORKFLOW
+  // BLUEPRINT INTAKE, LOGARITHMIC EXTRACTION (LET) & GUIDED WORKFLOW
   // ══════════════════════════════════════════════════════════════════════════
   {
     keywords: ['blueprint', 'import pdf', 'pdf import', 'upload plan', 'floor plan pdf', 'drag and drop', 'underlay', 'import blueprint', 'trace'],
@@ -1179,7 +1179,7 @@ The page is placed on the locked, 30%-opacity **Underlay layer** so you can trac
 
 **The workflow:**
 1. **Import** the blueprint — multiple files welcome; sheets tile side-by-side (a project also saves the originals to its files)
-2. **AI Extract Rooms** (sparkles) — reads ALL sheets on the floor as one plan set and proposes a merged room schedule you review, then draws it in CAD and sends it to Manual J
+2. **Logarithmic Extraction (LET)** — reads ALL sheets on the floor as one plan set and proposes a merged room schedule you review, then draws it in CAD and sends it to Manual J (walls + dimensions only; you enter windows per room)
 3. Manual alternative: **Calibrate Scale** against a printed dimension, trace walls, then **Detect Rooms**
 
 Limits: PDFs up to 25 MB, images up to 10 MB, 6 sheets per AI pass.`,
@@ -1200,17 +1200,19 @@ The underlay rescales around your first click so that distance maps exactly to t
 **Tips:** zoom in before clicking the endpoints — precision here is precision everywhere. Calibrate before tracing; already-traced geometry doesn't move when the underlay rescales.`,
   },
   {
-    keywords: ['ai extract', 'ai takeoff', 'extract rooms', 'ai rooms', 'sparkles', 'automatic takeoff', 'read blueprint', 'ai blueprint'],
+    keywords: ['logarithmic extraction', 'let', 'ai extract', 'extract rooms', 'takeoff', 'hexagon', 'sparkles', 'automatic takeoff', 'read blueprint', 'ai blueprint', 'extract', 'rip blueprint'],
     contexts: ['cad', 'manualj'],
-    answer: `**AI Extract Rooms — Claude reads the blueprint for you**
+    answer: `**Logarithmic Extraction Tool (LET) — rip a plan into the platform's format**
 
-Click the **sparkles icon** in the CAD toolbox after importing a blueprint. EVERY sheet on the active floor is sent together (up to 6) — a plan split across multiple files comes back as ONE merged, deduplicated room schedule: names, dimensions (preferring the plan's printed dimension strings), window counts, and exposure where a north arrow exists.
+Click the glowing **hexagon** in the CAD toolbox after importing a blueprint. LET takes a plan someone else drew and pulls it into DesignPro's own format — same measurements, cleanly rebuilt. EVERY sheet on the active floor is sent together (up to 6); a plan split across multiple files comes back as ONE merged, deduplicated room schedule: names, dimensions (preferring the plan's printed dimension strings), and exposure where a north arrow exists.
 
-**Nothing is applied automatically.** You get a review list where every room can be edited, unchecked, or corrected — each row carries a confidence badge (high = read from printed dimensions, low = inferred from proportions). The AI also traces each room's outline on the sheet, and dashed green previews show exactly where the rooms will land — **on the blueprint itself, measurement for measurement**, not an invented layout. Confirming **draws the walls at their true positions on the active floor**, auto-calibrates the sheet scale from the printed dimensions (optional checkbox), and adds the rooms to **Manual J** for the active project. Rooms whose outline couldn't be traced go to Manual J only; if no outlines come back at all, a schematic "AI Takeoff" floor is generated as a fallback.
+**Nothing is applied automatically.** You get a review list where every room can be edited, unchecked, or corrected — each row carries a confidence badge (high = read from printed dimensions, low = inferred from proportions). LET traces each room's outline on the sheet, and dashed green previews show exactly where the rooms will land — **on the blueprint itself, measurement for measurement**, not an invented layout. Confirming **draws the walls at their true positions on the active floor**, auto-calibrates the sheet scale from the printed dimensions (optional checkbox), and adds the rooms to **Manual J**. Rooms whose outline couldn't be traced go to Manual J only; if none come back, a schematic **"LET Extraction"** floor is the fallback.
 
-You remain the engineer of record: verify dimensions against the plan before calculating. The extraction is a first pass, not a stamp.
+**One thing LET does NOT read: glazing.** Window area, SHGC, and orientation aren't on most plans, so every imported room arrives with **no windows** — enter them per room in Manual J before the load calc or **AED** are permit-valid. This is deliberate: defaulting glass would quietly poison the solar load and the Section-N AED check. So if AED reads "off" right after an extraction, that's why — fill in the glazing and it comes right.
 
-If you see "not configured", the deployment is missing its AI key — ask your admin.`,
+You remain the engineer of record: verify dimensions against the plan before calculating. LET is a first pass, not a stamp.
+
+If you see "not configured", the deployment is missing its extraction key — ask your admin.`,
   },
   {
     keywords: ['glimmer', 'glowing', 'glow', 'why is the button glowing', 'highlighted button', 'shimmer', 'hint', 'suggested next', 'next step'],
@@ -1219,7 +1221,7 @@ If you see "not configured", the deployment is missing its AI key — ask your a
 
 When you finish an action, DesignPro softly glimmers the tool that usually comes next in the workflow — for example:
 
-- Import a blueprint → **AI Extract Rooms** glimmers (the heavy lifter)
+- Import a blueprint → **Logarithmic Extraction (LET)** glimmers (the heavy lifter)
 - Skip or cancel the AI → **Calibrate Scale** glimmers (manual path)
 - Calibrate → **Draw Wall** glimmers, then walls → **Detect Rooms**
 - Detect rooms → **Import from CAD** glimmers in Manual J
@@ -1234,7 +1236,7 @@ It's a hint, not a requirement — it disappears as soon as you click it or choo
     answer: `**From a client's blueprint to an estimate — the full funnel**
 
 1. **CAD → Import Blueprint** — drop the client's files on the canvas (multiple sheets tile side-by-side)
-2. **AI Extract Rooms** — review the merged schedule, confirm, and the plan is drawn in CAD + sent to Manual J (manual path: Calibrate Scale → trace → Detect Rooms)
+2. **Logarithmic Extraction (LET)** — review the merged schedule, confirm, and the plan is drawn in CAD + sent to Manual J (manual path: Calibrate Scale → trace → Detect Rooms)
 3. **Finalize in CAD** — the walls land on the blueprint at true scale; adjust them, then place openings and equipment
 4. **Manual J** — review R-values, windows, and design conditions, then **Calculate Loads**
 5. **Find Retailer & Estimate** — regionally priced system estimate + nearest supply branches, with a one-click quote-request email that attaches the load report
@@ -1248,9 +1250,69 @@ Every step's next tool glimmers when you complete the previous one. The whole fl
 
 Manual J is a **residential** load standard. For commercial / assembly occupancies (warehouses, gyms, churches, offices), a Manual J result is a **budget estimate only** — it is *not* permit-valid, and it won't capture ventilation-dominated loads (ASHRAE 62.1 outdoor air per occupant) that drive assembly spaces.
 
-The AI blueprint takeoff flags commercial plans automatically. Use the result to ballpark equipment and quote materials — and set client expectations accordingly.
+Logarithmic Extraction flags commercial plans automatically. Use the result to ballpark equipment and quote materials — and set client expectations accordingly.
 
 **ACCA Manual N** (commercial load calculation) is on the DesignPro roadmap; until it ships, permit-grade commercial calcs need a commercial tool or a licensed mechanical engineer's methods.`,
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // RECENT PLATFORM CHANGES — panels, avatar, portal, backup, what's new
+  // ══════════════════════════════════════════════════════════════════════════
+  {
+    keywords: ['move panel', 'movable panel', 'drag panel', 'properties panel', 'layers panel', 'move properties', 'move layers', 'floating panel', 'reposition panel', 'undock', 'dock panel'],
+    contexts: ['cad'],
+    answer: `**Move the Properties & Layers panels anywhere**
+
+Both panels now float like the toolbox. Grab a panel's **header** (the strip with the grip dots) and drag — it pops off its rail and follows the cursor, clamped inside the viewport. The position is saved per-user, so it's right where you left it next session.
+
+To put it back, click the **pin** icon in the header to **dock** it to the rail again. You can still resize (drag the left edge) and scale it (the − / + buttons) in either mode.`,
+  },
+  {
+    keywords: ['avatar', 'profile photo', 'profile picture', 'upload photo', 'my picture', 'change avatar', 'headshot', 'user photo', 'profile image'],
+    contexts: ['cad', 'manualj', 'manual-d', 'manual-s', 'aed'],
+    answer: `**Your avatar — set it in Settings**
+
+Go to **Settings → User Profile → Profile photo**. Upload a PNG/JPG/WebP (max 4 MB) and it opens in the platform's own drawing tool — the same editor the bug reporter uses — so you can mark it up, add a note, or redact something before you save. Click **Attach** and it's live.
+
+Your avatar then represents you everywhere: the sidebar, the account menu, and inside the **Creation Portal** in CAD. Remove or re-edit it any time from the same spot. (It's stored on your device for now.)`,
+  },
+  {
+    keywords: ['creation portal', 'black hole', 'portal menu', 'the portal', 'settings tab', 'sign out', 'log out', 'where is settings', 'account menu', 'where is sign out'],
+    contexts: ['cad'],
+    answer: `**The Creation Portal — your hub in CAD**
+
+The spinning **black-hole** button (top-right of the CAD bar) is the Creation Portal. Opening it now shows **you** at the top — your avatar, name, and email — above:
+
+- **Save** / **New Project** / **3D View** / **Export PDF**
+- **Settings** — jump to your workbench (theme, units, profile)
+- **Platform Admin** (L0 only)
+- **Sign Out**
+
+Everything that used to live in the little avatar menu is here now, so the portal is the single place for both your work and your account.`,
+  },
+  {
+    keywords: ['backup', 'archive', 'synology', 'nas', 'legacy archive', 'offsite', 'off-site backup', 'data backup', 'retention', 'webhook backup'],
+    contexts: ['cad', 'manualj', 'manual-d', 'manual-s', 'aed'],
+    answer: `**Legacy Archive & Backup — to your own Synology NAS**
+
+Tenant admins can route permit-grade records and drawings to the firm's own **Synology NAS** — the same appliance C4 Technologies runs for its MSP clients. Find it under **Settings → Legacy Archive & Backup** (admin only; a Professional / Enterprise capability).
+
+Pick an integration shape — a **webhook** the platform POSTs archive events to, or your **Synology API** endpoint — set the destination share and which events to archive (projects, calculations, CAD drawings, permits, exports), and save. Credentials never live in the app; you set those on the NAS or in the server-side secret store.`,
+  },
+  {
+    keywords: ['what is new', 'whats new', "what's new", 'changelog', 'recent changes', 'updates', 'new features', 'release notes', 'latest changes'],
+    contexts: ['cad', 'manualj', 'manual-d', 'manual-s', 'aed'],
+    answer: `**Recently shipped**
+
+- **Logarithmic Extraction Tool (LET)** — the blueprint takeoff, rebranded and tightened. It reads walls + dimensions true-to-plan; glazing is now left empty on purpose (you enter it), which is what keeps the load calc and **AED** honest.
+- **Movable Properties & Layers panels** — drag them off their rails like the toolbox; pin to re-dock.
+- **Your avatar** — upload and mark up a profile photo in Settings; it shows across the platform and inside the Creation Portal, which now also holds **Settings** and **Sign Out**.
+- **Legacy Archive & Backup** — route records to your own Synology NAS (admin, higher tiers).
+- **Manual S** — equipment selection with the 115% rule, importing straight from Manual J, plus the combined report print-off.
+- **Permit lifecycle** — revoke / suspend / reinstate / expire with resubmission chains.
+- **Security** — session tokens hashed at rest, rotating refresh tokens with reuse-detection and silent refresh, and a CI guard that blocks any un-scoped tenant query.
+
+Ask me about any of these by name for the details.`,
   },
 ];
 

@@ -108,28 +108,29 @@ const sections: GuideSection[] = [
   },
   {
     id: 'blueprints',
-    title: 'Blueprints & AI Takeoff',
+    title: 'Blueprints & Logarithmic Extraction',
     icon: <Sparkles className="w-5 h-5 text-sky-400" />,
     easyContent: (
       <div className="space-y-3">
         <p>Have a client's blueprint? Drop it straight into the CAD workspace and go from plan to estimate without redrawing anything from scratch.</p>
         <StepList steps={[
           'Drop the blueprint files onto the CAD canvas, click the drop zone to browse (multi-select works), or paste a copied image with Ctrl+V / right-click. Multiple sheets tile side-by-side; multi-page PDFs ask which page is the floor plan',
-          'Click AI Extract Rooms (sparkles) — all sheets are read together as one plan set and come back as a single merged room schedule',
+          'Click the Logarithmic Extraction Tool — LET, the glowing hexagon — and all sheets are read together as one plan set and come back as a single merged room schedule',
           'Review every proposed room: edit names and dimensions, watch the dashed green previews on the canvas, then confirm — walls are drawn at their TRUE positions on the blueprint (auto-calibrating the sheet scale from printed dimensions) AND the rooms are sent to Manual J',
+          'Enter glazing per room in Manual J — LET reads walls and dimensions, not windows, so imported rooms arrive with no glass (required before the load calc or AED are permit-valid)',
           'Finalize the drawing in CAD (walls, openings, equipment), stamp, and export — or go straight to Manual J',
           'Prefer manual takeoff? Calibrate Scale against a printed dimension, trace walls, then Detect Rooms',
           'Calculate loads, then Find Retailer & Estimate for a regionally priced system quote',
         ]} />
         <Tip>Watch for the soft glow — after each step, the next ideal tool glimmers until you click it or pick something else. It's the platform walking you through the workflow.</Tip>
-        <Tip>The AI never applies anything by itself. Every extracted room passes through your review first — you are the engineer of record.</Tip>
+        <Tip>Logarithmic Extraction never applies anything by itself. Every extracted room passes through your review first — you are the engineer of record.</Tip>
       </div>
     ),
     advancedContent: (
       <div className="space-y-3">
         <p><strong>PDF ingestion:</strong> pdf.js is lazy-loaded (own bundle chunk) and rasterizes the chosen page to a PNG capped at 2400px on the long edge. The raster lands as an <code className="text-emerald-400/70">UnderlayImage</code> on the locked underlay layer; the original file is also uploaded to R2 with <code className="text-emerald-400/70">purpose: 'underlay'</code> when a project is active (silent skip offline/draft).</p>
         <p><strong>Scale calibration</strong> uniform-scales the underlay about the first clicked point so the clicked span equals the entered feet at <code className="text-emerald-400/70">projectScale.pxPerFt</code> (default 40). Existing traced geometry is never rescaled — calibrate before tracing. Calibration clicks intentionally bypass grid snap.</p>
-        <p><strong>AI extraction</strong> POSTs the underlay raster to <code className="text-emerald-400/70">/api/ai/blueprint-extract</code> (auth-gated Worker → Claude vision with a strict JSON schema). The response is a proposal object — rooms with per-room confidence, warnings, and a building-type flag. Confirmed rooms are spread over <code className="text-emerald-400/70">createDefaultRoom()</code> defaults and appended to the project-scoped Manual J inputs key, so the calculator hydrates them on mount. Commercial plans are flagged: Manual J output is budget-grade only for those.</p>
+        <p><strong>Logarithmic Extraction</strong> POSTs the underlay raster to <code className="text-emerald-400/70">/api/ai/blueprint-extract</code> (auth-gated Worker → Claude vision with a strict JSON schema). The response is a proposal object — rooms with per-room confidence, warnings, and a building-type flag. Confirmed rooms are spread over <code className="text-emerald-400/70">createDefaultRoom()</code> defaults <strong>with <code className="text-emerald-400/70">windowSqFt</code> forced to 0</strong> (glazing is not read from the plan — defaulting it would poison the Manual J solar load and the Section-N AED check, an ACCA rule-4 violation), then appended to the project-scoped Manual J inputs key, so the calculator hydrates them on mount. Commercial plans are flagged: Manual J output is budget-grade only for those.</p>
         <p><strong>Guidance glimmer:</strong> <code className="text-emerald-400/70">useGuidanceStore</code> holds at most one hint id; surfaces clear their own namespace (<code className="text-emerald-400/70">cad_*</code>, <code className="text-emerald-400/70">mj_*</code>) when any tool is chosen. The animation honors reduced-motion (static ring) and uses the preference accent color.</p>
       </div>
     ),
