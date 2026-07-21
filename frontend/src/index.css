@@ -457,3 +457,68 @@ body {
     animation: none;
   }
 }
+
+/* ── Logarithmic Extraction Tool — transform scanner ────────────────────────
+   Shown during the LET "reading" phase. Underneath sits the raw imported plan
+   (faint, gray, slightly skewed — it was created elsewhere). A scan line
+   sweeps left→right and, in its wake, the geometry snaps into the platform's
+   own crisp format, then cross-fades back and loops. Deliberately subtle:
+   low-contrast and never pulls focus — it just says "we're ripping this into
+   our format." */
+.let-scan-stage {
+  position: relative;
+  width: 224px;
+  height: 140px;
+  overflow: hidden;
+  border-radius: 0.75rem;
+}
+.let-scan-src,
+.let-scan-out {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+/* The platform-format layer is revealed left→right in step with the scan line,
+   held, then faded back to the raw source so the loop has no hard cut. */
+.let-scan-out {
+  clip-path: inset(0 100% 0 0);
+  animation: let-scan-reveal 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes let-scan-reveal {
+  0%   { clip-path: inset(0 100% 0 0); opacity: 1; }
+  50%  { clip-path: inset(0 0 0 0);    opacity: 1; }
+  78%  { clip-path: inset(0 0 0 0);    opacity: 1; }
+  100% { clip-path: inset(0 0 0 0);    opacity: 0; }
+}
+.let-scan-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: 100%;
+  background: linear-gradient(to bottom, transparent, rgba(52, 211, 153, 0.9), transparent);
+  box-shadow: 0 0 10px 1px rgba(52, 211, 153, 0.5);
+  opacity: 0;
+  animation: let-scan-line 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes let-scan-line {
+  0%   { transform: translateX(0);     opacity: 0; }
+  6%   { opacity: 1; }
+  50%  { transform: translateX(222px); opacity: 1; }
+  58%  { transform: translateX(222px); opacity: 0; }
+  100% { transform: translateX(222px); opacity: 0; }
+}
+/* Reduced motion: no sweep — a still, half-converted split states the same
+   idea (raw on the right, platform format on the left). The global
+   .reduce-motion rule already freezes the animations; pin an explicit static
+   frame so it reads as a transform, not a stall. */
+.reduce-motion .let-scan-out {
+  clip-path: inset(0 42% 0 0) !important;
+  opacity: 1 !important;
+}
+.reduce-motion .let-scan-line { display: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .let-scan-out { clip-path: inset(0 42% 0 0); opacity: 1; animation: none; }
+  .let-scan-line { display: none; animation: none; }
+}

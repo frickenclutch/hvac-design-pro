@@ -96,7 +96,7 @@ function UnderlayMigrationPrompt() {
 }
 
 // variant 'modal' dims and blurs the whole workspace; 'panel' docks to the
-// right WITHOUT a backdrop so the canvas stays visible — the AI takeoff review
+// right WITHOUT a backdrop so the canvas stays visible — the LET review
 // ghost-previews the proposed rooms on the canvas behind it.
 function DialogShell({ icon, title, children, variant = 'modal' }: { icon: React.ReactNode; title: string; children: React.ReactNode; variant?: 'modal' | 'panel' }) {
   return (
@@ -283,10 +283,10 @@ function VectorTrace() {
         if (res.segments.length === 0) {
           // A refused sheet is empty for the opposite reason to a scan — it
           // carried too much geometry, not none. Saying "probably a scan" there
-          // would send the user to the AI takeoff for no reason.
+          // would send the user to the Logarithmic Extraction Tool for no reason.
           setError(res.capped && res.notice
             ? res.notice
-            : 'No vector geometry found on this sheet. It is most likely a scan or a photo — use the AI takeoff instead.');
+            : 'No vector geometry found on this sheet. It is most likely a scan or a photo — use the Logarithmic Extraction Tool (LET) instead.');
         }
       })
       .catch((err: unknown) => {
@@ -467,7 +467,7 @@ function VectorTrace() {
   );
 }
 
-// ── AI extraction — review-and-confirm takeoff ───────────────────────────────
+// ── Logarithmic Extraction Tool (LET) — review-and-confirm extraction ────────
 // Sends the underlay raster to the Worker's Claude endpoint and presents the
 // proposed rooms for review. NOTHING becomes calculator input until the user
 // confirms — extracted values feed a legally binding load calc, and ACCA
@@ -515,6 +515,43 @@ function splitGeometry(rooms: EditableRoom[], request: AiExtractRequest): {
     else manualOnly.push(r);
   }
   return { rects, geom, manualOnly };
+}
+
+// Subtle transform "blip" shown while LET reads the plan. The raw imported
+// sheet (gray, skewed — created elsewhere) sits underneath; a scan line sweeps
+// across and leaves the platform's own crisp geometry in its wake, then loops.
+// Pure SVG + CSS (index.css .let-scan-*), reduced-motion aware. It reinforces
+// "we're ripping this into our format" without ever pulling focus.
+function ExtractionScanner() {
+  return (
+    <div className="let-scan-stage border border-slate-700/50 bg-slate-950/40 shadow-inner" aria-hidden>
+      {/* Raw source — the plan as it arrived: gray, dashed, a hair off-square */}
+      <svg className="let-scan-src" viewBox="0 0 224 140" fill="none">
+        <g transform="rotate(-1.4 112 70)" stroke="#64748b" strokeOpacity="0.5" strokeWidth="1.25" strokeLinecap="round">
+          <rect x="20" y="20" width="184" height="100" rx="1" strokeDasharray="3 3" />
+          <path d="M104 19 L103 121" strokeDasharray="3 3" />
+          <path d="M105 71 L205 69" strokeDasharray="3 3" />
+          <path d="M40 40 l4 -4" />
+          <path d="M150 98 l4 -4" />
+        </g>
+      </svg>
+      {/* Platform format — crisp, orthogonal, node-anchored emerald geometry */}
+      <div className="let-scan-out">
+        <svg viewBox="0 0 224 140" fill="none" className="w-full h-full">
+          <rect x="18" y="18" width="188" height="104" rx="3" fill="rgba(52,211,153,0.06)" stroke="#34d399" strokeWidth="2" />
+          <line x1="104" y1="18" x2="104" y2="122" stroke="#34d399" strokeWidth="1.6" />
+          <line x1="104" y1="70" x2="206" y2="70" stroke="#34d399" strokeWidth="1.6" />
+          <g fill="#34d399">
+            <circle cx="18" cy="18" r="2.4" /><circle cx="206" cy="18" r="2.4" />
+            <circle cx="18" cy="122" r="2.4" /><circle cx="206" cy="122" r="2.4" />
+            <circle cx="104" cy="18" r="2.4" /><circle cx="104" cy="122" r="2.4" />
+            <circle cx="104" cy="70" r="2.4" /><circle cx="206" cy="70" r="2.4" />
+          </g>
+        </svg>
+      </div>
+      <div className="let-scan-line" />
+    </div>
+  );
 }
 
 function AiExtract() {
@@ -666,6 +703,18 @@ function AiExtract() {
         lengthFt: r.lengthFt,
         widthFt: r.widthFt,
         ...(r.ceilingHeightFt ? { ceilingHeightFt: r.ceilingHeightFt } : {}),
+        // Glazing is NOT read from the plan — the extraction schema carries no
+        // window area, SHGC, or interior-shading field. createDefaultRoom seeds
+        // a placeholder 15 ft² of south glass; leaving that in silently drives
+        // BOTH the Manual J solar gain and the Section-N AED diversity check off
+        // fabricated numbers (an ACCA rule-4 violation — "no defaulted
+        // engineering inputs"). It is exactly what made AED read "close but not
+        // accurate" after an extraction. Zero the glass so the load calc and AED
+        // honestly show NONE until the engineer of record enters it per room —
+        // AED's own `windowSqFt <= 0` guard then excludes the room rather than
+        // computing a fake profile. windowCount (a bare count, when the model
+        // saw one) is kept only as a hint of how many openings to fill in.
+        windowSqFt: 0,
         ...(r.windowCount != null ? { windowCount: r.windowCount } : {}),
         ...(r.exposureDirection ? { exposureDirection: r.exposureDirection } : {}),
       };
@@ -731,7 +780,7 @@ function AiExtract() {
       const manualNote = manualOnly.length > 0
         ? ` ${manualOnly.length} room${manualOnly.length === 1 ? ' had' : 's had'} no traceable outline — added to Manual J only.`
         : '';
-      toast.success(`${geom.length} room${geom.length === 1 ? '' : 's'} drawn true to the blueprint and added to Manual J.${manualNote} Review the walls, then calculate loads.`);
+      toast.success(`${geom.length} room${geom.length === 1 ? '' : 's'} extracted true to the blueprint and added to Manual J.${manualNote} Review the walls and enter glazing per room, then calculate loads.`);
     } else {
       const newFloor = generateCadFloorFromManualJ(
         newRooms,
@@ -739,7 +788,7 @@ function AiExtract() {
         'grid',
         cadState.floors.length,
       );
-      newFloor.name = 'AI Takeoff';
+      newFloor.name = 'LET Extraction';
       useCadStore.setState((s) => ({
         floors: [...s.floors, newFloor],
         activeFloorId: newFloor.id,
@@ -748,7 +797,7 @@ function AiExtract() {
         redoStack: [],
       }));
       setRequest(null);
-      toast.success(`${newRooms.length} room${newRooms.length === 1 ? '' : 's'} drawn on the "AI Takeoff" floor and added to Manual J (no traceable outlines came back, so the layout is schematic). Finalize the plan here, then calculate loads.`);
+      toast.success(`${newRooms.length} room${newRooms.length === 1 ? '' : 's'} drawn on the "LET Extraction" floor and added to Manual J (no traceable outlines came back, so the layout is schematic). Finalize the plan, enter glazing per room, then calculate loads.`);
     }
     useGuidanceStore.getState().setHint('mj_calculate');
   };
@@ -760,17 +809,22 @@ function AiExtract() {
   };
 
   return (
-    <DialogShell icon={<Sparkles className="w-5 h-5" />} title="AI Blueprint Takeoff" variant="panel">
+    <DialogShell icon={<Sparkles className="w-5 h-5" />} title="Logarithmic Extraction Tool" variant="panel">
       {phase === 'loading' && (
-        <div className="flex flex-col items-center py-8 gap-3">
-          <Loader2 className="w-8 h-8 text-sky-400 animate-spin" />
-          <p className="text-sm text-slate-400">
-            Reading <span className="text-slate-200 break-words">{request.underlayName}</span>…
-          </p>
-          <p className="text-xs text-slate-600">Extracting the room schedule for review — nothing is applied automatically.</p>
+        <div className="flex flex-col items-center py-6 gap-4">
+          <ExtractionScanner />
+          <div className="flex flex-col items-center gap-1.5">
+            <p className="text-sm text-slate-300 flex items-center gap-2">
+              <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />
+              Extracting <span className="text-slate-100 break-words max-w-[16rem] truncate">{request.underlayName}</span>…
+            </p>
+            <p className="text-xs text-slate-600 text-center max-w-xs">
+              Reading the plan into the platform's own format — nothing is applied automatically.
+            </p>
+          </div>
           <button
             onClick={dismiss}
-            className="mt-2 min-h-[44px] px-4 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 transition-colors text-sm"
+            className="mt-1 min-h-[44px] px-4 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 transition-colors text-sm"
           >
             Cancel
           </button>
@@ -805,6 +859,18 @@ function AiExtract() {
               </span>
             </div>
           )}
+          {/* Glazing is never read from the plan. Window area, SHGC, and
+              orientation drive both the Manual J solar load and the Section-N
+              AED check — importing with fabricated glass is exactly what made
+              AED read "close but not accurate". Say so, every time. */}
+          <div className="flex gap-2 items-start mb-3 p-3 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-200 text-xs">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>
+              Windows aren't read from the plan — each imported room arrives with
+              <strong> no glazing</strong>. Enter window area, SHGC, and orientation
+              per room in Manual J before the load calc or <strong>AED</strong> are permit-valid.
+            </span>
+          </div>
           {extraction.warnings.length > 0 && (
             <ul className="mb-3 space-y-1">
               {extraction.warnings.map((w, i) => (
