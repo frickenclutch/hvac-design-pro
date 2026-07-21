@@ -102,6 +102,10 @@ export default function SettingsPage() {
               checked={prefs.showTooltips}
               onChange={(v) => prefs.update({ showTooltips: v })}
             />
+
+            <div className="pt-4 border-t border-slate-800/60">
+              <MetalFinishPicker />
+            </div>
           </Section>
 
           {/* Units & Defaults */}
@@ -165,9 +169,6 @@ export default function SettingsPage() {
           {/* Accessibility */}
           <Section icon={<Accessibility className="w-5 h-5 text-cyan-400" />} title="Accessibility">
             <A11yPanel />
-            <div className="pt-4 border-t border-slate-800/60">
-              <MetalFinishPicker />
-            </div>
           </Section>
 
           {/* PDF & Print Settings */}
@@ -940,7 +941,7 @@ function SynologyBackupSection({ orgId }: { orgId?: string }) {
   );
 }
 
-// Metal-finish picker (Accessibility). Each swatch previews its finish live by
+// Metal-finish picker (Appearance). Each swatch previews its finish live by
 // scoping the same CSS variables the global [data-metal] rules set, and the
 // engraved label re-inks per finish so the contrast is visible before you pick.
 // The values here mirror index.css :root[data-metal='…'] — index.css is the
