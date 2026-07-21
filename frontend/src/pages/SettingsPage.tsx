@@ -1,9 +1,10 @@
 import { useRef, useState, useEffect } from 'react';
 import { usePreferencesStore, type ThemeMode, type UIDensity, type UnitSystem, type EngineVersion } from '../stores/usePreferencesStore';
-import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle } from 'lucide-react';
+import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle, Pencil, HardDrive } from 'lucide-react';
 import { api } from '../lib/api';
 import A11yPanel from '../components/accessibility/A11yPanel';
 import TotpQr from '../components/TotpQr';
+import FeedbackAnnotator from '../components/FeedbackAnnotator';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { useAccessPolicyStore } from '../stores/useAccessPolicyStore';
 import { toast } from '../stores/useToastStore';
@@ -39,6 +40,10 @@ export default function SettingsPage() {
           {/* Access Policy — who in the tenant can see audit/version
               surfaces. Admin + L0 only. */}
           {(user?.role === 'admin' || user?.isPlatformAdmin) && <AccessPolicySection />}
+
+          {/* Legacy Archive & Backup (Synology NAS) — tenant-admin config for
+              routing records to the org's own NAS. Higher-tier capability. */}
+          {user?.role === 'admin' && <SynologyBackupSection orgId={organisation?.id} />}
 
           {/* User Profile */}
           <UserProfileSection token={token} user={user} />
@@ -689,6 +694,214 @@ function StampUpload({ label, dataUrl, onUpload, onClear }: { label: string; dat
   );
 }
 
+// Avatar that represents the user everywhere (menu, sidebar, Creation Portal).
+// Upload → optionally mark it up with the platform's own drawing tool
+// (FeedbackAnnotator, the same editor the bug reporter uses) → save. Stored as
+// a data URL in preferences (per-user scoped, quota-managed).
+function AvatarField({ initials }: { initials: string }) {
+  const avatarDataUrl = usePreferencesStore(s => s.avatarDataUrl);
+  const update = usePreferencesStore(s => s.update);
+  const fileRef = useRef<HTMLInputElement>(null);
+  // The image currently open in the annotator (null = closed).
+  const [editing, setEditing] = useState<string | null>(null);
+
+  const pickFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 4 * 1024 * 1024) { toast.error('Image must be under 4MB.'); return; }
+    const reader = new FileReader();
+    reader.onload = () => { if (typeof reader.result === 'string') setEditing(reader.result); };
+    reader.onerror = () => toast.error('Could not read that image.');
+    reader.readAsDataURL(file);
+  };
+
+  const handleDone = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') { update({ avatarDataUrl: reader.result }); toast.success('Avatar updated.'); }
+      setEditing(null);
+    };
+    reader.onerror = () => { toast.error('Could not save that avatar.'); setEditing(null); };
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div className="flex items-center gap-5 pb-5 mb-5 border-b border-slate-800/60">
+      <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={pickFile} className="hidden" />
+      <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-emerald-500/30 bg-emerald-500/10 flex items-center justify-center shrink-0 shadow-[0_0_20px_rgba(16,185,129,0.15)]">
+        {avatarDataUrl
+          ? <img src={avatarDataUrl} alt="Your avatar" className="w-full h-full object-cover" />
+          : <span className="text-2xl font-bold text-emerald-400 select-none">{initials}</span>}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-white">Profile photo</p>
+        <p className="text-xs text-slate-500 mb-3">Represents you across the platform. Add a few marks with the drawing tool before you save.</p>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 text-xs font-bold text-sky-400 hover:text-sky-300 bg-sky-500/10 border border-sky-500/30 px-3 py-2 rounded-lg transition-colors">
+            <Upload className="w-3.5 h-3.5" /> {avatarDataUrl ? 'Replace' : 'Upload'}
+          </button>
+          {avatarDataUrl && (
+            <>
+              <button onClick={() => setEditing(avatarDataUrl)} className="flex items-center gap-1.5 text-xs font-bold text-slate-300 hover:text-white bg-slate-700/40 border border-slate-600/40 px-3 py-2 rounded-lg transition-colors">
+                <Pencil className="w-3.5 h-3.5" /> Edit
+              </button>
+              <button onClick={() => { update({ avatarDataUrl: '' }); toast.success('Avatar removed.'); }} className="flex items-center gap-1.5 text-xs font-bold text-red-400 hover:text-red-300 bg-red-500/5 border border-red-500/20 px-3 py-2 rounded-lg transition-colors">
+                <Trash2 className="w-3.5 h-3.5" /> Remove
+              </button>
+            </>
+          )}
+        </div>
+        <p className="text-[10px] text-slate-600 mt-2">PNG, JPG, or WebP — max 4MB. Stored on this device.</p>
+      </div>
+      {editing && (
+        <FeedbackAnnotator imageDataUrl={editing} onDone={handleDone} onCancel={() => setEditing(null)} />
+      )}
+    </div>
+  );
+}
+
+// ── Legacy Archive & Backup (Synology NAS) ─────────────────────────────────
+// Tenant-admin surface for routing permit-grade records + drawings to the
+// org's own Synology NAS — the same appliance C4 Technologies runs for its
+// MSP clients. Two integration shapes: a WEBHOOK the platform POSTs archive
+// events to, or the org's Synology API endpoint. No credentials are ever held
+// here (CLAUDE.md §2 — no secrets in the frontend); this panel captures the
+// POLICY. The server-side delivery worker (fires on the selected events and
+// authenticates against the NAS with a server-held secret) is the follow-up
+// unit — the config is stored so that worker has something to read.
+interface BackupConfig {
+  enabled: boolean;
+  mode: 'webhook' | 'api';
+  endpointUrl: string;
+  sharePath: string;
+  events: { projects: boolean; calculations: boolean; cadDrawings: boolean; permits: boolean; exports: boolean };
+}
+
+const DEFAULT_BACKUP_CONFIG: BackupConfig = {
+  enabled: false,
+  mode: 'webhook',
+  endpointUrl: '',
+  sharePath: '/hvac-design-pro',
+  events: { projects: true, calculations: true, cadDrawings: true, permits: true, exports: false },
+};
+
+function backupKey(orgId?: string) { return `hvac_synology_backup_${orgId || 'org'}`; }
+
+function loadBackupConfig(orgId?: string): BackupConfig {
+  try {
+    const raw = localStorage.getItem(backupKey(orgId));
+    if (!raw) return DEFAULT_BACKUP_CONFIG;
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_BACKUP_CONFIG, ...parsed, events: { ...DEFAULT_BACKUP_CONFIG.events, ...(parsed.events ?? {}) } };
+  } catch { return DEFAULT_BACKUP_CONFIG; }
+}
+
+function SynologyBackupSection({ orgId }: { orgId?: string }) {
+  const [config, setConfig] = useState<BackupConfig>(() => loadBackupConfig(orgId));
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setConfig(loadBackupConfig(orgId)); }, [orgId]);
+
+  const patch = (p: Partial<BackupConfig>) => setConfig(c => ({ ...c, ...p }));
+  const patchEvent = (k: keyof BackupConfig['events'], v: boolean) =>
+    setConfig(c => ({ ...c, events: { ...c.events, [k]: v } }));
+
+  const save = () => {
+    setSaving(true);
+    try {
+      const clean: BackupConfig = { ...config, endpointUrl: config.endpointUrl.trim(), sharePath: config.sharePath.trim() };
+      if (clean.enabled && !clean.endpointUrl) {
+        toast.error('Enter your NAS endpoint before enabling backup.');
+        setSaving(false); return;
+      }
+      if (clean.endpointUrl && !/^https?:\/\//i.test(clean.endpointUrl)) {
+        toast.error('Endpoint must start with http:// or https://');
+        setSaving(false); return;
+      }
+      localStorage.setItem(backupKey(orgId), JSON.stringify(clean));
+      setConfig(clean);
+      toast.success('Backup policy saved.');
+    } catch {
+      toast.error('Could not save backup policy.');
+    }
+    setSaving(false);
+  };
+
+  return (
+    <Section icon={<HardDrive className="w-5 h-5 text-amber-400" />} title="Legacy Archive & Backup">
+      <div className="flex gap-2.5 items-start mb-5 p-3 rounded-xl border border-amber-500/25 bg-amber-500/5 text-xs text-amber-200/90">
+        <HardDrive className="w-4 h-4 shrink-0 mt-0.5" />
+        <span>
+          Archive permit-grade records and drawings to your own <strong>Synology NAS</strong> — the same
+          appliance C4&nbsp;Technologies runs for its MSP clients. Included on <strong>Professional</strong> and
+          <strong> Enterprise</strong> plans; your workspace plan governs activation.
+        </span>
+      </div>
+
+      <SwitchOption
+        label="Enable NAS archiving"
+        description="Push a copy of the selected records to your Synology appliance"
+        checked={config.enabled}
+        onChange={v => patch({ enabled: v })}
+      />
+
+      <div className={config.enabled ? '' : 'opacity-50 pointer-events-none select-none'}>
+        <OptionGroup label="Integration">
+          <ToggleRow
+            options={[
+              { value: 'webhook', label: 'Webhook (we POST to you)' },
+              { value: 'api', label: 'Synology API' },
+            ]}
+            value={config.mode}
+            onChange={(v) => patch({ mode: v as BackupConfig['mode'] })}
+          />
+        </OptionGroup>
+
+        <ProfileInput
+          label={config.mode === 'webhook' ? 'Webhook URL' : 'Synology API endpoint'}
+          value={config.endpointUrl}
+          onChange={v => patch({ endpointUrl: v })}
+          placeholder={config.mode === 'webhook' ? 'https://nas.yourfirm.com/webhook/hvac' : 'https://nas.yourfirm.com:5001/webapi'}
+        />
+        <div className="mt-4">
+          <ProfileInput
+            label="Destination share / folder"
+            value={config.sharePath}
+            onChange={v => patch({ sharePath: v })}
+            placeholder="/hvac-design-pro"
+          />
+        </div>
+
+        <div className="mt-5">
+          <p className="text-sm font-semibold text-white mb-1">Archive these events</p>
+          <p className="text-xs text-slate-500 mb-2">Each selected event pushes a copy to the NAS when it happens.</p>
+          <SwitchOption label="Projects" description="Project records and metadata" checked={config.events.projects} onChange={v => patchEvent('projects', v)} />
+          <SwitchOption label="Calculations" description="Manual J / D / S results (append-only snapshots)" checked={config.events.calculations} onChange={v => patchEvent('calculations', v)} />
+          <SwitchOption label="CAD drawings" description="Saved drawings and version history" checked={config.events.cadDrawings} onChange={v => patchEvent('cadDrawings', v)} />
+          <SwitchOption label="Permit submissions" description="Submittal packets and lifecycle records" checked={config.events.permits} onChange={v => patchEvent('permits', v)} />
+          <SwitchOption label="PDF exports" description="Generated permit-ready plots and reports" checked={config.events.exports} onChange={v => patchEvent('exports', v)} />
+        </div>
+
+        <div className="flex gap-2.5 items-start mt-5 p-3 rounded-xl border border-slate-700/40 bg-slate-800/30 text-[11px] text-slate-400">
+          <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5 text-emerald-400/70" />
+          <span>
+            Credentials are never entered or stored here. Configure NAS authentication on your appliance
+            (webhook secret) or in the platform's server-side secret store. This panel sets the policy;
+            the platform delivers the archives to it.
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-5 flex justify-end">
+        <button onClick={save} disabled={saving}
+          className="flex items-center gap-2 bg-amber-500/10 text-amber-300 border border-amber-500/30 px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-amber-500/20 transition-all disabled:opacity-50">
+          <Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save Backup Policy'}
+        </button>
+      </div>
+    </Section>
+  );
+}
+
 function NumberOption({ label, suffix, value, onChange, step = 1 }: { label: string; suffix?: string; value: number; onChange: (v: number) => void; step?: number }) {
   return (
     <div className="flex items-center justify-between py-2">
@@ -845,8 +1058,11 @@ function UserProfileSection({ token, user }: { token: string | null; user: { id:
 
   if (!user) return null;
 
+  const initials = `${user.firstName?.[0] ?? ''}${user.lastName?.[0] ?? ''}`.toUpperCase() || '?';
+
   return (
     <Section icon={<User className="w-5 h-5 text-sky-400" />} title="User Profile">
+      <AvatarField initials={initials} />
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <ProfileInput label="First Name" value={profile.firstName} onChange={v => setProfile(p => ({ ...p, firstName: v }))} />
         <ProfileInput label="Last Name" value={profile.lastName} onChange={v => setProfile(p => ({ ...p, lastName: v }))} />

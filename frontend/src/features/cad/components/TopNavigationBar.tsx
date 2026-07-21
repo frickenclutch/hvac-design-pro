@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
-import { ArrowLeft, Save, Undo2, Redo2, Download, Zap, Box, Search, ChevronDown, ChevronUp, HelpCircle, Pencil, X, ArrowRight, Building2, Home, MapPin, Briefcase, Check, History } from 'lucide-react';
+import { ArrowLeft, Save, Undo2, Redo2, Download, Zap, Box, Search, ChevronDown, ChevronUp, HelpCircle, Pencil, X, ArrowRight, Building2, Home, MapPin, Briefcase, Check, History, Settings, LogOut, ShieldCheck } from 'lucide-react';
 import AssetSearch from './AssetSearch';
 import ErrorBoundary from '../../../components/ErrorBoundary';
 import { scopedKey } from '../../../utils/storage';
-import UserAvatarMenu from '../../../components/UserAvatarMenu';
 import newProjectGear from '../../../assets/brand/new-project-gear.png';
 import cadPortalBlackhole from '../../../assets/brand/cad-portal-blackhole.png';
 import { Link, useParams, useNavigate } from 'react-router-dom';
@@ -11,6 +10,7 @@ import { useCadStore } from '../store/useCadStore';
 import { useAuthStore } from '../../auth/store/useAuthStore';
 import { useProjectStore } from '../../../stores/useProjectStore';
 import { useAccessPolicyStore } from '../../../stores/useAccessPolicyStore';
+import { usePreferencesStore } from '../../../stores/usePreferencesStore';
 
 // Lazy-load heavy dependencies (Three.js ~1.2MB, jsPDF ~200KB)
 const Viewer3D = lazy(() => import('./Viewer3D'));
@@ -23,8 +23,13 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
   const setShow3D = (v: boolean) => { setShow3DLocal(v); setIs3DViewOpen(v); };
   const canViewVersions = useAccessPolicyStore((s) => s.capabilities.canViewVersions);
   const [showSearch, setShowSearch] = useState(false);
-  const { user, organisation } = useAuthStore();
+  const { user, organisation, logout } = useAuthStore();
+  const avatarDataUrl = usePreferencesStore((s) => s.avatarDataUrl);
   const { activeProjectName, activeProjectType, activeProjectAddress, renameProject, createProject, activeProjectId } = useProjectStore();
+
+  // Identity for the Creation Portal header (the avatar now lives inside the portal).
+  const initials = `${user?.firstName?.[0] ?? ''}${user?.lastName?.[0] ?? ''}`.toUpperCase() || '?';
+  const fullName = user ? `${user.firstName} ${user.lastName}`.trim() : '';
 
   // ── Inline title editing ────────────────────────────────────────────────
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -355,7 +360,6 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
 
         {/* Right Side */}
         <div className="flex items-center gap-3">
-           <UserAvatarMenu size={34} compact />
            <button
              onClick={() => setPanelNavBar(false)}
              className="p-2 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800/80 transition-colors"
@@ -393,6 +397,20 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                >
                  {/* Specular sweep — glancing light over the whole plate */}
                  <span aria-hidden className="portal-menu-sheen absolute inset-0 pointer-events-none" />
+
+                 {/* Identity — the user's avatar now lives in the portal */}
+                 <div className="px-2.5 pt-2 pb-2.5 flex items-center gap-3 border-b border-slate-950/15">
+                   <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-slate-900/40 bg-slate-800 flex items-center justify-center shrink-0 shadow-[inset_0_1px_2px_rgba(255,255,255,0.4),0_1px_3px_rgba(0,0,0,0.4)]">
+                     {avatarDataUrl
+                       ? <img src={avatarDataUrl} alt="" className="w-full h-full object-cover" />
+                       : <span className="text-sm font-bold text-slate-100">{initials}</span>}
+                   </div>
+                   <div className="min-w-0">
+                     <p className="text-sm font-bold text-slate-950 truncate [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">{fullName || 'Your account'}</p>
+                     <p className="text-[11px] font-semibold text-slate-800 truncate [text-shadow:0_1px_0_rgba(255,255,255,0.6)]">{user?.email}</p>
+                   </div>
+                 </div>
+
                  <div className="px-2.5 pt-1.5 pb-2 flex items-center justify-between">
                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-950 [text-shadow:0_1px_0_rgba(255,255,255,0.55)]">Creation Portal</span>
                    <span className={`${portalPillClass} text-[9px] uppercase font-mono font-bold tracking-widest px-1.5 py-0.5 rounded border shadow-[inset_0_1px_1px_rgba(255,255,255,0.35),0_1px_3px_rgba(0,0,0,0.4)]`}>{saveStatusText}</span>
@@ -453,6 +471,55 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                    <span className="flex flex-col">
                      <span className="text-sm font-bold text-slate-950 [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">Export PDF</span>
                      <span className="text-xs font-semibold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.6)]">Permit-ready plot of this drawing</span>
+                   </span>
+                 </button>
+
+                 {/* ── Platform tabs — home base for settings + session ──────── */}
+                 <div className="mx-2.5 my-1 h-px bg-slate-950/15" />
+
+                 <Link
+                   role="menuitem"
+                   to="/settings"
+                   onClick={() => setPortalOpen(false)}
+                   className="w-full min-h-[44px] flex items-center gap-3 px-2.5 py-3 text-left hover:bg-slate-950/15 transition-colors group"
+                 >
+                   <span className="w-9 h-9 rounded-xl bg-slate-600 border-2 border-slate-900/50 flex items-center justify-center shrink-0 shadow-[inset_0_1px_2px_rgba(255,255,255,0.45),0_2px_5px_rgba(0,0,0,0.45)]">
+                     <Settings className="w-4 h-4 text-slate-50" />
+                   </span>
+                   <span className="flex flex-col">
+                     <span className="text-sm font-bold text-slate-950 [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">Settings</span>
+                     <span className="text-xs font-semibold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.6)]">Your workbench — theme, units, profile</span>
+                   </span>
+                 </Link>
+
+                 {user?.isPlatformAdmin && (
+                   <Link
+                     role="menuitem"
+                     to="/admin"
+                     onClick={() => setPortalOpen(false)}
+                     className="w-full min-h-[44px] flex items-center gap-3 px-2.5 py-3 text-left hover:bg-slate-950/15 transition-colors group"
+                   >
+                     <span className="w-9 h-9 rounded-xl bg-amber-500 border-2 border-amber-800/60 flex items-center justify-center shrink-0 shadow-[inset_0_1px_2px_rgba(255,255,255,0.45),0_2px_5px_rgba(0,0,0,0.45)]">
+                       <ShieldCheck className="w-4 h-4 text-amber-950" />
+                     </span>
+                     <span className="flex flex-col">
+                       <span className="text-sm font-bold text-slate-950 [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">Platform Admin</span>
+                       <span className="text-xs font-semibold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.6)]">L0 — cross-tenant controls</span>
+                     </span>
+                   </Link>
+                 )}
+
+                 <button
+                   role="menuitem"
+                   onClick={() => { setPortalOpen(false); logout(); }}
+                   className="w-full min-h-[44px] flex items-center gap-3 px-2.5 py-3 text-left hover:bg-slate-950/15 transition-colors group"
+                 >
+                   <span className="w-9 h-9 rounded-xl bg-red-600 border-2 border-red-900/50 flex items-center justify-center shrink-0 shadow-[inset_0_1px_2px_rgba(255,255,255,0.45),0_2px_5px_rgba(0,0,0,0.45)]">
+                     <LogOut className="w-4 h-4 text-red-50" />
+                   </span>
+                   <span className="flex flex-col">
+                     <span className="text-sm font-bold text-slate-950 [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">Sign Out</span>
+                     <span className="text-xs font-semibold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.6)]">End this session</span>
                    </span>
                  </button>
                </div>
