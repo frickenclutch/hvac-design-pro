@@ -34,7 +34,7 @@ const sections: HelpSection[] = [
   },
   {
     id: 'blueprints',
-    title: 'Blueprints & AI Takeoff',
+    title: 'Blueprints & Logarithmic Extraction',
     icon: <FileText className="w-4 h-4" />,
     items: [
       {
@@ -46,16 +46,16 @@ const sections: HelpSection[] = [
         desc: 'Blueprints import as pixels — calibrate before tracing. Pick the Calibrate Scale tool (crosshair), click both ends of a printed dimension on the plan, and type the real distance (30, 24.5, or 24\' 6" all work). The underlay rescales so traced walls read in real feet. Zoom in first for precision.',
       },
       {
-        title: 'AI Extract Rooms',
-        desc: 'The sparkles button sends every sheet on the floor to the AI as one plan set (up to 6) and proposes a merged room schedule WITH each room\'s outline traced on the sheet. Everything lands in a review panel — dashed green previews show where rooms will land on the blueprint itself, measurement for measurement. Confirming draws the walls at their true positions on the active floor and auto-calibrates the sheet scale from the printed dimensions; the rooms also go to Manual J. Nothing is applied without your review; you are the engineer of record.',
+        title: 'Logarithmic Extraction Tool (LET)',
+        desc: 'The hexagon button sends every sheet on the floor to the extractor as one plan set (up to 6) and proposes a merged room schedule WITH each room\'s outline traced on the sheet. Everything lands in a review panel — dashed green previews show where rooms will land on the blueprint itself, measurement for measurement. Confirming draws the walls at their true positions on the active floor and auto-calibrates the sheet scale from the printed dimensions; the rooms also go to Manual J. Nothing is applied without your review; you are the engineer of record. Note: LET reads walls and dimensions, NOT glazing — imported rooms arrive with no windows, so enter window area, SHGC, and orientation per room in Manual J before the load calc or AED are permit-valid.',
       },
       {
         title: 'Glimmer hints',
-        desc: 'After each step, the next ideal tool softly glows — import → AI Extract Rooms; if you skip the AI, Calibrate Scale → Draw Wall → Detect Rooms. Click the glowing tool (or any other) and the hint disappears. With reduced motion enabled, the glow is a steady ring.',
+        desc: 'After each step, the next ideal tool softly glows — import → Logarithmic Extraction; if you skip LET, Calibrate Scale → Draw Wall → Detect Rooms. Click the glowing tool (or any other) and the hint disappears. With reduced motion enabled, the glow is a steady ring.',
       },
       {
         title: 'Commercial plans',
-        desc: 'Manual J is residential-only. Commercial/assembly plans (warehouses, gyms, offices) are flagged during AI takeoff — treat results as budget estimates, not permit-grade calcs, until Manual N ships.',
+        desc: 'Manual J is residential-only. Commercial/assembly plans (warehouses, gyms, offices) are flagged during Logarithmic Extraction — treat results as budget estimates, not permit-grade calcs, until Manual N ships.',
       },
     ],
   },

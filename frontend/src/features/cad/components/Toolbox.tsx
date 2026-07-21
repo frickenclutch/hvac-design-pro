@@ -189,7 +189,7 @@ export default function Toolbox() {
     if (activeTool !== 'select') useGuidanceStore.getState().clearHint('cad_');
   }, [activeTool]);
 
-  // ── AI blueprint extraction ───────────────────────────────────────────────
+  // ── Logarithmic Extraction Tool (LET) ─────────────────────────────────────
   // Sends EVERY sheet on the active floor — plan sets split across multiple
   // files are merged into one room schedule server-side.
   const handleAiExtract = () => {
@@ -198,11 +198,11 @@ export default function Toolbox() {
     const floor = state.floors.find(f => f.id === state.activeFloorId);
     const underlays = floor?.underlays ?? [];
     if (underlays.length === 0) {
-      toast.warning('Import a blueprint first (PDF or image), then run AI takeoff.');
+      toast.warning('Import a blueprint first (PDF or image), then run Logarithmic Extraction (LET).');
       return;
     }
     const sheets = underlays.slice(0, 6);
-    if (underlays.length > 6) toast.warning('Using the first 6 sheets — the AI takeoff caps at 6 per pass.');
+    if (underlays.length > 6) toast.warning('Using the first 6 sheets — the Logarithmic Extraction Tool caps at 6 per pass.');
     const name = sheets.length === 1 ? sheets[0].name : `${sheets[0].name} (+${sheets.length - 1} more sheet${sheets.length > 2 ? 's' : ''})`;
     state.setAiExtractRequest({ underlayName: name, dataUrls: sheets.map(u => u.dataUrl), underlayIds: sheets.map(u => u.id) });
   };
@@ -331,7 +331,7 @@ export default function Toolbox() {
           <button
             onClick={handleAiExtract}
             className={`p-3 mx-2 rounded-xl transition-all duration-300 group relative hover:bg-slate-800/80 border border-transparent${glimmerClass('cad_ai_extract', guidanceHint)}`}
-            aria-label="Algorithmic Extraction Tool (review before import)"
+            aria-label="Logarithmic Extraction Tool (review before import)"
           >
             {/* Glowing hexagon glyph — glow-on-transparent cut from the
                 emblem art. Rendered at 36px (negative margin keeps the
@@ -344,7 +344,7 @@ export default function Toolbox() {
             />
           </button>
           <div className="absolute left-full top-1/2 -translate-y-1/2 ml-4 px-3 py-1.5 bg-slate-800/90 border border-slate-700 text-slate-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 backdrop-blur-md shadow-xl">
-            Algorithmic Extraction Tool
+            Logarithmic Extraction Tool
             <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-2 bg-slate-800/90 border-l border-b border-slate-700 rotate-45" />
           </div>
         </div>

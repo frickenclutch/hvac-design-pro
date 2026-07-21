@@ -32,7 +32,7 @@ export interface Env {
    *  rest. Set via `wrangler secret put MFA_ENC_KEY`. Unset → MFA enrollment
    *  refuses (never stores a plaintext secret). */
   MFA_ENC_KEY?: string;
-  /** Anthropic API key for AI blueprint extraction — set via
+  /** Anthropic API key for the Logarithmic Extraction Tool (LET) — set via
    *  `wrangler secret put ANTHROPIC_API_KEY`. Unset → /api/ai/* returns 503. */
   ANTHROPIC_API_KEY?: string;
 }

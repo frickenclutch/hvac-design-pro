@@ -102,8 +102,8 @@ export interface ApiCalculationDetail extends Omit<ApiCalculationRow, 'inputs' |
   outputs: unknown;
 }
 
-// AI blueprint extraction — the structured proposal the Worker's Claude
-// vision endpoint returns. Mirrors workers/src/routes/ai.ts EXTRACTION_SCHEMA.
+// Logarithmic Extraction Tool (LET) — the structured proposal the Worker's
+// Claude vision endpoint returns. Mirrors workers/src/routes/ai.ts EXTRACTION_SCHEMA.
 export interface AiExtractedRoom {
   name: string;
   lengthFt: number;
@@ -578,7 +578,7 @@ class ApiClient {
     return this.request<ApiCalculationDetail>(`/api/calculations/${id}`);
   }
 
-  // AI blueprint extraction (Worker → Claude vision). Accepts a whole plan
+  // Logarithmic Extraction (Worker → Claude vision). Accepts a whole plan
   // set (up to 6 sheets) and returns ONE merged room schedule. Every result
   // is a PROPOSAL — the UI requires human review before anything becomes
   // calc input.
