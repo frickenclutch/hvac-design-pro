@@ -5,7 +5,15 @@ import { mintTokenPair } from '../utils/session';
 import { nowIso } from '../utils/time';
 import { sendEmail, buildWelcomeEmail, buildVerificationEmail, buildPasswordResetEmail, buildMfaEmailCode } from '../utils/email';
 import { createVerificationCode, validateVerificationCode } from '../utils/verificationCodes';
-import { checkRateLimit, recordRateLimitEvent, cleanupRateLimitEvents } from '../utils/rateLimit';
+import { checkRateLimit, recordRateLimitEvent, cleanupRateLimitEvents, checkAuthRateLimit, recordAuthFailure } from '../utils/rateLimit';
+
+/** Best-effort source IP for rate limiting. Cloudflare sets cf-connecting-ip
+ *  on every edge request; the x-forwarded-for fallback covers local/dev. */
+function clientIp(c: { req: { header(name: string): string | undefined } }): string | null {
+  return c.req.header('cf-connecting-ip')
+    ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim()
+    ?? null;
+}
 import { buildAuthUrl, exchangeCodeForTokens, fetchMicrosoftProfile, buildCfAccessAuthUrl, exchangeCfAccessCode, fetchCfAccessUserInfo } from '../utils/oauth';
 import { writeAuthAudit } from '../middleware/audit';
 import { authMiddleware, type AuthUser } from '../middleware/auth';
@@ -146,15 +154,16 @@ authRoutes.post('/register', async (c) => {
   const db = c.env.DB;
   const normalizedEmail = email.toLowerCase().trim();
 
-  // Rate limit registration
-  const limit = await checkRateLimit(db, normalizedEmail, 'register', 5, 15);
+  // Rate limit registration — email + source IP (curbs bulk account creation).
+  const ip = clientIp(c);
+  const limit = await checkAuthRateLimit(db, 'register', normalizedEmail, ip, { emailMax: 5, ipMax: 10, windowMinutes: 15 });
   if (!limit.allowed) {
     return c.json({ error: `Too many registration attempts. Try again in ${Math.ceil(limit.retryAfterSeconds! / 60)} minutes.` }, 429);
   }
 
   const existing = await db.prepare('SELECT id FROM users WHERE email = ?').bind(normalizedEmail).first();
   if (existing) {
-    await recordRateLimitEvent(db, normalizedEmail, 'register');
+    await recordAuthFailure(db, 'register', normalizedEmail, ip);
     return c.json({ error: 'Email already registered' }, 409);
   }
 
@@ -208,8 +217,11 @@ authRoutes.post('/login', async (c) => {
   const db = c.env.DB;
   const normalizedEmail = email.toLowerCase().trim();
 
-  // Rate limiting
-  const limit = await checkRateLimit(db, normalizedEmail, 'login', 5, 15);
+  // Rate limiting — email + source IP. The IP dimension is what stops password
+  // spray (one password across many emails from one source); a per-email limit
+  // alone never sees it.
+  const ip = clientIp(c);
+  const limit = await checkAuthRateLimit(db, 'login', normalizedEmail, ip, { emailMax: 5, ipMax: 20, windowMinutes: 15 });
   if (!limit.allowed) {
     return c.json({
       error: `Too many login attempts. Try again in ${Math.ceil(limit.retryAfterSeconds! / 60)} minutes.`,
@@ -226,7 +238,7 @@ authRoutes.post('/login', async (c) => {
   ).bind(normalizedEmail).first();
 
   if (!user || !user.password_hash) {
-    await recordRateLimitEvent(db, normalizedEmail, 'login');
+    await recordAuthFailure(db, 'login', normalizedEmail, ip);
     await writeAuthAudit(c, {
       action: 'auth.login.failed', status: 401,
       entityLabel: normalizedEmail,
@@ -237,7 +249,7 @@ authRoutes.post('/login', async (c) => {
 
   const valid = await verifyPassword(password, user.password_hash as string);
   if (!valid) {
-    await recordRateLimitEvent(db, normalizedEmail, 'login');
+    await recordAuthFailure(db, 'login', normalizedEmail, ip);
     await writeAuthAudit(c, {
       action: 'auth.login.failed', status: 401,
       userId: user.id as string, orgId: user.org_id as string,
@@ -465,13 +477,14 @@ authRoutes.post('/forgot-password', async (c) => {
   const db = c.env.DB;
   const normalizedEmail = email.toLowerCase().trim();
 
-  // Rate limiting
-  const limit = await checkRateLimit(db, normalizedEmail, 'forgot_password', 3, 15);
+  // Rate limiting — email + source IP.
+  const ip = clientIp(c);
+  const limit = await checkAuthRateLimit(db, 'forgot_password', normalizedEmail, ip, { emailMax: 3, ipMax: 10, windowMinutes: 15 });
   if (!limit.allowed) {
     return c.json({ error: `Too many requests. Try again in ${Math.ceil(limit.retryAfterSeconds! / 60)} minutes.` }, 429);
   }
 
-  await recordRateLimitEvent(db, normalizedEmail, 'forgot_password');
+  await recordAuthFailure(db, 'forgot_password', normalizedEmail, ip);
 
   // Look up user — always return ok to prevent email enumeration
   const user = await db.prepare(
