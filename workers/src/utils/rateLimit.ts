@@ -67,6 +67,48 @@ export async function recordRateLimitEvent(
 }
 
 /**
+ * Combined auth rate-limit check: the caller-supplied email AND the source IP.
+ * Either bucket over its limit → blocked.
+ *
+ * The per-email bucket stops single-account online guessing. The per-IP bucket
+ * is what stops PASSWORD SPRAY — one password tried across many different emails
+ * from one source — which a per-email-only limit is completely blind to (each
+ * email is a fresh counter). IP is prefixed (`ip:`) and uses a distinct action
+ * suffix (`_ip`) so it can never collide with an email bucket.
+ *
+ * Distributed spray across many IPs still needs a platform-wide anomaly ceiling;
+ * that is deliberately NOT a hard block here (a global hard block would let an
+ * attacker self-DoS every legit login) — it belongs in alerting. TODO: emit a
+ * metric when the global failed-auth rate spikes.
+ */
+export async function checkAuthRateLimit(
+  db: D1Database,
+  action: string,
+  email: string,
+  ip: string | null,
+  limits: { emailMax: number; ipMax: number; windowMinutes: number },
+): Promise<RateLimitResult> {
+  const byEmail = await checkRateLimit(db, email, action, limits.emailMax, limits.windowMinutes);
+  if (!byEmail.allowed) return byEmail;
+  if (ip) {
+    const byIp = await checkRateLimit(db, `ip:${ip}`, `${action}_ip`, limits.ipMax, limits.windowMinutes);
+    if (!byIp.allowed) return byIp;
+  }
+  return { allowed: true, retryAfterSeconds: null };
+}
+
+/** Record an auth failure against BOTH the email and the source-IP buckets. */
+export async function recordAuthFailure(
+  db: D1Database,
+  action: string,
+  email: string,
+  ip: string | null,
+): Promise<void> {
+  await recordRateLimitEvent(db, email, action);
+  if (ip) await recordRateLimitEvent(db, `ip:${ip}`, `${action}_ip`);
+}
+
+/**
  * Delete rate-limit events older than the given threshold.
  * Call inside `waitUntil` so it never blocks the response.
  */
