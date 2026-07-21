@@ -170,7 +170,7 @@ platformRoutes.get('/audit', async (c) => {
 //
 // Sections:
 //  - certification: hard-coded ACCA validation results for the engine version
-//    currently shipped (manualJ8 v1.1.0). These travel with the build, not
+//    currently shipped (manualJ8 v1.3.0). These travel with the build, not
 //    the DB, because the cert package was filed against a specific revision.
 //  - engineVersions: distribution of engine_version stamped onto persisted
 //    calculations — answers "which engine ran what in prod"

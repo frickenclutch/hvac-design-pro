@@ -15,7 +15,7 @@ review** live entirely in:
 ```
 frontend/src/engines/
   ├── manualJ.ts            # legacy per-room engine (display today)
-  ├── manualJ8/             # cert-grade Form J1 engine (manualJ8-ts-1.1.0)
+  ├── manualJ8/             # cert-grade Form J1 engine (manualJ8-ts-1.3.0)
   ├── manualD.ts            # duct sizing
   ├── aed.ts                # Adequate Exposure Diversity
   └── manualS.ts            # equipment selection

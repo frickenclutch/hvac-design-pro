@@ -678,7 +678,7 @@ const sections: GuideSection[] = [
         <p>Today, every Manual J calculation runs <strong>both engines</strong> in parallel:</p>
         <ul className="text-sm text-slate-300 space-y-1 ml-4 list-disc">
           <li><strong className="text-emerald-400">Legacy engine</strong> — the per-room aggregator that's been in production. Its results are what you see displayed.</li>
-          <li><strong className="text-amber-400">Cert-grade engine v1.1.0</strong> — the new whole-house Form J1 implementation. Runs silently alongside legacy and logs drift to the browser console.</li>
+          <li><strong className="text-amber-400">Cert-grade engine v1.3.0</strong> — the new whole-house Form J1 implementation. Runs silently alongside legacy and logs drift to the browser console.</li>
         </ul>
         <p>Once we collect a few weeks of real-user drift telemetry from production projects, we flip the display to the cert-grade results. ACCA approval makes those outputs <strong>legally valid for permit applications</strong>.</p>
         <Tip>Nothing changes for you today. Same calculator, same display. Drift telemetry happens in the background.</Tip>
@@ -689,7 +689,7 @@ const sections: GuideSection[] = [
         <p>Engine: <code className="text-emerald-400/70">frontend/src/engines/manualJ8/</code>, version stamp <code>manualJ8-ts-1.3.0</code> (1.1.0 + ceiling CLTD family rows and climate-dependent Construction 19 floor PTD tables, all transcribed from the physical ACCA book, Table 4A pp. 362-377). Validated against ACCA reference test cases (Smith / Walker / Cobb) at 184/184 line items within 0.5% tolerance, enforced in CI by the vitest cert suite.</p>
         <p>Adapter shim: <code className="text-emerald-400/70">manualJ8/adapters/legacy.ts → roomInputsToFormJ1Input()</code> aggregates per-room legacy <code>RoomInput[]</code> data into the whole-house <code>FormJ1Input</code>.</p>
         <p>Pipeline: <code className="text-emerald-400/70">runCalculation()</code> in <code>pages/ManualJCalculator.tsx</code> calls legacy first (display), then if <code>shadowRunManualJ8 === true</code> also calls the cert engine and console-logs <code>[engine drift]</code> with heat / sens / latent percentages.</p>
-        <p>Phase 2 trigger criteria documented in <code>docs/option-e-ui-migration-plan.md</code>: ≥10 production projects driven through the calculator + drift on those projects ≤ 5% on every total + ACCA cert review approved.</p>
+        <p>Phase 2 trigger criteria documented in <code>docs/option-e-ui-migration-plan.md</code>: ≥10 production projects driven through the calculator + drift on those projects ≤ 5% on every total. (ACCA approval is <em>no longer</em> a gate for the flip — the filing stays on record and, once granted, adds the permit-registry credential.)</p>
       </div>
     ),
   },
