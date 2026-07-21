@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { usePreferencesStore, type ThemeMode, type UIDensity, type UnitSystem, type EngineVersion, type MetalFinish } from '../stores/usePreferencesStore';
-import { Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle, Pencil, HardDrive, ChevronDown, Search, X } from 'lucide-react';
+import { usePreferencesStore, preferenceDefaults, type ThemeMode, type UIDensity, type UnitSystem, type EngineVersion, type MetalFinish, type UserPreferences } from '../stores/usePreferencesStore';
+import { Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle, Pencil, HardDrive, ChevronDown, Search, X, ArrowUpDown, GripVertical, Minus, Plus, ListFilter } from 'lucide-react';
 import { api } from '../lib/api';
 import A11yPanel from '../components/accessibility/A11yPanel';
 import TotpQr from '../components/TotpQr';
@@ -16,14 +16,38 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 export default function SettingsPage() {
   const { user, organisation, token } = useAuthStore();
   const settingsLastCategory = usePreferencesStore((s) => s.settingsLastCategory);
+  const navOrder = usePreferencesStore((s) => s.settingsNavOrder);
+  const navHidden = usePreferencesStore((s) => s.settingsNavHidden);
   const updatePrefs = usePreferencesStore((s) => s.update);
+  // Whole-prefs snapshot for the "changed only" filter — re-renders as the
+  // user edits a setting so the filtered list stays live.
+  const prefs = usePreferencesStore();
 
-  // Registry → only categories with at least one section visible to this viewer.
-  const categories = useMemo(
+  // Registry → only categories with at least one section visible to this
+  // viewer. This is the DEFAULT (registry) order.
+  const baseCategories = useMemo(
     () => buildSettingsCategories({ user, organisation, token })
       .map((c) => ({ ...c, sections: c.sections.filter((s) => s.visible) }))
       .filter((c) => c.sections.length > 0),
     [user, organisation, token],
+  );
+
+  // Apply the user's custom order (Phase 3). Forward-compatible: any category
+  // shipped since they last arranged appends in registry order — same rule as
+  // the CAD toolbox rail.
+  const categories = useMemo(() => {
+    if (!navOrder) return baseCategories;
+    const byId = new Map(baseCategories.map((c) => [c.id, c]));
+    const known = navOrder.map((id) => byId.get(id)).filter((c): c is SettingsCategoryEntry => !!c);
+    const missing = baseCategories.filter((c) => !navOrder.includes(c.id));
+    return [...known, ...missing];
+  }, [baseCategories, navOrder]);
+
+  // The rail shows ordered categories minus the hidden set; search and
+  // deep-links still reach hidden ones (hiding declutters, never disables).
+  const railCategories = useMemo(
+    () => categories.filter((c) => !navHidden.includes(c.id)),
+    [categories, navHidden],
   );
 
   // Active category: URL hash → last-open pref → first visible.
@@ -32,7 +56,13 @@ export default function SettingsPage() {
     return hash || settingsLastCategory || '';
   });
   const [query, setQuery] = useState('');
-  const activeCat = categories.find((c) => c.id === active) ?? categories[0];
+  const [arrangeMode, setArrangeMode] = useState(false);
+  const [changedOnly, setChangedOnly] = useState(false);
+
+  // Active resolves against the full ordered set (so a deep-linked / last-open
+  // category that's hidden from the rail still renders), but a fresh visit
+  // falls back to the first VISIBLE category.
+  const activeCat = categories.find((c) => c.id === active) ?? railCategories[0] ?? categories[0];
   useEffect(() => {
     if (activeCat && activeCat.id !== active) setActive(activeCat.id);
   }, [activeCat, active]);
@@ -43,7 +73,7 @@ export default function SettingsPage() {
   const location = useLocation();
   useEffect(() => {
     const h = location.hash.replace('#', '');
-    if (h) { setActive(h); setQuery(''); }
+    if (h) { setActive(h); setQuery(''); setChangedOnly(false); }
   }, [location.hash]);
 
   const selectCategory = (id: string) => {
@@ -51,23 +81,30 @@ export default function SettingsPage() {
     updatePrefs({ settingsLastCategory: id });
     if (typeof window !== 'undefined') window.history.replaceState(null, '', `#${id}`);
   };
+  const pickCategory = (id: string) => { setQuery(''); setChangedOnly(false); selectCategory(id); };
 
-  // ── Live search over the registry (Phase 2) ──────────────────────────────
+  // ── Detail filters: live search (Phase 2) ∪ "non-default only" (Phase 3) ──
+  // Both collapse the detail pane into one flat, category-grouped list over the
+  // registry. Search reaches every viewer-visible category (including ones
+  // hidden from the rail); "changed only" keeps pref-backed sections whose live
+  // value differs from its shipped default.
   const q = query.trim().toLowerCase();
   const searching = q.length > 0;
-  const searchResults = useMemo(() => {
-    if (!q) return [] as { category: SettingsCategoryEntry; section: SettingsSectionEntry }[];
+  const filterActive = searching || changedOnly;
+  const filteredList = useMemo(() => {
+    if (!filterActive) return [] as { category: SettingsCategoryEntry; section: SettingsSectionEntry }[];
     const out: { category: SettingsCategoryEntry; section: SettingsSectionEntry }[] = [];
     for (const c of categories) {
       for (const s of c.sections) {
-        if (`${s.title} ${s.keywords.join(' ')} ${c.title}`.toLowerCase().includes(q)) {
-          out.push({ category: c, section: s });
-        }
+        if (q && !`${s.title} ${s.keywords.join(' ')} ${c.title}`.toLowerCase().includes(q)) continue;
+        if (changedOnly && !sectionChanged(s, prefs)) continue;
+        out.push({ category: c, section: s });
       }
     }
     return out;
-  }, [q, categories]);
-  const pickCategory = (id: string) => { setQuery(''); selectCategory(id); };
+  }, [filterActive, q, changedOnly, categories, prefs]);
+
+  const enterArrange = () => { setArrangeMode(true); setQuery(''); setChangedOnly(false); };
 
   return (
     <div className="h-full overflow-y-auto">
@@ -95,35 +132,77 @@ export default function SettingsPage() {
         <div className="flex flex-col md:flex-row gap-6">
           {/* Search + category rail — registry-driven; only categories with a
               section visible to this viewer appear. Horizontal-scroll rail on
-              mobile, sticky vertical list on desktop. */}
+              mobile, sticky vertical list on desktop. Phase 3 adds an arrange
+              mode (reorder + hide) and a "changed only" filter. */}
           <nav className="md:w-56 md:shrink-0 md:sticky md:top-4 self-start w-full" aria-label="Settings categories">
-            <div className="relative mb-3">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search settings…"
-                aria-label="Search settings"
-                className="w-full bg-slate-900/70 border border-slate-700/50 rounded-xl pl-9 pr-8 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 min-h-[44px]"
-              />
-              {query && (
-                <button onClick={() => setQuery('')} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-slate-300">
-                  <X className="w-4 h-4" />
+            {!arrangeMode && (
+              <div className="relative mb-2">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+                <input
+                  value={query}
+                  onChange={(e) => { setQuery(e.target.value); if (e.target.value) setChangedOnly(false); }}
+                  placeholder="Search settings…"
+                  aria-label="Search settings"
+                  className="w-full bg-slate-900/70 border border-slate-700/50 rounded-xl pl-9 pr-8 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 min-h-[44px]"
+                />
+                {query && (
+                  <button onClick={() => setQuery('')} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-slate-300">
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Rail toolbar — Arrange (reorder/hide) and Changed-only filter.
+                Compact + muted so they stay out of the way of everyday use. */}
+            <div className="flex items-center gap-1.5 mb-3">
+              <button
+                onClick={() => (arrangeMode ? setArrangeMode(false) : enterArrange())}
+                aria-pressed={arrangeMode}
+                title={arrangeMode ? 'Done arranging' : 'Arrange categories — drag to reorder, hide what you don’t use'}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors min-h-[36px] ${arrangeMode ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50 border border-transparent'}`}
+              >
+                {arrangeMode ? <Check className="w-3.5 h-3.5" /> : <ArrowUpDown className="w-3.5 h-3.5" />}
+                {arrangeMode ? 'Done' : 'Arrange'}
+              </button>
+              {!arrangeMode && (
+                <button
+                  onClick={() => { setChangedOnly((v) => !v); setQuery(''); }}
+                  aria-pressed={changedOnly}
+                  title="Show only preferences changed from their defaults"
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors min-h-[36px] ${changedOnly ? 'bg-sky-500/15 text-sky-300 border border-sky-500/30' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50 border border-transparent'}`}
+                >
+                  <ListFilter className="w-3.5 h-3.5" /> Changed
                 </button>
               )}
             </div>
-            <SettingsRail categories={categories} active={searching ? '' : (activeCat?.id ?? '')} onSelect={pickCategory} />
+
+            {arrangeMode ? (
+              <SettingsArrangeRail
+                categories={categories}
+                hidden={navHidden}
+                defaultOrder={baseCategories.map((c) => c.id)}
+                onChange={updatePrefs}
+              />
+            ) : (
+              <SettingsRail categories={railCategories} active={filterActive ? '' : (activeCat?.id ?? '')} onSelect={pickCategory} />
+            )}
           </nav>
 
-          {/* Detail pane — search results across all categories, or the active
-              category's sections. Each keeps its collapsible card; #id anchors
-              make sections deep-linkable. */}
+          {/* Detail pane — while arranging, an instructional card; otherwise the
+              filtered flat list (search / changed-only) or the active category's
+              sections. Each keeps its collapsible card; #id anchors make sections
+              deep-linkable. */}
           <div className="flex-1 min-w-0 space-y-6">
-            {searching ? (
-              searchResults.length === 0 ? (
-                <p className="text-sm text-slate-500 py-10 text-center">No settings match “{query}”.</p>
+            {arrangeMode ? (
+              <ArrangeHint />
+            ) : filterActive ? (
+              filteredList.length === 0 ? (
+                <p className="text-sm text-slate-500 py-10 text-center">
+                  {searching ? <>No settings match “{query}”.</> : 'No preferences differ from their defaults.'}
+                </p>
               ) : (
-                searchResults.map(({ category, section }) => (
+                filteredList.map(({ category, section }) => (
                   <div key={section.id} id={section.id} className="scroll-mt-24">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1.5 ml-1">{category.title}</p>
                     {section.node}
@@ -414,6 +493,11 @@ export interface SettingsSectionEntry {
   keywords: string[];
   visible: boolean;
   node: React.ReactNode;
+  /** Preference keys this section owns — drives the "non-default only" filter.
+   *  Omit for server- or localStorage-backed sections (Org profile, MFA,
+   *  Access Policy, Authority, Synology backup, System): their state doesn't
+   *  live in usePreferencesStore, so there's no default to diff against. */
+  prefKeys?: (keyof UserPreferences)[];
 }
 export interface SettingsCategoryEntry {
   id: string;
@@ -432,29 +516,29 @@ function buildSettingsCategories(ctx: RegistryCtx): SettingsCategoryEntry[] {
   const isL0 = !!ctx.user?.isPlatformAdmin;
   return [
     { id: 'account', title: 'Account', icon: <User className="w-4 h-4" />, sections: [
-      { id: 'user-profile', title: 'User Profile', icon: <User className="w-5 h-5 text-sky-400" />, keywords: ['name', 'avatar', 'photo', 'phone', 'email', 'profile'], visible: !!ctx.user, node: <UserProfileSection token={ctx.token} user={ctx.user} /> },
+      { id: 'user-profile', title: 'User Profile', icon: <User className="w-5 h-5 text-sky-400" />, keywords: ['name', 'avatar', 'photo', 'phone', 'email', 'profile'], visible: !!ctx.user, prefKeys: ['avatarDataUrl'], node: <UserProfileSection token={ctx.token} user={ctx.user} /> },
     ] },
     { id: 'security', title: 'Security', icon: <ShieldCheck className="w-4 h-4" />, sections: [
       { id: 'two-factor', title: 'Two-Factor Authentication', icon: <ShieldCheck className="w-5 h-5 text-emerald-400" />, keywords: ['2fa', 'totp', 'mfa', 'authenticator', 'otp', 'security', 'two factor'], visible: !!ctx.user, node: <MfaSection requiredForRole={isAdmin || isL0} /> },
       { id: 'access-policy', title: 'Access Policy', icon: <Lock className="w-5 h-5 text-amber-400" />, keywords: ['access', 'audit', 'version history', 'roles', 'permissions', 'policy'], visible: isAdmin || isL0, node: <AccessPolicySection /> },
     ] },
     { id: 'appearance', title: 'Appearance', icon: <Palette className="w-4 h-4" />, sections: [
-      { id: 'appearance', title: 'Appearance', icon: <Palette className="w-5 h-5 text-violet-400" />, keywords: ['theme', 'dark', 'light', 'midnight', 'density', 'metal', 'finish', 'animation', 'tooltip', 'color'], visible: true, node: <AppearanceSection /> },
+      { id: 'appearance', title: 'Appearance', icon: <Palette className="w-5 h-5 text-violet-400" />, keywords: ['theme', 'dark', 'light', 'midnight', 'density', 'metal', 'finish', 'animation', 'tooltip', 'color'], visible: true, prefKeys: ['theme', 'density', 'animationsEnabled', 'showTooltips', 'metalFinish'], node: <AppearanceSection /> },
     ] },
     { id: 'workspace', title: 'Workspace', icon: <Grid3X3 className="w-4 h-4" />, sections: [
-      { id: 'units', title: 'Units & Defaults', icon: <Ruler className="w-5 h-5 text-sky-400" />, keywords: ['units', 'imperial', 'metric', 'ceiling', 'r-value', 'u-value', 'defaults'], visible: true, node: <UnitsSection /> },
-      { id: 'cad', title: 'CAD Workspace', icon: <Grid3X3 className="w-5 h-5 text-emerald-400" />, keywords: ['grid', 'snap', 'spacing', 'autosave', 'cad'], visible: true, node: <CadWorkspaceSection /> },
+      { id: 'units', title: 'Units & Defaults', icon: <Ruler className="w-5 h-5 text-sky-400" />, keywords: ['units', 'imperial', 'metric', 'ceiling', 'r-value', 'u-value', 'defaults'], visible: true, prefKeys: ['units', 'defaultCeilingHeight', 'defaultWallRValue', 'defaultWindowUValue'], node: <UnitsSection /> },
+      { id: 'cad', title: 'CAD Workspace', icon: <Grid3X3 className="w-5 h-5 text-emerald-400" />, keywords: ['grid', 'snap', 'spacing', 'autosave', 'cad'], visible: true, prefKeys: ['gridSnap', 'gridSpacing', 'autosave'], node: <CadWorkspaceSection /> },
     ] },
     { id: 'accessibility', title: 'Accessibility', icon: <Accessibility className="w-4 h-4" />, sections: [
       { id: 'accessibility', title: 'Accessibility', icon: <Accessibility className="w-5 h-5 text-cyan-400" />, keywords: ['motion', 'contrast', 'focus', 'text size', 'font', 'neural', 'prosthetic', 'haptic', 'a11y'], visible: true, node: <AccessibilitySection /> },
     ] },
     { id: 'reports', title: 'Reports & Output', icon: <FileText className="w-4 h-4" />, sections: [
-      { id: 'pdf', title: 'PDF & Print Settings', icon: <FileText className="w-5 h-5 text-orange-400" />, keywords: ['pdf', 'print', 'export', 'page size', 'orientation', 'watermark'], visible: true, node: <PdfSection /> },
-      { id: 'stamps', title: 'Blueprint Stamps', icon: <Stamp className="w-5 h-5 text-pink-400" />, keywords: ['stamp', 'seal', 'pe seal', 'notary', 'firm'], visible: true, node: <BlueprintStampsSection /> },
-      { id: 'pe-stamp', title: 'PE Stamp & Attestation', icon: <BadgeCheck className="w-5 h-5 text-amber-400" />, keywords: ['pe', 'engineer', 'attestation', 'signature', 'license', 'jurisdiction'], visible: true, node: <PeStampSection /> },
+      { id: 'pdf', title: 'PDF & Print Settings', icon: <FileText className="w-5 h-5 text-orange-400" />, keywords: ['pdf', 'print', 'export', 'page size', 'orientation', 'watermark'], visible: true, prefKeys: ['pdfIncludeDrawing', 'pdfIncludeRoomSchedule', 'pdfIncludeOpeningSchedule', 'pdfIncludeLoadSummary', 'pdfIncludeNotes', 'pdfPageSize', 'pdfOrientation', 'pdfWatermarkText'], node: <PdfSection /> },
+      { id: 'stamps', title: 'Blueprint Stamps', icon: <Stamp className="w-5 h-5 text-pink-400" />, keywords: ['stamp', 'seal', 'pe seal', 'notary', 'firm'], visible: true, prefKeys: ['firmStampDataUrl', 'firmStampPosition', 'notaryStampDataUrl'], node: <BlueprintStampsSection /> },
+      { id: 'pe-stamp', title: 'PE Stamp & Attestation', icon: <BadgeCheck className="w-5 h-5 text-amber-400" />, keywords: ['pe', 'engineer', 'attestation', 'signature', 'license', 'jurisdiction'], visible: true, prefKeys: ['peName', 'peLicenseNumber', 'peJurisdiction', 'peSignatureDataUrl'], node: <PeStampSection /> },
     ] },
     { id: 'engine', title: 'Calculation Engine', icon: <BadgeCheck className="w-4 h-4" />, sections: [
-      { id: 'engine', title: 'Calculation Engine (Beta)', icon: <BadgeCheck className="w-5 h-5 text-amber-400" />, keywords: ['engine', 'manual j', 'cert', 'shadow', 'legacy', 'calculation'], visible: isL0, node: <EngineSection /> },
+      { id: 'engine', title: 'Calculation Engine (Beta)', icon: <BadgeCheck className="w-5 h-5 text-amber-400" />, keywords: ['engine', 'manual j', 'cert', 'shadow', 'legacy', 'calculation'], visible: isL0, prefKeys: ['engineVersion', 'shadowRunManualJ8'], node: <EngineSection /> },
     ] },
     { id: 'organization', title: 'Organization', icon: <Building2 className="w-4 h-4" />, sections: [
       { id: 'org-profile', title: 'Organisation Profile', icon: <Building2 className="w-5 h-5 text-emerald-400" />, keywords: ['organisation', 'organization', 'company', 'tenant', 'profile'], visible: true, node: <OrgProfileSection token={ctx.token} orgId={ctx.organisation?.id} /> },
@@ -484,6 +568,174 @@ function SettingsRail({ categories, active, onSelect }: { categories: SettingsCa
           </button>
         );
       })}
+    </div>
+  );
+}
+
+// ── "Non-default only" filter (Phase 3) ─────────────────────────────────────
+// A section surfaces under the filter when any preference it owns differs from
+// its shipped default. Primitives compare by value; the rare object/array pref
+// falls back to a structural compare.
+function prefDiffers(key: keyof UserPreferences, prefs: UserPreferences): boolean {
+  const a = prefs[key];
+  const b = preferenceDefaults[key];
+  if (a !== null && typeof a === 'object') return JSON.stringify(a) !== JSON.stringify(b);
+  return a !== b;
+}
+function sectionChanged(section: SettingsSectionEntry, prefs: UserPreferences): boolean {
+  return !!section.prefKeys?.some((k) => prefDiffers(k, prefs));
+}
+
+// ── Arrange mode (Phase 3) ───────────────────────────────────────────────────
+// Reorder + hide categories, mirroring the CAD toolbox's arrange mode
+// (prefs.toolboxOrder / toolboxHidden). Rows become draggable; the − button
+// sends a category to the hidden tray; hidden categories stay reachable from
+// search and the Cmd+K palette. Reset restores the registry's default order and
+// the full set. Vertical drag math works on both the desktop rail and the
+// full-width mobile rail (both render this list as a column).
+function SettingsArrangeRail({ categories, hidden, defaultOrder, onChange }: {
+  categories: SettingsCategoryEntry[];   // full viewer-visible set, current order
+  hidden: string[];
+  defaultOrder: string[];                // registry order of viewer-visible ids
+  onChange: (patch: Partial<UserPreferences>) => void;
+}) {
+  const meta = new Map(categories.map((c) => [c.id, c]));
+  const ids = categories.map((c) => c.id);
+  const visibleIds = ids.filter((id) => !hidden.includes(id));
+  const hiddenIds = ids.filter((id) => hidden.includes(id));
+
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [liveOrder, setLiveOrder] = useState<string[] | null>(null);
+  const liveOrderRef = useRef<string[] | null>(null);
+  const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const dragInfo = useRef<{ id: string; startY: number; startIndex: number; rowH: number; order: string[] } | null>(null);
+
+  const renderIds = liveOrder ?? visibleIds;
+
+  const commit = (finalVisible: string[]) => {
+    // Persist the reordered VISIBLE ids, keeping hidden ids after them so an
+    // unhide later drops the category back at a sensible spot. Matching the
+    // registry order exactly reverts to null (default order, no divergence).
+    const full = [...finalVisible, ...hiddenIds];
+    const isDefault = full.length === defaultOrder.length && full.every((x, i) => x === defaultOrder[i]);
+    onChange({ settingsNavOrder: isDefault ? null : full });
+  };
+
+  const onDragStart = (e: React.PointerEvent, id: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const order = [...renderIds];
+    const el = itemRefs.current[id];
+    const rowH = Math.max(20, el ? el.getBoundingClientRect().height + 4 : 48);
+    dragInfo.current = { id, startY: e.clientY, startIndex: order.indexOf(id), rowH, order };
+    setDragId(id);
+    liveOrderRef.current = order;
+    setLiveOrder(order);
+
+    const onMove = (me: PointerEvent) => {
+      const d = dragInfo.current;
+      if (!d) return;
+      const delta = Math.round((me.clientY - d.startY) / d.rowH);
+      const target = Math.max(0, Math.min(d.order.length - 1, d.startIndex + delta));
+      const next = d.order.filter((x) => x !== d.id);
+      next.splice(target, 0, d.id);
+      liveOrderRef.current = next;
+      setLiveOrder(next);
+    };
+    const onUp = () => {
+      const d = dragInfo.current;
+      dragInfo.current = null;
+      const final = liveOrderRef.current ?? (d ? d.order : null);
+      setDragId(null);
+      setLiveOrder(null);
+      liveOrderRef.current = null;
+      if (final) commit(final);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  const hideCat = (id: string) => onChange({ settingsNavHidden: [...hidden.filter((h) => h !== id), id] });
+  const restoreCat = (id: string) => onChange({ settingsNavHidden: hidden.filter((h) => h !== id) });
+  const reset = () => onChange({ settingsNavOrder: null, settingsNavHidden: [] });
+
+  return (
+    <div className="flex flex-col gap-1">
+      {renderIds.map((id) => {
+        const c = meta.get(id);
+        if (!c) return null;
+        return (
+          <div
+            key={id}
+            ref={(el) => { itemRefs.current[id] = el; }}
+            onPointerDown={(e) => onDragStart(e, id)}
+            className={`relative flex items-center gap-2 px-2.5 py-2.5 rounded-xl text-sm font-semibold cursor-grab active:cursor-grabbing transition-shadow min-h-[44px] ${dragId === id ? 'ring-2 ring-emerald-400/70 bg-slate-800/80 z-10' : 'ring-1 ring-slate-700/60 hover:ring-slate-500/70 bg-slate-900/40'}`}
+          >
+            <GripVertical className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+            <span className="text-slate-500 shrink-0">{c.icon}</span>
+            <span className="text-slate-200 truncate">{c.title}</span>
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); hideCat(id); }}
+              title={`Hide ${c.title} from the rail`}
+              aria-label={`Hide ${c.title} from the rail`}
+              className="ml-auto shrink-0 w-6 h-6 rounded-full bg-slate-800 border border-slate-600 text-slate-400 hover:text-red-300 hover:border-red-400/70 flex items-center justify-center transition-colors"
+            >
+              <Minus className="w-3 h-3" />
+            </button>
+          </div>
+        );
+      })}
+
+      {hiddenIds.length > 0 && (
+        <>
+          <div className="mt-2 mb-0.5 px-1 text-[9px] font-mono font-bold uppercase tracking-widest text-slate-600 select-none">Hidden</div>
+          {hiddenIds.map((id) => {
+            const c = meta.get(id);
+            if (!c) return null;
+            return (
+              <div key={id} className="relative flex items-center gap-2 px-2.5 py-2 rounded-xl ring-1 ring-slate-800/80 bg-slate-900/30 opacity-60 hover:opacity-90 transition-opacity min-h-[40px]">
+                <span className="text-slate-600 shrink-0">{c.icon}</span>
+                <span className="text-slate-400 truncate text-sm">{c.title}</span>
+                <button
+                  onClick={() => restoreCat(id)}
+                  title={`Show ${c.title} in the rail`}
+                  aria-label={`Show ${c.title} in the rail`}
+                  className="ml-auto shrink-0 w-6 h-6 rounded-full bg-slate-800 border border-slate-600 text-slate-400 hover:text-emerald-300 hover:border-emerald-400/70 flex items-center justify-center transition-colors"
+                >
+                  <Plus className="w-3 h-3" />
+                </button>
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      <button
+        onClick={reset}
+        title="Reset to the default order with every category shown"
+        className="mt-2 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider text-slate-500 hover:text-amber-300 hover:bg-slate-800/60 transition-colors min-h-[36px]"
+      >
+        <RotateCcw className="w-3.5 h-3.5" /> Reset order
+      </button>
+    </div>
+  );
+}
+
+function ArrangeHint() {
+  return (
+    <div className="rounded-2xl border border-slate-700/60 bg-slate-900/40 p-6 text-sm text-slate-400 leading-relaxed">
+      <div className="flex items-center gap-2 mb-2 text-slate-200 font-semibold">
+        <ArrowUpDown className="w-4 h-4 text-emerald-400" /> Arranging categories
+      </div>
+      <p>
+        Drag the rows on the left to reorder your Settings categories. Use the
+        <span className="inline-flex items-center justify-center align-middle mx-1 w-4 h-4 rounded-full bg-slate-800 border border-slate-600"><Minus className="w-2.5 h-2.5" /></span>
+        on a row to hide a category from the rail — it stays reachable from search and the ⌘K palette.
+        Click <span className="text-emerald-300 font-semibold">Done</span> when you're finished; your layout saves automatically to this workbench.
+      </p>
     </div>
   );
 }

@@ -55,6 +55,14 @@ export interface UserPreferences {
   settingsCollapsed: string[];
   /** Last-open Settings category id — re-entry lands where you left off. */
   settingsLastCategory: string;
+  /** Custom Settings category order (category ids, top→bottom). null = the
+   *  registry's default order. Set from the Settings rail's arrange mode.
+   *  Mirrors the CAD toolbox's `toolboxOrder`. */
+  settingsNavOrder: string[] | null;
+  /** Settings categories hidden from the rail (ids). Still reachable via
+   *  search and deep-links — hiding declutters the rail, it never disables a
+   *  category. Mirrors the CAD toolbox's `toolboxHidden`. */
+  settingsNavHidden: string[];
   sidebarCollapsed: boolean;
   gridSnap: boolean;
   gridSpacing: number;       // px per foot
@@ -123,6 +131,8 @@ const defaults: UserPreferences = {
   metalFinish: 'steel',
   settingsCollapsed: [],
   settingsLastCategory: '',
+  settingsNavOrder: null,
+  settingsNavHidden: [],
   sidebarCollapsed: false,
   gridSnap: true,
   gridSpacing: 40,
@@ -154,6 +164,10 @@ const defaults: UserPreferences = {
   engineVersion: 'legacy',
   shadowRunManualJ8: true,
 };
+
+/** The canonical default preferences, exported so the Settings "non-default
+ *  only" filter can compare each live pref against its shipped default. */
+export { defaults as preferenceDefaults };
 
 function load(): UserPreferences {
   migrateUnscopedOrphan();
