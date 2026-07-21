@@ -1,10 +1,11 @@
 import { useRef, useState, useEffect } from 'react';
 import { usePreferencesStore, type ThemeMode, type UIDensity, type UnitSystem, type EngineVersion } from '../stores/usePreferencesStore';
-import { Settings, Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle, Pencil, HardDrive } from 'lucide-react';
+import { Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle, Pencil, HardDrive } from 'lucide-react';
 import { api } from '../lib/api';
 import A11yPanel from '../components/accessibility/A11yPanel';
 import TotpQr from '../components/TotpQr';
 import FeedbackAnnotator from '../components/FeedbackAnnotator';
+import cadPortalBlackhole from '../assets/brand/cad-portal-blackhole.png';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { useAccessPolicyStore } from '../stores/useAccessPolicyStore';
 import { toast } from '../stores/useToastStore';
@@ -18,14 +19,24 @@ export default function SettingsPage() {
   return (
     <div className="h-full overflow-y-auto">
       <div className="max-w-3xl mx-auto px-4 py-6 pt-8 pb-24 md:p-8 md:pt-12 md:pb-24">
-        <header className="mb-10">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="p-2.5 rounded-xl bg-slate-800/50 border border-slate-700/30">
-              <Settings className="w-6 h-6 text-slate-300" />
+        {/* Portal-reflected hero — stepping into Settings is stepping through
+            the Creation Portal: the same black-hole emblem, brushed-steel
+            plate, and engraved ink. */}
+        <header className="mb-8">
+          <div className="portal-plate portal-menu-emerge relative overflow-hidden rounded-2xl border border-slate-700/70 p-5 sm:p-6 flex items-center gap-4 sm:gap-5 shadow-[0_16px_50px_rgba(0,0,0,0.6)]">
+            <span aria-hidden className="portal-menu-sheen absolute inset-0 pointer-events-none" />
+            {/* Spinning black-hole emblem — the portal trigger, at rest */}
+            <div className="portal-button-metallic relative w-16 h-16 rounded-2xl overflow-hidden flex items-center justify-center shrink-0">
+              <span aria-hidden className="portal-ring-metallic absolute inset-[-50%]" />
+              <span aria-hidden className="absolute inset-[2px] rounded-[14px] bg-slate-950/95" />
+              <img src={cadPortalBlackhole} alt="" aria-hidden className="absolute inset-[2px] z-10 rounded-[14px] object-cover" />
             </div>
-            <h2 className="text-3xl font-bold text-white">Settings</h2>
+            <div className="relative z-10 min-w-0">
+              <p className="text-[10px] font-mono font-bold uppercase tracking-[0.25em] text-slate-800 [text-shadow:0_1px_0_rgba(255,255,255,0.55)]">Creation Portal</p>
+              <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-950 leading-tight [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">Settings</h2>
+              <p className="text-xs sm:text-sm font-semibold text-slate-800 [text-shadow:0_1px_0_rgba(255,255,255,0.6)]">Your workbench — you and your tenant, all in one place.</p>
+            </div>
           </div>
-          <p className="text-slate-400 ml-14">Customize your workspace experience.</p>
         </header>
 
         <div className="space-y-8">
@@ -362,12 +373,18 @@ export default function SettingsPage() {
 
 function Section({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
-    <section className="glass-panel rounded-2xl border border-slate-800/60 overflow-hidden">
-      <div className="px-6 py-4 border-b border-slate-800/40 flex items-center gap-2.5">
-        {icon}
-        <h3 className="text-sm font-bold text-white uppercase tracking-wider">{title}</h3>
+    <section className="rounded-2xl border border-slate-700/60 overflow-hidden shadow-[0_10px_36px_rgba(0,0,0,0.45)]">
+      {/* Machined header strip — the same brushed-steel plate, sheen, enamel
+          icon chip, and engraved ink as the Creation Portal menu. */}
+      <div className="portal-plate relative px-5 py-3.5 flex items-center gap-3">
+        <span aria-hidden className="portal-menu-sheen absolute inset-0 pointer-events-none" />
+        <span className="relative z-10 w-9 h-9 rounded-xl bg-slate-900 border-2 border-slate-950/60 flex items-center justify-center shrink-0 shadow-[inset_0_1px_2px_rgba(255,255,255,0.3),0_2px_5px_rgba(0,0,0,0.5)]">
+          {icon}
+        </span>
+        <h3 className="relative z-10 text-sm font-bold text-slate-950 uppercase tracking-widest [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">{title}</h3>
       </div>
-      <div className="p-6 space-y-5">{children}</div>
+      {/* Dark body keeps the form controls legible below the metal header. */}
+      <div className="bg-slate-900/60 backdrop-blur-xl p-6 space-y-5 border-t border-slate-950/50">{children}</div>
     </section>
   );
 }
