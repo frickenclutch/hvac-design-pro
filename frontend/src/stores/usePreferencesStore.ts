@@ -63,6 +63,21 @@ export interface UserPreferences {
    *  search and deep-links — hiding declutters the rail, it never disables a
    *  category. Mirrors the CAD toolbox's `toolboxHidden`. */
   settingsNavHidden: string[];
+
+  // ── L0 Platform Admin panel (mirrors the Settings rail contract) ──────────
+  /** Auto-refresh interval (ms) for the admin panel's live telemetry sections.
+   *  0 = manual only. Persisted so the operator's console stays how they left
+   *  it — same "my workbench" rule as the Settings prefs. */
+  adminAutoRefreshMs: number;
+  /** Custom admin category order (ids, top→bottom). null = registry default.
+   *  Set from the admin rail's arrange mode. Mirrors `settingsNavOrder`. */
+  adminNavOrder: string[] | null;
+  /** Admin categories hidden from the rail (ids). Still search-reachable —
+   *  hiding declutters, never disables. Mirrors `settingsNavHidden`. */
+  adminNavHidden: string[];
+  /** Last-open admin category id — re-entry lands where you left off. */
+  adminLastCategory: string;
+
   sidebarCollapsed: boolean;
   gridSnap: boolean;
   gridSpacing: number;       // px per foot
@@ -133,6 +148,10 @@ const defaults: UserPreferences = {
   settingsLastCategory: '',
   settingsNavOrder: null,
   settingsNavHidden: [],
+  adminAutoRefreshMs: 0,
+  adminNavOrder: null,
+  adminNavHidden: [],
+  adminLastCategory: '',
   sidebarCollapsed: false,
   gridSnap: true,
   gridSpacing: 40,

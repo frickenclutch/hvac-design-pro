@@ -15,14 +15,16 @@
  *    future endpoint smoke-test buttons land here again as needed
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import {
   ShieldCheck, Activity, Building2, Users, FlaskConical, ChevronRight,
   RefreshCw, Cloud, AlertTriangle, Search, Eye, EyeOff,
   CheckCircle2, Gauge, Database, BadgeCheck, Trash2,
+  X, ArrowUpDown, Check, GripVertical, Minus, Plus, RotateCcw, Clock,
 } from 'lucide-react';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
+import { usePreferencesStore, type UserPreferences } from '../stores/usePreferencesStore';
 import { api } from '../lib/api';
 import AuditLogView from '../components/AuditLogView';
 
@@ -45,54 +47,463 @@ function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = []): [LoadState<T>, 
   return [state, run];
 }
 
+// ── Global refresh coordination ──────────────────────────────────────────────
+// One tick shared by every live (telemetry-fetching) section. The manual
+// Refresh button and the auto-interval both bump it; each live section lists
+// the tick in its `useLoad` deps, so a bump refetches whatever category is on
+// screen. Static categories (Action lab) ignore it. This is the admin-specific
+// counterpart to the Settings "workbench persists" controls.
+const AdminRefreshContext = createContext(0);
+const useRefreshTick = () => useContext(AdminRefreshContext);
+
+const REFRESH_OPTIONS: { label: string; ms: number }[] = [
+  { label: 'Manual', ms: 0 },
+  { label: '10s', ms: 10_000 },
+  { label: '30s', ms: 30_000 },
+  { label: '1m', ms: 60_000 },
+  { label: '5m', ms: 300_000 },
+];
+
+// ── Registry — single source of truth for the admin rail / detail ────────────
+interface AdminCategory {
+  id: string;
+  title: string;
+  subtitle: string;
+  icon: React.ReactNode;
+  keywords: string[];
+  /** true = pulls live telemetry (subscribes to the refresh tick). */
+  live: boolean;
+  node: React.ReactNode;
+}
+
+function buildAdminCategories(): AdminCategory[] {
+  return [
+    { id: 'metrics', title: 'Metrics', subtitle: 'Cross-tenant totals + 30-day activity', icon: <Activity className="w-4 h-4" />, live: true,
+      keywords: ['metrics', 'totals', 'organisations', 'users', 'projects', 'calculations', 'signups', 'plans', 'org types', 'active'], node: <MetricsSection /> },
+    { id: 'qa', title: 'Q/A Benchmarks', subtitle: 'Engine integrity · calc telemetry · cutover', icon: <BadgeCheck className="w-4 h-4" />, live: true,
+      keywords: ['qa', 'benchmark', 'certification', 'acca', 'drift', 'shadow', 'cutover', 'readiness', 'reliability', 'p95', 'duration', 'engine version', 'telemetry'], node: <QaBenchmarksSection /> },
+    { id: 'orgs', title: 'Organisations', subtitle: 'Every tenant — drill in for members + actions', icon: <Building2 className="w-4 h-4" />, live: true,
+      keywords: ['organisations', 'organizations', 'tenants', 'orgs', 'members', 'roles', 'impersonate', 'billing', 'plan', 'remove'], node: <OrgsSection /> },
+    { id: 'audit', title: 'Audit Log', subtitle: 'Every mutation across every tenant', icon: <Activity className="w-4 h-4" />, live: true,
+      keywords: ['audit', 'log', 'events', 'history', 'mutations', 'diff', 'before', 'after'], node: <AuditSection /> },
+    { id: 'action-lab', title: 'Action Lab', subtitle: 'Operator tools + where each unit lives', icon: <FlaskConical className="w-4 h-4" />, live: false,
+      keywords: ['action', 'lab', 'tools', 'smoke test', 'endpoint', 'shipped', 'where', 'jump'], node: <ActionLabSection /> },
+  ];
+}
+
 export default function AdminPage() {
   const user = useAuthStore((s) => s.user);
+  const lastCategory = usePreferencesStore((s) => s.adminLastCategory);
+  const navOrder = usePreferencesStore((s) => s.adminNavOrder);
+  const navHidden = usePreferencesStore((s) => s.adminNavHidden);
+  const autoMs = usePreferencesStore((s) => s.adminAutoRefreshMs);
+  const updatePrefs = usePreferencesStore((s) => s.update);
 
-  // Hard gate — render-time check. Server still enforces 403 if bypassed.
+  // Global refresh tick — the manual button and the auto-interval both bump it.
+  const [tick, setTick] = useState(0);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState(() => Date.now());
+  const [spinning, setSpinning] = useState(false);
+  const bump = useCallback(() => {
+    setTick((t) => t + 1);
+    setLastRefreshedAt(Date.now());
+    setSpinning(true);
+    window.setTimeout(() => setSpinning(false), 700);
+  }, []);
+  useEffect(() => {
+    if (!autoMs) return;
+    const id = window.setInterval(bump, autoMs);
+    return () => window.clearInterval(id);
+  }, [autoMs, bump]);
+
+  // Registry → custom order (forward-compatible: newer categories append) →
+  // rail set (minus hidden). Same contract as the Settings rail.
+  const baseCategories = useMemo(() => buildAdminCategories(), []);
+  const categories = useMemo(() => {
+    if (!navOrder) return baseCategories;
+    const byId = new Map(baseCategories.map((c) => [c.id, c]));
+    const known = navOrder.map((id) => byId.get(id)).filter((c): c is AdminCategory => !!c);
+    const missing = baseCategories.filter((c) => !navOrder.includes(c.id));
+    return [...known, ...missing];
+  }, [baseCategories, navOrder]);
+  const railCategories = useMemo(
+    () => categories.filter((c) => !navHidden.includes(c.id)),
+    [categories, navHidden],
+  );
+
+  const [active, setActive] = useState<string>(() => {
+    const hash = typeof window !== 'undefined' ? window.location.hash.replace('#', '') : '';
+    return hash || lastCategory || '';
+  });
+  const [query, setQuery] = useState('');
+  const [arrangeMode, setArrangeMode] = useState(false);
+
+  const q = query.trim().toLowerCase();
+  const searching = q.length > 0;
+  // Search filters the rail itself (categories are coarse and few; each detail
+  // is a heavy live panel, so we never mount more than one at a time).
+  const matches = useMemo(() => {
+    if (!searching) return railCategories;
+    return railCategories.filter((c) =>
+      `${c.title} ${c.subtitle} ${c.keywords.join(' ')}`.toLowerCase().includes(q));
+  }, [searching, q, railCategories]);
+
+  // Active resolves against the full ordered set (so a deep-linked / last-open
+  // hidden category still renders); a fresh visit or a no-match search falls
+  // back to the first shown/matching category.
+  const pool = searching ? matches : categories;
+  const activeCat = pool.find((c) => c.id === active)
+    ?? (searching ? matches[0] : railCategories[0])
+    ?? categories[0];
+  useEffect(() => {
+    if (activeCat && activeCat.id !== active) setActive(activeCat.id);
+  }, [activeCat, active]);
+
+  // Deep-links / in-page hash jumps (Action lab "jump to" links, back/forward).
+  useEffect(() => {
+    const onHash = () => {
+      const h = window.location.hash.replace('#', '');
+      if (h) { setActive(h); setQuery(''); usePreferencesStore.getState().update({ adminLastCategory: h }); }
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  const selectCategory = (id: string) => {
+    setActive(id);
+    updatePrefs({ adminLastCategory: id });
+    if (typeof window !== 'undefined') window.history.replaceState(null, '', `#${id}`);
+  };
+  const pickCategory = (id: string) => { setQuery(''); selectCategory(id); };
+
+  // Gate — after all hooks so hook order stays stable. Server still enforces 403.
   if (!user) return <Navigate to="/" replace />;
   if (!user.isPlatformAdmin) return <Navigate to="/dashboard" replace />;
 
   return (
-    <div className="px-4 py-6 md:p-8 md:pt-12 h-full flex flex-col overflow-y-auto">
-      {/* Header */}
-      <header className="mb-8">
-        <div className="flex items-center gap-3 mb-2">
-          <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center">
-            <ShieldCheck className="w-5 h-5 text-amber-400" />
-          </div>
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold text-white">Platform Admin</h1>
-            <p className="text-slate-400 text-sm">
-              Cross-tenant control panel — visible only to L0 platform admins.
-            </p>
-          </div>
-        </div>
-        <div className="text-xs text-slate-600 font-mono">
-          Signed in as <span className="text-amber-400">{user.email}</span>
-        </div>
-      </header>
+    <AdminRefreshContext.Provider value={tick}>
+      <div className="h-full overflow-y-auto">
+        <div className="max-w-6xl mx-auto px-4 py-6 pt-8 pb-24 md:p-8 md:pt-12 md:pb-24">
+          {/* Hero — echoes the Settings portal plate in the L0 amber identity,
+              with the global refresh control docked on the right. */}
+          <header className="mb-8">
+            <div className="relative overflow-hidden rounded-2xl border border-amber-500/25 bg-gradient-to-br from-amber-500/10 via-slate-900/60 to-slate-950 p-5 sm:p-6 shadow-[0_16px_50px_rgba(0,0,0,0.6)]">
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div className="flex items-center gap-4 min-w-0">
+                  <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shrink-0">
+                    <ShieldCheck className="w-7 h-7 text-amber-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-mono font-bold uppercase tracking-[0.25em] text-amber-400/80">Platform · L0</p>
+                    <h1 className="text-2xl sm:text-3xl font-extrabold text-white leading-tight">Platform Admin</h1>
+                    <p className="text-xs sm:text-sm text-slate-400 truncate">
+                      Signed in as <span className="text-amber-300 font-mono">{user.email}</span>
+                    </p>
+                  </div>
+                </div>
+                <RefreshControl
+                  intervalMs={autoMs}
+                  onIntervalChange={(ms) => updatePrefs({ adminAutoRefreshMs: ms })}
+                  onRefresh={bump}
+                  lastRefreshedAt={lastRefreshedAt}
+                  spinning={spinning}
+                />
+              </div>
+            </div>
+          </header>
 
-      <div className="space-y-8 pb-20">
-        <MetricsSection />
-        <QaBenchmarksSection />
-        <OrgsSection />
-        <AuditSection />
-        <ActionLabSection />
+          <div className="flex flex-col md:flex-row gap-6">
+            {/* Search + category rail — registry-driven, arrange/hide like Settings.
+                Horizontal-scroll on mobile, sticky vertical list on desktop. */}
+            <nav className="md:w-56 md:shrink-0 md:sticky md:top-4 self-start w-full" aria-label="Admin sections">
+              {!arrangeMode && (
+                <div className="relative mb-2">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search admin…"
+                    aria-label="Search admin sections"
+                    className="w-full bg-slate-900/70 border border-slate-700/50 rounded-xl pl-9 pr-8 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/40 min-h-[44px]"
+                  />
+                  {query && (
+                    <button onClick={() => setQuery('')} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-slate-300">
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <div className="flex items-center gap-1.5 mb-3">
+                <button
+                  onClick={() => { setArrangeMode((v) => !v); setQuery(''); }}
+                  aria-pressed={arrangeMode}
+                  title={arrangeMode ? 'Done arranging' : 'Arrange sections — drag to reorder, hide what you don’t use'}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors min-h-[36px] ${arrangeMode ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50 border border-transparent'}`}
+                >
+                  {arrangeMode ? <Check className="w-3.5 h-3.5" /> : <ArrowUpDown className="w-3.5 h-3.5" />}
+                  {arrangeMode ? 'Done' : 'Arrange'}
+                </button>
+              </div>
+
+              {arrangeMode ? (
+                <AdminArrangeRail
+                  categories={categories}
+                  hidden={navHidden}
+                  defaultOrder={baseCategories.map((c) => c.id)}
+                  onChange={updatePrefs}
+                />
+              ) : (
+                <AdminRail categories={matches} active={activeCat?.id ?? ''} onSelect={pickCategory} />
+              )}
+            </nav>
+
+            {/* Detail — one category at a time (keyed so switching remounts and
+                refetches). While arranging, an instructional card instead. */}
+            <div className="flex-1 min-w-0">
+              {arrangeMode ? (
+                <AdminArrangeHint />
+              ) : matches.length === 0 ? (
+                <p className="text-sm text-slate-500 py-10 text-center">No admin sections match “{query}”.</p>
+              ) : activeCat ? (
+                <div key={activeCat.id}>{activeCat.node}</div>
+              ) : null}
+            </div>
+          </div>
+        </div>
       </div>
+    </AdminRefreshContext.Provider>
+  );
+}
+
+// ── Refresh control ──────────────────────────────────────────────────────────
+function RefreshControl({
+  intervalMs, onIntervalChange, onRefresh, lastRefreshedAt, spinning,
+}: {
+  intervalMs: number;
+  onIntervalChange: (ms: number) => void;
+  onRefresh: () => void;
+  lastRefreshedAt: number;
+  spinning: boolean;
+}) {
+  // Live "updated Ns ago" — re-render once a second so the label stays honest.
+  const [, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const secs = Math.max(0, Math.round((Date.now() - lastRefreshedAt) / 1000));
+  const ago = secs < 60 ? `${secs}s ago` : `${Math.floor(secs / 60)}m ${secs % 60}s ago`;
+
+  return (
+    <div className="flex items-center gap-2 shrink-0">
+      <span className="hidden sm:flex items-center gap-1.5 text-[10px] font-mono text-slate-500" title="When the monitored panels last pulled fresh data">
+        <Clock className="w-3 h-3" /> updated {ago}
+      </span>
+      <div className="flex items-center rounded-xl border border-slate-700/60 bg-slate-900/60 overflow-hidden">
+        <label className="flex items-center gap-1.5 pl-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+          <RefreshCw className="w-3 h-3" /> Auto
+          <select
+            value={intervalMs}
+            onChange={(e) => onIntervalChange(Number(e.target.value))}
+            className="bg-transparent text-slate-200 text-xs font-semibold py-1.5 pr-1 focus:outline-none cursor-pointer"
+            aria-label="Auto-refresh interval"
+            title="Auto-refresh interval for the monitored panels"
+          >
+            {REFRESH_OPTIONS.map((o) => (
+              <option key={o.ms} value={o.ms} className="bg-slate-900">{o.label}</option>
+            ))}
+          </select>
+        </label>
+        <button
+          onClick={onRefresh}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-300 bg-amber-500/10 hover:bg-amber-500/25 border-l border-slate-700/60 transition-colors min-h-[40px]"
+          title="Refresh the monitored panels now"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${spinning ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Rail (mirrors SettingsRail; amber active accent) ─────────────────────────
+function AdminRail({ categories, active, onSelect }: { categories: AdminCategory[]; active: string; onSelect: (id: string) => void }) {
+  return (
+    <div className="flex md:flex-col gap-1 overflow-x-auto md:overflow-visible pb-2 md:pb-0 -mx-1 px-1 md:mx-0 md:px-0">
+      {categories.map((c) => {
+        const isActive = c.id === active;
+        return (
+          <button
+            key={c.id}
+            onClick={() => onSelect(c.id)}
+            aria-current={isActive ? 'page' : undefined}
+            className={`shrink-0 md:w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all min-h-[44px] whitespace-nowrap ${isActive ? 'bg-slate-800/80 text-white border border-slate-700/60 shadow-inner' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'}`}
+          >
+            <span className={isActive ? 'text-amber-400' : 'text-slate-500'}>{c.icon}</span>
+            {c.title}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Arrange mode (mirrors SettingsArrangeRail; adminNav* prefs) ──────────────
+function AdminArrangeRail({ categories, hidden, defaultOrder, onChange }: {
+  categories: AdminCategory[];
+  hidden: string[];
+  defaultOrder: string[];
+  onChange: (patch: Partial<UserPreferences>) => void;
+}) {
+  const meta = new Map(categories.map((c) => [c.id, c]));
+  const ids = categories.map((c) => c.id);
+  const visibleIds = ids.filter((id) => !hidden.includes(id));
+  const hiddenIds = ids.filter((id) => hidden.includes(id));
+
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [liveOrder, setLiveOrder] = useState<string[] | null>(null);
+  const liveOrderRef = useRef<string[] | null>(null);
+  const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const dragInfo = useRef<{ id: string; startY: number; startIndex: number; rowH: number; order: string[] } | null>(null);
+
+  const renderIds = liveOrder ?? visibleIds;
+
+  const commit = (finalVisible: string[]) => {
+    const full = [...finalVisible, ...hiddenIds];
+    const isDefault = full.length === defaultOrder.length && full.every((x, i) => x === defaultOrder[i]);
+    onChange({ adminNavOrder: isDefault ? null : full });
+  };
+
+  const onDragStart = (e: React.PointerEvent, id: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const order = [...renderIds];
+    const el = itemRefs.current[id];
+    const rowH = Math.max(20, el ? el.getBoundingClientRect().height + 4 : 48);
+    dragInfo.current = { id, startY: e.clientY, startIndex: order.indexOf(id), rowH, order };
+    setDragId(id);
+    liveOrderRef.current = order;
+    setLiveOrder(order);
+
+    const onMove = (me: PointerEvent) => {
+      const d = dragInfo.current;
+      if (!d) return;
+      const delta = Math.round((me.clientY - d.startY) / d.rowH);
+      const target = Math.max(0, Math.min(d.order.length - 1, d.startIndex + delta));
+      const next = d.order.filter((x) => x !== d.id);
+      next.splice(target, 0, d.id);
+      liveOrderRef.current = next;
+      setLiveOrder(next);
+    };
+    const onUp = () => {
+      const d = dragInfo.current;
+      dragInfo.current = null;
+      const final = liveOrderRef.current ?? (d ? d.order : null);
+      setDragId(null);
+      setLiveOrder(null);
+      liveOrderRef.current = null;
+      if (final) commit(final);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  const hideCat = (id: string) => onChange({ adminNavHidden: [...hidden.filter((h) => h !== id), id] });
+  const restoreCat = (id: string) => onChange({ adminNavHidden: hidden.filter((h) => h !== id) });
+  const reset = () => onChange({ adminNavOrder: null, adminNavHidden: [] });
+
+  return (
+    <div className="flex flex-col gap-1">
+      {renderIds.map((id) => {
+        const c = meta.get(id);
+        if (!c) return null;
+        return (
+          <div
+            key={id}
+            ref={(el) => { itemRefs.current[id] = el; }}
+            onPointerDown={(e) => onDragStart(e, id)}
+            className={`relative flex items-center gap-2 px-2.5 py-2.5 rounded-xl text-sm font-semibold cursor-grab active:cursor-grabbing transition-shadow min-h-[44px] ${dragId === id ? 'ring-2 ring-amber-400/70 bg-slate-800/80 z-10' : 'ring-1 ring-slate-700/60 hover:ring-slate-500/70 bg-slate-900/40'}`}
+          >
+            <GripVertical className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+            <span className="text-slate-500 shrink-0">{c.icon}</span>
+            <span className="text-slate-200 truncate">{c.title}</span>
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); hideCat(id); }}
+              title={`Hide ${c.title} from the rail`}
+              aria-label={`Hide ${c.title} from the rail`}
+              className="ml-auto shrink-0 w-6 h-6 rounded-full bg-slate-800 border border-slate-600 text-slate-400 hover:text-red-300 hover:border-red-400/70 flex items-center justify-center transition-colors"
+            >
+              <Minus className="w-3 h-3" />
+            </button>
+          </div>
+        );
+      })}
+
+      {hiddenIds.length > 0 && (
+        <>
+          <div className="mt-2 mb-0.5 px-1 text-[9px] font-mono font-bold uppercase tracking-widest text-slate-600 select-none">Hidden</div>
+          {hiddenIds.map((id) => {
+            const c = meta.get(id);
+            if (!c) return null;
+            return (
+              <div key={id} className="relative flex items-center gap-2 px-2.5 py-2 rounded-xl ring-1 ring-slate-800/80 bg-slate-900/30 opacity-60 hover:opacity-90 transition-opacity min-h-[40px]">
+                <span className="text-slate-600 shrink-0">{c.icon}</span>
+                <span className="text-slate-400 truncate text-sm">{c.title}</span>
+                <button
+                  onClick={() => restoreCat(id)}
+                  title={`Show ${c.title} in the rail`}
+                  aria-label={`Show ${c.title} in the rail`}
+                  className="ml-auto shrink-0 w-6 h-6 rounded-full bg-slate-800 border border-slate-600 text-slate-400 hover:text-emerald-300 hover:border-emerald-400/70 flex items-center justify-center transition-colors"
+                >
+                  <Plus className="w-3 h-3" />
+                </button>
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      <button
+        onClick={reset}
+        title="Reset to the default order with every section shown"
+        className="mt-2 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider text-slate-500 hover:text-amber-300 hover:bg-slate-800/60 transition-colors min-h-[36px]"
+      >
+        <RotateCcw className="w-3.5 h-3.5" /> Reset order
+      </button>
+    </div>
+  );
+}
+
+function AdminArrangeHint() {
+  return (
+    <div className="rounded-2xl border border-slate-700/60 bg-slate-900/40 p-6 text-sm text-slate-400 leading-relaxed">
+      <div className="flex items-center gap-2 mb-2 text-slate-200 font-semibold">
+        <ArrowUpDown className="w-4 h-4 text-amber-400" /> Arranging sections
+      </div>
+      <p>
+        Drag the rows on the left to reorder your admin sections. Use the
+        <span className="inline-flex items-center justify-center align-middle mx-1 w-4 h-4 rounded-full bg-slate-800 border border-slate-600"><Minus className="w-2.5 h-2.5" /></span>
+        on a row to hide a section from the rail — it stays reachable from search.
+        Click <span className="text-amber-300 font-semibold">Done</span> when you're finished; your layout saves to this workbench.
+      </p>
     </div>
   );
 }
 
 // ── Metrics ──────────────────────────────────────────────────────────────────
 function MetricsSection() {
-  const [state, refresh] = useLoad(() => api.platformMetrics());
+  const tick = useRefreshTick();
+  const [state] = useLoad(() => api.platformMetrics(), [tick]);
 
   return (
     <SectionShell
       icon={<Activity className="w-4 h-4" />}
       title="Platform metrics"
       subtitle="Cross-tenant totals + last-30-day activity"
-      onRefresh={refresh}
       loading={state.status === 'loading'}
     >
       {state.status === 'error' && <ErrorBlock message={state.message} />}
@@ -124,14 +535,14 @@ function MetricsSection() {
 // surfaces the data the L0 admin needs to answer "is the platform sound?"
 // without curl-ing endpoints. Static cert facts join with live D1 telemetry.
 function QaBenchmarksSection() {
-  const [state, refresh] = useLoad(() => api.platformQaBenchmarks());
+  const tick = useRefreshTick();
+  const [state] = useLoad(() => api.platformQaBenchmarks(), [tick]);
 
   return (
     <SectionShell
       icon={<BadgeCheck className="w-4 h-4" />}
       title="Q/A benchmarks"
       subtitle="Engine integrity · calc telemetry · audit activity"
-      onRefresh={refresh}
       loading={state.status === 'loading'}
     >
       {state.status === 'error' && <ErrorBlock message={state.message} />}
@@ -608,7 +1019,8 @@ function EngineVersionTable({ rows }: { rows: Array<{ engine_version: string; ca
 
 // ── Organisations ────────────────────────────────────────────────────────────
 function OrgsSection() {
-  const [state, refresh] = useLoad(() => api.platformOrgs());
+  const tick = useRefreshTick();
+  const [state] = useLoad(() => api.platformOrgs(), [tick]);
   const [filter, setFilter] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -628,7 +1040,6 @@ function OrgsSection() {
       icon={<Building2 className="w-4 h-4" />}
       title="Organisations"
       subtitle={state.status === 'ok' ? `${state.data.organisations.length} total — click a row for detail` : 'Loading…'}
-      onRefresh={refresh}
       loading={state.status === 'loading'}
     >
       {state.status === 'error' && <ErrorBlock message={state.message} />}
@@ -703,7 +1114,8 @@ function OrgsSection() {
 }
 
 function OrgDetailPanel({ id, onClose }: { id: string; onClose: () => void }) {
-  const [state, refresh] = useLoad(() => api.platformOrgDetail(id), [id]);
+  const tick = useRefreshTick();
+  const [state, refresh] = useLoad(() => api.platformOrgDetail(id), [id, tick]);
   // Banner messages for the cross-tenant role/authority/remove flow.
   // Local state — the L0 admin sees their own success/failure for the
   // action they just took without polluting the rest of the page.
@@ -910,17 +1322,18 @@ function OrgDetailPanel({ id, onClose }: { id: string; onClose: () => void }) {
 
 // ── Audit ────────────────────────────────────────────────────────────────────
 function AuditSection() {
-  // Replaces the old "last 50 cross-org events" stub. Now renders the
-  // shared rich audit log view in platform scope, with filters, drill-
-  // through, before/after diffs, and pagination — same component as the
-  // tenant-facing /audit-log page.
+  // Renders the shared rich audit log view in platform scope, with filters,
+  // drill-through, before/after diffs, and pagination — same component as the
+  // tenant-facing /audit-log page. Keyed on the global refresh tick so a manual
+  // refresh (or the auto-interval) remounts it with a fresh first page.
+  const tick = useRefreshTick();
   return (
     <SectionShell
       icon={<Activity className="w-4 h-4" />}
       title="Audit log"
       subtitle="Every authenticated mutation across every tenant — filter, drill, expand for diffs"
     >
-      <AuditLogView scope="platform" showOrgFilter />
+      <AuditLogView key={tick} scope="platform" showOrgFilter />
     </SectionShell>
   );
 }
@@ -930,28 +1343,50 @@ function AuditSection() {
 // documents where each one lives instead of holding placeholders. New
 // endpoint smoke-test buttons land here again when a future unit needs one.
 function ActionLabSection() {
+  const jumps: Array<{ id: string; label: string }> = [
+    { id: 'metrics', label: 'Metrics' },
+    { id: 'qa', label: 'Q/A Benchmarks' },
+    { id: 'orgs', label: 'Organisations' },
+    { id: 'audit', label: 'Audit Log' },
+  ];
   const shipped: Array<{ name: string; where: string }> = [
     { name: 'Domain claim', where: 'Team page → Domain card (PUT /api/org/domain)' },
     { name: 'Issue invite', where: 'Team page → Invite card (email delivery via Resend)' },
     { name: 'Submit for review', where: 'Permits rail → SubmitForReviewModal (lifecycle v2)' },
     { name: 'Subdivision tree', where: 'Team page → Subdivisions card (/api/org/subdivisions)' },
     { name: 'Reparent user', where: 'Team page → Transfer card + in-app consent banner' },
-    { name: 'Impersonate org', where: 'Org detail drawer above → "View as tenant" (read-only, 30 min)' },
+    { name: 'Impersonate org', where: 'Organisations → open a row → “View as tenant” (read-only, 30 min)' },
   ];
   return (
     <SectionShell
       icon={<FlaskConical className="w-4 h-4" />}
       title="Action lab"
-      subtitle="All planned units shipped — smoke-test buttons for future endpoints land here"
+      subtitle="Operator tools + where each shipped unit now lives"
     >
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="rounded-xl bg-slate-900/40 border border-slate-800/40 p-3 mb-4">
+        <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-2">Jump to a monitored panel</div>
+        <div className="flex flex-wrap gap-2">
+          {jumps.map((j) => (
+            <a
+              key={j.id}
+              href={`#${j.id}`}
+              className="flex items-center gap-1.5 text-xs font-bold text-slate-300 hover:text-white bg-slate-800/50 hover:bg-slate-700/60 border border-slate-700/50 px-2.5 py-1.5 rounded-lg transition-colors min-h-[36px]"
+            >
+              <ChevronRight className="w-3 h-3 text-amber-400" /> {j.label}
+            </a>
+          ))}
+        </div>
+      </div>
+
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-2">Where each unit lives</div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
         {shipped.map((s) => (
-          <div key={s.name} className="rounded-xl bg-slate-900/40 border border-slate-800/40 p-3">
-            <div className="flex items-center justify-between mb-1">
-              <span className="font-bold text-sm text-slate-300">{s.name}</span>
-              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">Shipped</span>
+          <div key={s.name} className="rounded-xl bg-slate-900/40 border border-slate-800/40 p-3 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="font-bold text-sm text-slate-300">{s.name}</div>
+              <p className="text-[11px] text-slate-500">{s.where}</p>
             </div>
-            <p className="text-[11px] text-slate-500">{s.where}</p>
+            <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">Shipped</span>
           </div>
         ))}
       </div>
@@ -961,37 +1396,30 @@ function ActionLabSection() {
 
 // ── Reusable bits ────────────────────────────────────────────────────────────
 function SectionShell({
-  icon, title, subtitle, onRefresh, loading, children,
+  icon, title, subtitle, loading, children,
 }: {
   icon: React.ReactNode;
   title: string;
   subtitle?: string;
-  onRefresh?: () => void;
   loading?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <section className="glass-panel rounded-2xl border border-slate-800/60 p-5">
-      <header className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-slate-800/60 flex items-center justify-center text-amber-400">
+      <header className="flex items-center justify-between mb-4 gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-7 h-7 rounded-lg bg-slate-800/60 flex items-center justify-center text-amber-400 shrink-0">
             {icon}
           </div>
-          <div>
+          <div className="min-w-0">
             <h2 className="font-bold text-white text-base">{title}</h2>
             {subtitle && <p className="text-[11px] text-slate-500">{subtitle}</p>}
           </div>
         </div>
-        {onRefresh && (
-          <button
-            onClick={onRefresh}
-            disabled={loading}
-            className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-slate-800/60 disabled:opacity-50"
-            title="Refresh"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
+        {loading && (
+          <span className="flex items-center gap-1.5 text-[11px] text-slate-500 shrink-0" aria-live="polite">
+            <RefreshCw className="w-3.5 h-3.5 animate-spin" /> updating…
+          </span>
         )}
       </header>
       {children}
