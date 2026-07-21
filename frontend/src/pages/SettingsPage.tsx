@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react';
-import { usePreferencesStore, type ThemeMode, type UIDensity, type UnitSystem, type EngineVersion } from '../stores/usePreferencesStore';
-import { Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle, Pencil, HardDrive } from 'lucide-react';
+import { usePreferencesStore, type ThemeMode, type UIDensity, type UnitSystem, type EngineVersion, type MetalFinish } from '../stores/usePreferencesStore';
+import { Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle, Pencil, HardDrive, ChevronDown } from 'lucide-react';
 import { api } from '../lib/api';
 import A11yPanel from '../components/accessibility/A11yPanel';
 import TotpQr from '../components/TotpQr';
@@ -32,9 +32,9 @@ export default function SettingsPage() {
               <img src={cadPortalBlackhole} alt="" aria-hidden className="absolute inset-[2px] z-10 rounded-[14px] object-cover" />
             </div>
             <div className="relative z-10 min-w-0">
-              <p className="text-[10px] font-mono font-bold uppercase tracking-[0.25em] text-slate-800 [text-shadow:0_1px_0_rgba(255,255,255,0.55)]">Creation Portal</p>
-              <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-950 leading-tight [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">Settings</h2>
-              <p className="text-xs sm:text-sm font-semibold text-slate-800 [text-shadow:0_1px_0_rgba(255,255,255,0.6)]">Your workbench — you and your tenant, all in one place.</p>
+              <p className="metal-ink-soft text-[10px] font-mono font-bold uppercase tracking-[0.25em]">Creation Portal</p>
+              <h2 className="metal-ink text-2xl sm:text-3xl font-extrabold leading-tight">Settings</h2>
+              <p className="metal-ink-soft text-xs sm:text-sm font-semibold">Your workbench — you and your tenant, all in one place.</p>
             </div>
           </div>
         </header>
@@ -165,6 +165,9 @@ export default function SettingsPage() {
           {/* Accessibility */}
           <Section icon={<Accessibility className="w-5 h-5 text-cyan-400" />} title="Accessibility">
             <A11yPanel />
+            <div className="pt-4 border-t border-slate-800/60">
+              <MetalFinishPicker />
+            </div>
           </Section>
 
           {/* PDF & Print Settings */}
@@ -372,19 +375,37 @@ export default function SettingsPage() {
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function Section({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
+  const collapsed = usePreferencesStore(s => s.settingsCollapsed);
+  const update = usePreferencesStore(s => s.update);
+  const isOpen = !collapsed.includes(title);
+  const toggle = () => {
+    const set = new Set(collapsed);
+    if (set.has(title)) set.delete(title); else set.add(title);
+    update({ settingsCollapsed: [...set] });
+  };
+
   return (
     <section className="rounded-2xl border border-slate-700/60 overflow-hidden shadow-[0_10px_36px_rgba(0,0,0,0.45)]">
       {/* Machined header strip — the same brushed-steel plate, sheen, enamel
-          icon chip, and engraved ink as the Creation Portal menu. */}
-      <div className="portal-plate relative px-5 py-3.5 flex items-center gap-3">
+          icon chip, and engraved ink as the Creation Portal menu. Doubles as
+          the collapse toggle; the ink follows the selected metal finish. */}
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={isOpen}
+        className="portal-plate relative w-full px-5 py-3.5 flex items-center gap-3 text-left"
+      >
         <span aria-hidden className="portal-menu-sheen absolute inset-0 pointer-events-none" />
         <span className="relative z-10 w-9 h-9 rounded-xl bg-slate-900 border-2 border-slate-950/60 flex items-center justify-center shrink-0 shadow-[inset_0_1px_2px_rgba(255,255,255,0.3),0_2px_5px_rgba(0,0,0,0.5)]">
           {icon}
         </span>
-        <h3 className="relative z-10 text-sm font-bold text-slate-950 uppercase tracking-widest [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">{title}</h3>
-      </div>
+        <h3 className="metal-ink relative z-10 text-sm font-bold uppercase tracking-widest">{title}</h3>
+        <ChevronDown className={`metal-ink relative z-10 ml-auto w-4 h-4 shrink-0 transition-transform ${isOpen ? '' : '-rotate-90'}`} />
+      </button>
       {/* Dark body keeps the form controls legible below the metal header. */}
-      <div className="bg-slate-900/60 backdrop-blur-xl p-6 space-y-5 border-t border-slate-950/50">{children}</div>
+      {isOpen && (
+        <div className="bg-slate-900/60 backdrop-blur-xl p-6 space-y-5 border-t border-slate-950/50">{children}</div>
+      )}
     </section>
   );
 }
@@ -916,6 +937,59 @@ function SynologyBackupSection({ orgId }: { orgId?: string }) {
         </button>
       </div>
     </Section>
+  );
+}
+
+// Metal-finish picker (Accessibility). Each swatch previews its finish live by
+// scoping the same CSS variables the global [data-metal] rules set, and the
+// engraved label re-inks per finish so the contrast is visible before you pick.
+// The values here mirror index.css :root[data-metal='…'] — index.css is the
+// source of truth for what actually applies platform-wide.
+const METAL_FINISHES: { value: MetalFinish; label: string; tint: string; ink: string; inkShadow: string }[] = [
+  { value: 'steel',      label: 'Steel',            tint: 'transparent',           ink: '#0a0f1a', inkShadow: 'rgba(255,255,255,0.5)' },
+  { value: 'aluminum',   label: 'Aluminum',         tint: 'rgba(224,230,236,0.4)',  ink: '#111827', inkShadow: 'rgba(255,255,255,0.6)' },
+  { value: 'brass',      label: 'Brass',            tint: 'rgba(201,161,58,0.52)',  ink: '#20180a', inkShadow: 'rgba(255,244,214,0.55)' },
+  { value: 'bronze',     label: 'Bronze',           tint: 'rgba(74,46,24,0.75)',    ink: '#f5ead9', inkShadow: 'rgba(0,0,0,0.5)' },
+  { value: 'galvanized', label: 'Galvanized Steel', tint: 'rgba(150,165,180,0.42)', ink: '#0b1220', inkShadow: 'rgba(255,255,255,0.5)' },
+  { value: 'copper',     label: 'Copper',           tint: 'rgba(183,79,45,0.6)',    ink: '#2a1006', inkShadow: 'rgba(255,235,215,0.5)' },
+  { value: 'cast-iron',  label: 'Cast Iron',        tint: 'rgba(34,36,40,0.78)',    ink: '#e8eaed', inkShadow: 'rgba(0,0,0,0.55)' },
+];
+
+function MetalFinishPicker() {
+  const metalFinish = usePreferencesStore(s => s.metalFinish);
+  const update = usePreferencesStore(s => s.update);
+
+  return (
+    <div>
+      <div className="flex items-center gap-2.5 mb-1">
+        <Palette className="w-4 h-4 text-slate-400" />
+        <span className="text-sm text-slate-200 font-medium">Metal finish</span>
+      </div>
+      <p className="text-xs text-slate-500 mb-3">
+        The Creation Portal and Settings plates take on this finish. The engraved text re-inks
+        itself for strong contrast on each finish — legible to human and machine vision.
+      </p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+        {METAL_FINISHES.map(f => {
+          const active = metalFinish === f.value;
+          return (
+            <button
+              key={f.value}
+              type="button"
+              onClick={() => update({ metalFinish: f.value })}
+              aria-pressed={active}
+              title={f.label}
+              style={{ '--metal-tint': f.tint, '--metal-ink': f.ink, '--metal-ink-shadow': f.inkShadow } as React.CSSProperties}
+              className={`portal-plate relative overflow-hidden rounded-xl border h-14 px-3 flex items-center justify-center gap-1.5 transition-all ${active ? 'border-emerald-400 ring-2 ring-emerald-400/50' : 'border-slate-600/60 hover:border-slate-400/70'}`}
+            >
+              <span aria-hidden className="portal-menu-sheen absolute inset-0 pointer-events-none" />
+              <span className="metal-ink relative z-10 text-[11px] font-bold uppercase tracking-wider text-center leading-tight">{f.label}</span>
+              {active && <Check className="metal-ink relative z-10 w-3.5 h-3.5 shrink-0" />}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

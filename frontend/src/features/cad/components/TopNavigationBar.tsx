@@ -406,13 +406,13 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                        : <span className="text-sm font-bold text-slate-100">{initials}</span>}
                    </div>
                    <div className="min-w-0">
-                     <p className="text-sm font-bold text-slate-950 truncate [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">{fullName || 'Your account'}</p>
-                     <p className="text-[11px] font-semibold text-slate-800 truncate [text-shadow:0_1px_0_rgba(255,255,255,0.6)]">{user?.email}</p>
+                     <p className="metal-ink text-sm font-bold truncate">{fullName || 'Your account'}</p>
+                     <p className="metal-ink-soft text-[11px] font-semibold truncate">{user?.email}</p>
                    </div>
                  </div>
 
                  <div className="px-2.5 pt-1.5 pb-2 flex items-center justify-between">
-                   <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-950 [text-shadow:0_1px_0_rgba(255,255,255,0.55)]">Creation Portal</span>
+                   <span className="metal-ink text-[10px] font-mono font-bold uppercase tracking-widest">Creation Portal</span>
                    <span className={`${portalPillClass} text-[9px] uppercase font-mono font-bold tracking-widest px-1.5 py-0.5 rounded border shadow-[inset_0_1px_1px_rgba(255,255,255,0.35),0_1px_3px_rgba(0,0,0,0.4)]`}>{saveStatusText}</span>
                  </div>
 
@@ -425,8 +425,8 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                      <Save className="w-4 h-4 text-teal-50" />
                    </span>
                    <span className="flex flex-col">
-                     <span className="text-sm font-bold text-slate-950 [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">{isDraft ? 'Save as Project' : 'Save'}</span>
-                     <span className="text-xs font-semibold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.6)]">
+                     <span className="text-sm font-bold metal-ink">{isDraft ? 'Save as Project' : 'Save'}</span>
+                     <span className="text-xs font-semibold metal-ink-soft">
                        {saveError ? 'Save failed — try again' : isSaving ? 'Saving…' : isDraft ? 'Turn this draft into a project' : isDirty ? 'Unsaved changes' : 'All changes saved'}
                      </span>
                    </span>
@@ -441,8 +441,8 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                      <img src={newProjectGear} alt="" aria-hidden className="w-7 h-7 rounded-full" />
                    </span>
                    <span className="flex flex-col">
-                     <span className="text-sm font-bold text-slate-950 [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">New Project</span>
-                     <span className="text-xs font-semibold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.6)]">Fresh workspace — right from the canvas</span>
+                     <span className="text-sm font-bold metal-ink">New Project</span>
+                     <span className="text-xs font-semibold metal-ink-soft">Fresh workspace — right from the canvas</span>
                    </span>
                  </button>
 
@@ -455,8 +455,8 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                      <Box className="w-4 h-4 text-violet-50" />
                    </span>
                    <span className="flex flex-col">
-                     <span className="text-sm font-bold text-slate-950 [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">3D View</span>
-                     <span className="text-xs font-semibold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.6)]">Walk the model in three dimensions</span>
+                     <span className="text-sm font-bold metal-ink">3D View</span>
+                     <span className="text-xs font-semibold metal-ink-soft">Walk the model in three dimensions</span>
                    </span>
                  </button>
 
@@ -469,8 +469,8 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                      <Download className="w-4 h-4 text-amber-950" />
                    </span>
                    <span className="flex flex-col">
-                     <span className="text-sm font-bold text-slate-950 [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">Export PDF</span>
-                     <span className="text-xs font-semibold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.6)]">Permit-ready plot of this drawing</span>
+                     <span className="text-sm font-bold metal-ink">Export PDF</span>
+                     <span className="text-xs font-semibold metal-ink-soft">Permit-ready plot of this drawing</span>
                    </span>
                  </button>
 
@@ -487,8 +487,8 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                      <Settings className="w-4 h-4 text-slate-50" />
                    </span>
                    <span className="flex flex-col">
-                     <span className="text-sm font-bold text-slate-950 [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">Settings</span>
-                     <span className="text-xs font-semibold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.6)]">Your workbench — theme, units, profile</span>
+                     <span className="text-sm font-bold metal-ink">Settings</span>
+                     <span className="text-xs font-semibold metal-ink-soft">Your workbench — theme, units, profile</span>
                    </span>
                  </Link>
 
@@ -503,8 +503,8 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                        <ShieldCheck className="w-4 h-4 text-amber-950" />
                      </span>
                      <span className="flex flex-col">
-                       <span className="text-sm font-bold text-slate-950 [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">Platform Admin</span>
-                       <span className="text-xs font-semibold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.6)]">L0 — cross-tenant controls</span>
+                       <span className="text-sm font-bold metal-ink">Platform Admin</span>
+                       <span className="text-xs font-semibold metal-ink-soft">L0 — cross-tenant controls</span>
                      </span>
                    </Link>
                  )}
@@ -518,8 +518,8 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                      <LogOut className="w-4 h-4 text-red-50" />
                    </span>
                    <span className="flex flex-col">
-                     <span className="text-sm font-bold text-slate-950 [text-shadow:0_1px_0_rgba(255,255,255,0.5)]">Sign Out</span>
-                     <span className="text-xs font-semibold text-slate-900 [text-shadow:0_1px_0_rgba(255,255,255,0.6)]">End this session</span>
+                     <span className="text-sm font-bold metal-ink">Sign Out</span>
+                     <span className="text-xs font-semibold metal-ink-soft">End this session</span>
                    </span>
                  </button>
                </div>

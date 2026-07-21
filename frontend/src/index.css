@@ -353,6 +353,63 @@ body {
   box-shadow: 0 0 26px rgb(214 150 110 / 0.5), 0 0 10px rgb(226 232 240 / 0.25), 0 4px 15px rgb(0 0 0 / 0.4);
 }
 
+/* ── Metal finish (configurable in Accessibility) ───────────────────────────
+   Each finish washes the shared brushed-steel texture with a translucent tint
+   and picks an engraved-ink color for strong contrast on THAT finish — so the
+   text stays legible to human eyes and to machine vision (OCR/CV). Default
+   (steel) is the untinted plate. Applied via <html data-metal="…">. */
+:root {
+  --metal-tint: transparent;
+  --metal-ink: #0a0f1a;
+  --metal-ink-shadow: rgba(255, 255, 255, 0.5);
+}
+:root[data-metal='steel'] {
+  --metal-tint: transparent;
+  --metal-ink: #0a0f1a;
+  --metal-ink-shadow: rgba(255, 255, 255, 0.5);
+}
+:root[data-metal='aluminum'] {
+  --metal-tint: rgba(224, 230, 236, 0.4);
+  --metal-ink: #111827;
+  --metal-ink-shadow: rgba(255, 255, 255, 0.6);
+}
+:root[data-metal='brass'] {
+  --metal-tint: rgba(201, 161, 58, 0.52);
+  --metal-ink: #20180a;
+  --metal-ink-shadow: rgba(255, 244, 214, 0.55);
+}
+:root[data-metal='bronze'] {
+  --metal-tint: rgba(74, 46, 24, 0.75);
+  --metal-ink: #f5ead9;
+  --metal-ink-shadow: rgba(0, 0, 0, 0.5);
+}
+:root[data-metal='galvanized'] {
+  --metal-tint: rgba(150, 165, 180, 0.42);
+  --metal-ink: #0b1220;
+  --metal-ink-shadow: rgba(255, 255, 255, 0.5);
+}
+:root[data-metal='copper'] {
+  --metal-tint: rgba(183, 79, 45, 0.6);
+  --metal-ink: #2a1006;
+  --metal-ink-shadow: rgba(255, 235, 215, 0.5);
+}
+:root[data-metal='cast-iron'] {
+  --metal-tint: rgba(34, 36, 40, 0.78);
+  --metal-ink: #e8eaed;
+  --metal-ink-shadow: rgba(0, 0, 0, 0.55);
+}
+
+/* Engraved ink that follows the finish — high contrast on every plate. */
+.metal-ink {
+  color: var(--metal-ink);
+  text-shadow: 0 1px 0 var(--metal-ink-shadow);
+}
+.metal-ink-soft {
+  color: var(--metal-ink);
+  opacity: 0.82;
+  text-shadow: 0 1px 0 var(--metal-ink-shadow);
+}
+
 /* Sheet-metal menu — a machined brushed-steel plate. The fill is the panel
    artwork's interior melted to a soft light-field; the edge is a simple
    machined bevel (top-light, bottom-shadow inset ring). Text renders
@@ -362,8 +419,9 @@ body {
   border: 1px solid rgb(71 85 105 / 0.8);
   border-radius: 1rem;
   overflow: hidden;
-  background: #c3c7cd url('./assets/brand/portal-menu-steel.webp');
-  background-size: 100% 100%;
+  background-color: #c3c7cd;
+  background-image: linear-gradient(var(--metal-tint, transparent), var(--metal-tint, transparent)), url('./assets/brand/portal-menu-steel.webp');
+  background-size: 100% 100%, 100% 100%;
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.5),
     inset 0 -1px 0 rgb(0 0 0 / 0.35),
@@ -380,8 +438,9 @@ body {
    .portal-menu-sheen for the living specular light and engrave text as
    dark ink with a bottom-light letterpress shadow. */
 .portal-plate {
-  background: #c3c7cd url('./assets/brand/portal-menu-steel.webp');
-  background-size: 100% 100%;
+  background-color: #c3c7cd;
+  background-image: linear-gradient(var(--metal-tint, transparent), var(--metal-tint, transparent)), url('./assets/brand/portal-menu-steel.webp');
+  background-size: 100% 100%, 100% 100%;
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.5),
     inset 0 -1px 0 rgb(0 0 0 / 0.35),

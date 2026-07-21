@@ -5,6 +5,10 @@ export type ThemeMode = 'dark' | 'midnight' | 'light';
 export type UIDensity = 'compact' | 'comfortable' | 'spacious';
 export type UnitSystem = 'imperial' | 'metric';
 export type AccentColor = 'emerald' | 'sky' | 'violet' | 'amber' | 'rose';
+/** Metallic finish for the Creation Portal + portal-styled surfaces (Settings).
+ *  Each finish re-tints the brushed plate AND re-inks the engraved text so it
+ *  stays legible to human and machine vision (contrast-picked per finish). */
+export type MetalFinish = 'steel' | 'aluminum' | 'brass' | 'bronze' | 'galvanized' | 'copper' | 'cast-iron';
 /** Manual J calculation engine selector.
  *  'legacy'   — production default, per-room aggregated math (`engines/manualJ.ts`).
  *  'manualJ8' — cert-grade Form J1 whole-house engine. Beta — opt-in. */
@@ -44,6 +48,11 @@ export interface UserPreferences {
   density: UIDensity;
   units: UnitSystem;
   accent: AccentColor;
+  /** Finish for the Creation Portal + portal-styled Settings surfaces. */
+  metalFinish: MetalFinish;
+  /** Titles of Settings sections the user has collapsed (persisted so the
+   *  workbench stays how they left it). */
+  settingsCollapsed: string[];
   sidebarCollapsed: boolean;
   gridSnap: boolean;
   gridSpacing: number;       // px per foot
@@ -109,6 +118,8 @@ const defaults: UserPreferences = {
   density: 'comfortable',
   units: 'imperial',
   accent: 'emerald',
+  metalFinish: 'steel',
+  settingsCollapsed: [],
   sidebarCollapsed: false,
   gridSnap: true,
   gridSpacing: 40,
@@ -289,6 +300,10 @@ function applyTheme(prefs: UserPreferences) {
   // Theme class
   root.classList.remove('theme-dark', 'theme-midnight', 'theme-light');
   root.classList.add(`theme-${prefs.theme}`);
+
+  // Metal finish — drives the portal-plate tint + engraved-ink CSS variables
+  // (see index.css [data-metal="…"]). Text ink is contrast-picked per finish.
+  root.dataset.metal = prefs.metalFinish ?? 'steel';
 
   // Animations
   if (!prefs.animationsEnabled) {
