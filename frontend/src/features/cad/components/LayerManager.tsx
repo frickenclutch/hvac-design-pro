@@ -1,8 +1,9 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useCadStore } from '../store/useCadStore';
-import { Eye, EyeOff, Lock, Unlock, Layers, Target, Circle, CheckCircle2, Minus, Plus } from 'lucide-react';
+import { Eye, EyeOff, Lock, Unlock, Layers, Target, Circle, CheckCircle2, Minus, Plus, GripVertical, Pin } from 'lucide-react';
 import { usePreferencesStore } from '../../../stores/usePreferencesStore';
 import PanelResizeHandle from './PanelResizeHandle';
+import { useDraggablePanel } from '../hooks/useDraggablePanel';
 
 export default function LayerManager() {
   const [open, setOpen] = useState(true);
@@ -40,7 +41,11 @@ export default function LayerManager() {
   // lets Properties end above us instead of running underneath. Measured rather
   // than assumed because this panel is both user-resizable and user-scalable.
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const visible = !is3DViewOpen && open;
+  // Movable island — drag off the bottom-right dock to float anywhere (persisted).
+  const { pos: floatPos, isFloating, onPointerDown: onDragHandle, dock } = useDraggablePanel('layersPos', panelRef);
+  // Only reserve rail space for Properties while we're DOCKED. Once floated,
+  // this panel no longer shares the right rail, so Properties gets full height.
+  const visible = !is3DViewOpen && open && !isFloating;
   useEffect(() => {
     const root = document.documentElement;
     const clear = () => root.style.setProperty('--cad-layers-h', '0px');
@@ -73,19 +78,44 @@ export default function LayerManager() {
 
   // ---- Expanded panel ----
   return (
-    <div ref={panelRef} className="absolute right-6 bottom-6 z-10 pointer-events-auto" style={{ width: panelWidth, transform: `scale(${layersScale})`, transformOrigin: 'bottom right' }}>
-      <div className="glass-panel rounded-2xl flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.6)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/70 overflow-hidden transition-[background,border,shadow] duration-500 relative">
+    <div
+      ref={panelRef}
+      className={`${isFloating ? 'fixed z-30' : 'absolute right-6 bottom-6 z-10'} pointer-events-auto`}
+      style={isFloating ? {
+        left: floatPos!.x,
+        top: floatPos!.y,
+        width: panelWidth,
+        maxHeight: `calc(100vh - ${floatPos!.y}px - 0.75rem)`,
+        transform: `scale(${layersScale})`,
+        transformOrigin: 'top left',
+      } : {
+        width: panelWidth,
+        transform: `scale(${layersScale})`,
+        transformOrigin: 'bottom right',
+      }}
+    >
+      <div className={`${isFloating ? 'max-h-full' : ''} glass-panel rounded-2xl flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.6)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/70 overflow-hidden transition-[background,border,shadow] duration-500 relative`}>
         <PanelResizeHandle edge="left" currentWidth={panelWidth} onResize={handleResize} minWidth={220} maxWidth={520} />
 
-        {/* Header */}
-        <div className="px-4 py-3 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between">
+        {/* Header — doubles as the drag handle (pointerdown on a control is ignored) */}
+        <div
+          onPointerDown={onDragHandle}
+          className="px-4 py-3 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between cursor-grab active:cursor-grabbing select-none"
+          title={isFloating ? 'Drag to move' : 'Drag to pop the panel off the rail'}
+        >
           <div className="flex items-center gap-2">
+            <GripVertical className="w-3.5 h-3.5 text-slate-600 shrink-0" />
             <Layers className="w-4 h-4 text-emerald-400" />
             <h3 className="text-sm font-bold text-slate-200 uppercase tracking-widest">
               Layers
             </h3>
           </div>
           <div className="flex items-center gap-1">
+            {isFloating && (
+              <button onClick={dock} className="p-1 rounded-lg text-slate-500 hover:text-emerald-300 hover:bg-slate-800/80 transition-colors" title="Dock back to the rail">
+                <Pin className="w-3.5 h-3.5" />
+              </button>
+            )}
             <button onClick={() => adjustLayersScale(-0.1)} className="p-1 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800/80 transition-colors" title="Shrink panel">
               <Minus className="w-3 h-3" />
             </button>
@@ -103,7 +133,7 @@ export default function LayerManager() {
         </div>
 
         {/* Layer list */}
-        <ul className="flex flex-col divide-y divide-slate-800/60">
+        <ul className={`flex flex-col divide-y divide-slate-800/60${isFloating ? ' min-h-0 overflow-y-auto custom-scrollbar' : ''}`}>
           {layers.map((layer) => {
             const isActive = activeLayerId === layer.id;
             
