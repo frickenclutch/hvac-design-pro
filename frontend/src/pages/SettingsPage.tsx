@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect, useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
 import { usePreferencesStore, type ThemeMode, type UIDensity, type UnitSystem, type EngineVersion, type MetalFinish } from '../stores/usePreferencesStore';
-import { Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle, Pencil, HardDrive, ChevronDown } from 'lucide-react';
+import { Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle, Pencil, HardDrive, ChevronDown, Search, X } from 'lucide-react';
 import { api } from '../lib/api';
 import A11yPanel from '../components/accessibility/A11yPanel';
 import TotpQr from '../components/TotpQr';
@@ -30,27 +31,43 @@ export default function SettingsPage() {
     const hash = typeof window !== 'undefined' ? window.location.hash.replace('#', '') : '';
     return hash || settingsLastCategory || '';
   });
+  const [query, setQuery] = useState('');
   const activeCat = categories.find((c) => c.id === active) ?? categories[0];
   useEffect(() => {
     if (activeCat && activeCat.id !== active) setActive(activeCat.id);
   }, [activeCat, active]);
 
-  // Follow deep-links that change the hash after mount (e.g. search jumps,
-  // back/forward). Fresh loads read the hash in the initial state above.
+  // Follow deep-links (Cmd+K jumps, back/forward). useLocation catches
+  // react-router navigations (pushState) that a window 'hashchange' listener
+  // would miss; fresh loads read the hash in the initial state above.
+  const location = useLocation();
   useEffect(() => {
-    const onHash = () => {
-      const h = window.location.hash.replace('#', '');
-      if (h) setActive(h);
-    };
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
-  }, []);
+    const h = location.hash.replace('#', '');
+    if (h) { setActive(h); setQuery(''); }
+  }, [location.hash]);
 
   const selectCategory = (id: string) => {
     setActive(id);
     updatePrefs({ settingsLastCategory: id });
     if (typeof window !== 'undefined') window.history.replaceState(null, '', `#${id}`);
   };
+
+  // ── Live search over the registry (Phase 2) ──────────────────────────────
+  const q = query.trim().toLowerCase();
+  const searching = q.length > 0;
+  const searchResults = useMemo(() => {
+    if (!q) return [] as { category: SettingsCategoryEntry; section: SettingsSectionEntry }[];
+    const out: { category: SettingsCategoryEntry; section: SettingsSectionEntry }[] = [];
+    for (const c of categories) {
+      for (const s of c.sections) {
+        if (`${s.title} ${s.keywords.join(' ')} ${c.title}`.toLowerCase().includes(q)) {
+          out.push({ category: c, section: s });
+        }
+      }
+    }
+    return out;
+  }, [q, categories]);
+  const pickCategory = (id: string) => { setQuery(''); selectCategory(id); };
 
   return (
     <div className="h-full overflow-y-auto">
@@ -76,19 +93,48 @@ export default function SettingsPage() {
         </header>
 
         <div className="flex flex-col md:flex-row gap-6">
-          {/* Category rail — registry-driven; only categories with a section
-              visible to this viewer appear. Horizontal scroll on mobile,
-              sticky vertical list on desktop. */}
+          {/* Search + category rail — registry-driven; only categories with a
+              section visible to this viewer appear. Horizontal-scroll rail on
+              mobile, sticky vertical list on desktop. */}
           <nav className="md:w-56 md:shrink-0 md:sticky md:top-4 self-start w-full" aria-label="Settings categories">
-            <SettingsRail categories={categories} active={activeCat?.id ?? ''} onSelect={selectCategory} />
+            <div className="relative mb-3">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search settings…"
+                aria-label="Search settings"
+                className="w-full bg-slate-900/70 border border-slate-700/50 rounded-xl pl-9 pr-8 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 min-h-[44px]"
+              />
+              {query && (
+                <button onClick={() => setQuery('')} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-slate-300">
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            <SettingsRail categories={categories} active={searching ? '' : (activeCat?.id ?? '')} onSelect={pickCategory} />
           </nav>
 
-          {/* Detail pane — the active category's visible sections. Each keeps
-              its collapsible card; #id anchors make sections deep-linkable. */}
+          {/* Detail pane — search results across all categories, or the active
+              category's sections. Each keeps its collapsible card; #id anchors
+              make sections deep-linkable. */}
           <div className="flex-1 min-w-0 space-y-6">
-            {activeCat?.sections.map((s) => (
-              <div key={s.id} id={s.id} className="scroll-mt-24">{s.node}</div>
-            ))}
+            {searching ? (
+              searchResults.length === 0 ? (
+                <p className="text-sm text-slate-500 py-10 text-center">No settings match “{query}”.</p>
+              ) : (
+                searchResults.map(({ category, section }) => (
+                  <div key={section.id} id={section.id} className="scroll-mt-24">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1.5 ml-1">{category.title}</p>
+                    {section.node}
+                  </div>
+                ))
+              )
+            ) : (
+              activeCat?.sections.map((s) => (
+                <div key={s.id} id={s.id} className="scroll-mt-24">{s.node}</div>
+              ))
+            )}
           </div>
         </div>
       </div>
