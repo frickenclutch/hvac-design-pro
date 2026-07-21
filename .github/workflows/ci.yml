@@ -3,9 +3,10 @@ name: CI — Type + Cert Gate
 # WHY THIS EXISTS (separate from deploy.yml):
 #   deploy.yml's `test` job runs Python pytest against calc-service —
 #   but calc-service is NOT what ships. The live, production,
-#   shadow-running engine is the TypeScript `manualJ8-ts-1.1.0`, and
-#   its 43-case vitest cert suite (Smith/Walker/Cobb within 0.5% ACCA
-#   tolerance) plus both tsc checks were gated NOWHERE. A tired session
+#   shadow-running engine is the TypeScript `manualJ8-ts-1.3.0`, and
+#   its vitest suite (318 cases across 20 files, incl. the
+#   Smith/Walker/Cobb cert cases within 0.5% ACCA tolerance) plus both
+#   tsc checks were gated NOWHERE. A tired session
 #   could ship accuracy drift straight onto permit-binding documents
 #   with nothing red-flagging it.
 #

@@ -3,7 +3,7 @@
 **Engine version:** `manualJ8-ts-1.1.0` (registry expanded to ~423 ConstructionVariant entries — see `frontend/src/engines/manualJ8/tables/constructions.ts`)
 **Reference standard:** ACCA Manual J 8th Edition, v2.50
 **Document status:** Submission package for ACCA software certification — **filed 2026-05-01** to Glenn Hourahan (`glenn.hourahan@acca.org`); awaiting review (~3-4 mo SLA).
-**Production status:** Engine is **shadow-running in production** as of 2026-05-04 alongside the legacy per-room engine. Display still uses legacy; cert-grade results logged as drift telemetry. Phase 2 (display flip) gated on real-user drift collection — see `docs/option-e-ui-migration-plan.md`.
+**Production status:** Engine is **shadow-running in production** as of 2026-05-04 alongside the legacy per-room engine. Display still uses legacy; cert-grade results logged as drift telemetry. Phase 2 (display flip) gated on real-user drift collection — see `docs/option-e-ui-migration-plan.md`. *The filed revision is `manualJ8-ts-1.1.0`; the current production stamp is `manualJ8-ts-1.3.0` — 1.2.0/1.2.1 transcribed the remaining ceiling CLTD family rows (16B/16C/16D/16F) and 1.3.0 added climate-dependent Construction 19 floor PTD tables, all book-sourced with the 184/184 cert anchors unchanged, so this validation remains valid for the filed reference cases.*
 
 ---
 
@@ -506,7 +506,8 @@ implementation.
 ## Appendix B — Engine Version Stamp
 
 ```typescript
-// frontend/src/engines/manualJ8/index.ts
+// frontend/src/engines/manualJ8/index.ts — value AS FILED (2026-05-01).
+// Current shipped stamp is 'manualJ8-ts-1.3.0'; cert anchors unchanged.
 export const MANUAL_J8_ENGINE_VERSION = 'manualJ8-ts-1.1.0';
 ```
 
