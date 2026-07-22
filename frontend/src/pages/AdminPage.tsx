@@ -22,6 +22,7 @@ import {
   RefreshCw, Cloud, AlertTriangle, Search, Eye, EyeOff,
   CheckCircle2, Gauge, Database, BadgeCheck, Trash2,
   X, ArrowUpDown, Check, GripVertical, Minus, Plus, RotateCcw, Clock,
+  MessageSquare, Paperclip,
 } from 'lucide-react';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { usePreferencesStore, type UserPreferences } from '../stores/usePreferencesStore';
@@ -86,6 +87,8 @@ function buildAdminCategories(): AdminCategory[] {
       keywords: ['organisations', 'organizations', 'tenants', 'orgs', 'members', 'roles', 'impersonate', 'billing', 'plan', 'remove'], node: <OrgsSection /> },
     { id: 'audit', title: 'Audit Log', subtitle: 'Every mutation across every tenant', icon: <Activity className="w-4 h-4" />, live: true,
       keywords: ['audit', 'log', 'events', 'history', 'mutations', 'diff', 'before', 'after'], node: <AuditSection /> },
+    { id: 'feedback', title: 'Feedback', subtitle: 'Bugs · ideas · questions from Mason, every tenant', icon: <MessageSquare className="w-4 h-4" />, live: true,
+      keywords: ['feedback', 'bug', 'bugs', 'idea', 'ideas', 'suggestion', 'question', 'mason', 'report', 'inbox', 'triage', 'ticket'], node: <FeedbackSection /> },
     { id: 'action-lab', title: 'Action Lab', subtitle: 'Operator tools + where each unit lives', icon: <FlaskConical className="w-4 h-4" />, live: false,
       keywords: ['action', 'lab', 'tools', 'smoke test', 'endpoint', 'shipped', 'where', 'jump'], node: <ActionLabSection /> },
   ];
@@ -1348,6 +1351,7 @@ function ActionLabSection() {
     { id: 'qa', label: 'Q/A Benchmarks' },
     { id: 'orgs', label: 'Organisations' },
     { id: 'audit', label: 'Audit Log' },
+    { id: 'feedback', label: 'Feedback' },
   ];
   const shipped: Array<{ name: string; where: string }> = [
     { name: 'Domain claim', where: 'Team page → Domain card (PUT /api/org/domain)' },
@@ -1391,6 +1395,200 @@ function ActionLabSection() {
         ))}
       </div>
     </SectionShell>
+  );
+}
+
+// ── Feedback inbox — read side of the Mason feedback loop ────────────────────
+const FEEDBACK_TYPE_META: Record<string, { label: string; cls: string }> = {
+  bug: { label: 'Bug', cls: 'bg-red-500/10 text-red-400 border-red-500/30' },
+  suggestion: { label: 'Idea', cls: 'bg-sky-500/10 text-sky-400 border-sky-500/30' },
+  question: { label: 'Question', cls: 'bg-violet-500/10 text-violet-400 border-violet-500/30' },
+};
+const FEEDBACK_STATUS_META: Record<string, { label: string; cls: string }> = {
+  open: { label: 'Open', cls: 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10' },
+  in_progress: { label: 'In progress', cls: 'text-amber-400 border-amber-500/40 bg-amber-500/10' },
+  resolved: { label: 'Resolved', cls: 'text-slate-400 border-slate-600/40 bg-slate-700/20' },
+  closed: { label: 'Closed', cls: 'text-slate-500 border-slate-700/40 bg-slate-800/20' },
+};
+const FEEDBACK_STATUS_ORDER = ['open', 'in_progress', 'resolved', 'closed'];
+
+// SQLite `datetime('now')` is UTC without a zone marker — normalise before display.
+function fmtTs(s: string): string {
+  try { return new Date(s.replace(' ', 'T') + 'Z').toLocaleString(); } catch { return s; }
+}
+
+function FeedbackSection() {
+  const tick = useRefreshTick();
+  const [typeFilter, setTypeFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [state, refresh] = useLoad(
+    () => api.platformFeedback({ type: typeFilter || undefined, status: statusFilter || undefined }),
+    [tick, typeFilter, statusFilter],
+  );
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  return (
+    <SectionShell
+      icon={<MessageSquare className="w-4 h-4" />}
+      title="Feedback"
+      subtitle="Bugs · ideas · questions submitted from Mason across every tenant"
+      loading={state.status === 'loading'}
+    >
+      {state.status === 'error' && <ErrorBlock message={state.message} />}
+      {state.status === 'ok' && (
+        <>
+          <div className="grid grid-cols-3 md:grid-cols-5 gap-2 mb-3">
+            <Stat label="Total" value={state.data.counts.total} compact />
+            <Stat label="Open" value={state.data.counts.open} compact />
+            <Stat label="Bugs" value={state.data.counts.bugs} compact />
+            <Stat label="Ideas" value={state.data.counts.ideas} compact />
+            <Stat label="Questions" value={state.data.counts.questions} compact />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <FilterSelect label="Type" value={typeFilter} onChange={(v) => { setTypeFilter(v); setSelectedId(null); }}
+              options={[['', 'All types'], ['bug', 'Bug'], ['suggestion', 'Idea'], ['question', 'Question']]} />
+            <FilterSelect label="Status" value={statusFilter} onChange={(v) => { setStatusFilter(v); setSelectedId(null); }}
+              options={[['', 'All statuses'], ['open', 'Open'], ['in_progress', 'In progress'], ['resolved', 'Resolved'], ['closed', 'Closed']]} />
+          </div>
+
+          {state.data.feedback.length === 0 ? (
+            <p className="text-sm text-slate-500 py-8 text-center">No feedback matches these filters.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {state.data.feedback.map((f) => {
+                const tm = FEEDBACK_TYPE_META[f.type] ?? FEEDBACK_TYPE_META.question;
+                const sm = FEEDBACK_STATUS_META[f.status] ?? FEEDBACK_STATUS_META.open;
+                const who = `${f.first_name ?? ''} ${f.last_name ?? ''}`.trim() || f.user_email;
+                const isOpen = selectedId === f.id;
+                return (
+                  <div key={f.id} className="rounded-xl bg-slate-900/40 border border-slate-800/40 overflow-hidden">
+                    <button
+                      onClick={() => setSelectedId(isOpen ? null : f.id)}
+                      className="w-full flex items-start gap-2.5 px-3 py-2.5 text-left hover:bg-slate-800/30 transition-colors"
+                    >
+                      <span className={`shrink-0 mt-0.5 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${tm.cls}`}>{tm.label}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-slate-200 truncate">{f.text}</p>
+                        <p className="text-[10px] text-slate-500 mt-0.5 truncate">
+                          {who} · <span className="text-slate-400">{f.org_name}</span> · {f.context || 'general'} · {fmtTs(f.created_at)}
+                        </p>
+                      </div>
+                      {f.attachment_count > 0 && (
+                        <span className="shrink-0 flex items-center gap-0.5 text-[10px] text-slate-500 mt-0.5"><Paperclip className="w-3 h-3" />{f.attachment_count}</span>
+                      )}
+                      <span className={`shrink-0 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${sm.cls}`}>{sm.label}</span>
+                      <ChevronRight className={`w-4 h-4 text-slate-600 shrink-0 mt-0.5 transition-transform ${isOpen ? 'rotate-90 text-amber-400' : ''}`} />
+                    </button>
+                    {isOpen && <FeedbackDetailPanel id={f.id} currentStatus={f.status} onStatusChanged={refresh} />}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {state.data.nextCursor && (
+            <p className="text-[10px] text-slate-600 mt-3 text-center">Showing the {state.data.feedback.length} most recent — narrow with the filters to see older items.</p>
+          )}
+          <RawJsonDrawer payload={state.data} />
+        </>
+      )}
+    </SectionShell>
+  );
+}
+
+function FeedbackDetailPanel({ id, currentStatus, onStatusChanged }: {
+  id: string; currentStatus: string; onStatusChanged: () => void;
+}) {
+  const tick = useRefreshTick();
+  const [state] = useLoad(() => api.platformFeedbackDetail(id), [id, tick]);
+  const [status, setStatus] = useState(currentStatus);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const changeStatus = async (next: string) => {
+    setBusy(true); setErr(null);
+    try {
+      await api.platformUpdateFeedback(id, next);
+      setStatus(next);
+      onStatusChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="border-t border-slate-800/60 bg-slate-950/40 px-3 py-3">
+      {state.status === 'loading' && <p className="text-xs text-slate-500">Loading…</p>}
+      {state.status === 'error' && <ErrorBlock message={state.message} />}
+      {state.status === 'ok' && (
+        <>
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
+            <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Triage</span>
+            <select
+              value={status}
+              disabled={busy}
+              onChange={(e) => changeStatus(e.target.value)}
+              className="bg-slate-900 border border-slate-700 rounded text-xs text-slate-200 px-2 py-1 disabled:opacity-50"
+              title="Change status — logged to the audit feed"
+            >
+              {FEEDBACK_STATUS_ORDER.map((s) => (
+                <option key={s} value={s}>{FEEDBACK_STATUS_META[s].label}</option>
+              ))}
+            </select>
+            {busy && <RefreshCw className="w-3 h-3 animate-spin text-slate-500" />}
+            {err && <span className="text-[11px] text-red-400">{err}</span>}
+          </div>
+
+          <p className="text-sm text-slate-200 whitespace-pre-wrap mb-3">
+            {String((state.data.feedback as Record<string, unknown>).text ?? '')}
+          </p>
+
+          {state.data.attachments.length > 0 && (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-3">
+              {state.data.attachments.map((a) => (
+                <div key={a.id} className="rounded-lg border border-slate-800/60 overflow-hidden bg-slate-900/40">
+                  {a.dataUrl ? (
+                    <a href={a.dataUrl} target="_blank" rel="noreferrer" title={a.filename}>
+                      <img src={a.dataUrl} alt={a.filename} className="w-full h-28 object-cover" />
+                    </a>
+                  ) : (
+                    <div className="h-28 flex items-center justify-center text-center text-[10px] text-slate-600 p-2">
+                      {a.filename}<br />(archived — open in R2)
+                    </div>
+                  )}
+                  <div className="px-2 py-1 text-[9px] text-slate-500 font-mono truncate">{a.filename}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <p className="text-[10px] text-slate-600 font-mono break-words">
+            UA: {String((state.data.feedback as Record<string, unknown>).user_agent ?? '—')}
+          </p>
+          <RawJsonDrawer payload={state.data} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function FilterSelect({ label, value, onChange, options }: {
+  label: string; value: string; onChange: (v: string) => void; options: Array<[string, string]>;
+}) {
+  return (
+    <label className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-900/60 border border-slate-700/50 rounded-lg pl-2.5 pr-1">
+      {label}
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="bg-transparent text-slate-200 text-xs font-semibold py-1.5 focus:outline-none cursor-pointer"
+      >
+        {options.map(([v, l]) => <option key={v} value={v} className="bg-slate-900">{l}</option>)}
+      </select>
+    </label>
   );
 }
 
