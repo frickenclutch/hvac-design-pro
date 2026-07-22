@@ -14,6 +14,7 @@ import { stateCentroid, type LatLng } from '../data/stateCentroids';
 import { getUserLocation, sortRetailersByDistance, type RetailerWithDistance, type Coords } from '../utils/geolocation';
 import { generateCostEstimate, type CostEstimate, type SystemType } from '../../../engines/costEstimator';
 import type { WholeHouseResult, DesignConditions } from '../../../engines/manualJ';
+import { api, type PricingStatus, type PricingItemRow } from '../../../lib/api';
 
 /** A job within this many miles of a branch is treated as "in footprint"
  *  (a walk-in/local-delivery branch leads). Beyond it, the nationwide
@@ -56,6 +57,14 @@ interface RetailerState {
   systemType: SystemType;
   setSystemType: (st: SystemType) => void;
   generateEstimate: (result: WholeHouseResult, conditions: DesignConditions) => void;
+
+  // Real pricing (org-configured via Settings → Pricing Engine). null until
+  // loaded. When hasActivePricing, `pricingItems` override the estimator's
+  // industry-average lines; otherwise the panel shows the "configure
+  // integrations" message and the estimate stays a disclaimed ballpark.
+  pricingStatus: PricingStatus | null;
+  pricingItems: PricingItemRow[];
+  loadPricing: () => Promise<void>;
 
   // Cached calc results for re-estimation on system type change
   _cachedResult: WholeHouseResult | null;
@@ -123,21 +132,42 @@ export const useRetailerStore = create<RetailerState>((set, get) => ({
 
   setSystemType: (st: SystemType) => {
     set({ systemType: st });
-    const { _cachedResult, _cachedConditions } = get();
+    const { _cachedResult, _cachedConditions, pricingItems } = get();
     if (_cachedResult && _cachedConditions) {
-      const estimate = generateCostEstimate(_cachedResult, _cachedConditions, st, get().projectLocation?.state ?? null);
+      const estimate = generateCostEstimate(_cachedResult, _cachedConditions, st, get().projectLocation?.state ?? null, pricingItems);
       set({ costEstimate: estimate });
     }
   },
 
   generateEstimate: (result, conditions) => {
-    const { systemType, projectLocation } = get();
-    const estimate = generateCostEstimate(result, conditions, systemType, projectLocation?.state ?? null);
+    const { systemType, projectLocation, pricingItems } = get();
+    const estimate = generateCostEstimate(result, conditions, systemType, projectLocation?.state ?? null, pricingItems);
     set({
       costEstimate: estimate,
       _cachedResult: result,
       _cachedConditions: conditions,
     });
+  },
+
+  pricingStatus: null,
+  pricingItems: [],
+
+  loadPricing: async () => {
+    try {
+      const status = await api.pricingStatus();
+      // Only pull the item rows when there's active pricing to apply.
+      const items = status.hasActivePricing ? (await api.pricingItems()).items : [];
+      set({ pricingStatus: status, pricingItems: items });
+      // Re-price any estimate already on screen with the real numbers.
+      const { _cachedResult, _cachedConditions, systemType, projectLocation } = get();
+      if (_cachedResult && _cachedConditions) {
+        set({ costEstimate: generateCostEstimate(_cachedResult, _cachedConditions, systemType, projectLocation?.state ?? null, items) });
+      }
+    } catch {
+      // Best-effort — pricing is optional. Treat failure as "not configured"
+      // so the panel shows the fallback message + the generic estimate.
+      set({ pricingStatus: { hasActivePricing: false, sourceCount: 0, activeCount: 0, itemCount: 0, sources: [] }, pricingItems: [] });
+    }
   },
 
   _cachedResult: null,

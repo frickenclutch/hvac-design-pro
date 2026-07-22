@@ -1,8 +1,8 @@
 import { useRef, useState, useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { usePreferencesStore, preferenceDefaults, type ThemeMode, type UIDensity, type UnitSystem, type EngineVersion, type MetalFinish, type UserPreferences } from '../stores/usePreferencesStore';
-import { Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle, Pencil, HardDrive, ChevronDown, Search, X, ArrowUpDown, GripVertical, Minus, Plus, ListFilter } from 'lucide-react';
-import { api } from '../lib/api';
+import { Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle, Pencil, HardDrive, ChevronDown, Search, X, ArrowUpDown, GripVertical, Minus, Plus, ListFilter, Tag, Webhook } from 'lucide-react';
+import { api, type PricingSourceRow } from '../lib/api';
 import A11yPanel from '../components/accessibility/A11yPanel';
 import TotpQr from '../components/TotpQr';
 import FeedbackAnnotator from '../components/FeedbackAnnotator';
@@ -545,6 +545,9 @@ function buildSettingsCategories(ctx: RegistryCtx): SettingsCategoryEntry[] {
       { id: 'org-profile', title: 'Organisation Profile', icon: <Building2 className="w-5 h-5 text-emerald-400" />, keywords: ['organisation', 'organization', 'company', 'tenant', 'profile'], visible: true, node: <OrgProfileSection token={ctx.token} orgId={ctx.organisation?.id} /> },
       { id: 'backup', title: 'Legacy Archive & Backup', icon: <HardDrive className="w-5 h-5 text-amber-400" />, keywords: ['backup', 'archive', 'synology', 'nas', 'webhook'], visible: isAdmin, node: <SynologyBackupSection orgId={ctx.organisation?.id} /> },
       { id: 'authority', title: 'Authority Profile', icon: <ShieldCheck className="w-5 h-5 text-amber-400" />, keywords: ['authority', 'permit', 'jurisdiction', 'inspector', 'reviewer'], visible: isAdmin, node: <AuthorityProfileSection /> },
+    ] },
+    { id: 'pricing', title: 'Pricing Engine', icon: <Tag className="w-4 h-4" />, sections: [
+      { id: 'pricing-engine', title: 'Pricing Engine', icon: <Tag className="w-5 h-5 text-amber-400" />, keywords: ['pricing', 'price', 'cost', 'csv', 'webhook', 'api', 'supplier', 'distributor', 'estimate', 'integration', 'inventory', 'retailer', 'oracle'], visible: isAdmin, node: <PricingEngineSection /> },
     ] },
     { id: 'system', title: 'System', icon: <Monitor className="w-4 h-4" />, sections: [
       { id: 'system', title: 'System', icon: <Monitor className="w-5 h-5 text-amber-400" />, keywords: ['version', 'storage', 'clear data', 'reset', 'about', 'system'], visible: true, node: <SystemSection /> },
@@ -1589,6 +1592,179 @@ function UserProfileSection({ token, user }: { token: string | null; user: { id:
 // configuring this does not by itself make existing users authority
 // members — admin still has to flip is_permit_authority on each
 // inspector/reviewer via the Team page.
+// ── Pricing Engine (admin) ─────────────────────────────────────────────────
+// Plug real supplier pricing into the platform so Find-a-Retailer estimates
+// show the org's actual numbers instead of industry averages. CSV upload is
+// live; webhook/REST endpoints register now and execute in a later phase.
+function PricingEngineSection() {
+  const [sources, setSources] = useState<PricingSourceRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const csvRef = useRef<HTMLInputElement>(null);
+  const [epKind, setEpKind] = useState<'webhook' | 'api'>('webhook');
+  const [epName, setEpName] = useState('');
+  const [epUrl, setEpUrl] = useState('');
+
+  const load = () => {
+    api.pricingListSources()
+      .then((r) => setSources(r.sources))
+      .catch(() => { /* best-effort hydrate */ })
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
+
+  const uploadCsv = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setBusy(true);
+    file.text()
+      .then(async (csv) => {
+        try {
+          const name = file.name.replace(/\.csv$/i, '').trim() || 'Price list';
+          const r = await api.pricingUploadCsv(name, csv);
+          toast.success(`Imported ${r.itemCount} price${r.itemCount === 1 ? '' : 's'}${r.skipped ? ` (skipped ${r.skipped})` : ''}.`);
+          load();
+        } catch { /* api.request surfaced the error toast */ }
+      })
+      .catch(() => toast.error('Could not read that file.'))
+      .finally(() => setBusy(false));
+  };
+
+  const registerEndpoint = async () => {
+    if (!epName.trim()) { toast.error('Give the source a name.'); return; }
+    if (!/^https:\/\/.+/i.test(epUrl.trim())) { toast.error('Enter a valid https:// endpoint URL.'); return; }
+    setBusy(true);
+    try {
+      await api.pricingAddSource(epKind, epName.trim(), epUrl.trim());
+      toast.success('Endpoint registered. Live activation ships in a later release.');
+      setEpName(''); setEpUrl('');
+      load();
+    } catch { /* toast surfaced */ } finally { setBusy(false); }
+  };
+
+  const toggleSource = async (s: PricingSourceRow) => {
+    setBusy(true);
+    try {
+      await api.pricingUpdateSource(s.id, { status: s.status === 'active' ? 'disabled' : 'active' });
+      load();
+    } catch { /* toast surfaced */ } finally { setBusy(false); }
+  };
+
+  const removeSource = async (s: PricingSourceRow) => {
+    if (!confirm(`Remove "${s.name}" and any prices it added?`)) return;
+    setBusy(true);
+    try { await api.pricingDeleteSource(s.id); toast.success('Pricing source removed.'); load(); }
+    catch { /* toast surfaced */ } finally { setBusy(false); }
+  };
+
+  const activeItems = sources.filter((s) => s.status === 'active').reduce((n, s) => n + (s.item_count || 0), 0);
+
+  if (loading) return null;
+
+  return (
+    <Section icon={<Tag className="w-5 h-5 text-amber-400" />} title="Pricing Engine">
+      <p className="text-xs text-slate-500 mb-4">
+        Plug real supplier pricing into the platform so the Find-a-Retailer estimate shows your organisation’s
+        actual numbers instead of industry averages. Until a source is active, estimates stay a disclaimed
+        ballpark and users are told to have their retailer configure integrations.
+      </p>
+
+      <div className={`flex items-start gap-2 px-3 py-2 mb-5 rounded-lg border text-xs ${
+        activeItems > 0
+          ? 'bg-emerald-500/5 border-emerald-500/25 text-emerald-300'
+          : 'bg-slate-800/40 border-slate-700/40 text-slate-400'
+      }`}>
+        {activeItems > 0
+          ? <><Check className="w-4 h-4 flex-shrink-0 mt-0.5" /><span><b>{activeItems.toLocaleString()}</b> price{activeItems === 1 ? '' : 's'} feeding live estimates.</span></>
+          : <><AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" /><span>No active pricing yet — estimates use industry averages. Upload a price list to go live.</span></>}
+      </div>
+
+      {/* CSV upload — LIVE */}
+      <div className="rounded-xl border border-slate-700/50 bg-slate-900/40 p-4 mb-3">
+        <div className="flex items-center gap-2 mb-1.5">
+          <Upload className="w-4 h-4 text-emerald-400" />
+          <h4 className="text-sm font-bold text-white">Upload a price list (CSV)</h4>
+          <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-1.5 py-0.5 rounded-full">Live</span>
+        </div>
+        <p className="text-xs text-slate-500 mb-3">
+          Required columns <span className="font-mono text-slate-400">category</span>, <span className="font-mono text-slate-400">unit_price</span>.
+          Optional <span className="font-mono text-slate-400">system_type</span>, <span className="font-mono text-slate-400">tonnage</span>, <span className="font-mono text-slate-400">model</span>, <span className="font-mono text-slate-400">description</span>, <span className="font-mono text-slate-400">unit</span>, <span className="font-mono text-slate-400">match_key</span>.
+          Equipment rows with system_type + tonnage feed the estimate automatically.
+        </p>
+        <input ref={csvRef} type="file" accept=".csv,text/csv" onChange={uploadCsv} className="hidden" />
+        <button disabled={busy} onClick={() => csvRef.current?.click()}
+          className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-3 py-2 rounded-lg transition-colors disabled:opacity-50">
+          <Upload className="w-3.5 h-3.5" /> Choose CSV
+        </button>
+      </div>
+
+      {/* Webhook / API — registered now, activation later */}
+      <div className="rounded-xl border border-slate-700/50 bg-slate-900/40 p-4 mb-4">
+        <div className="flex items-center gap-2 mb-1.5">
+          <Webhook className="w-4 h-4 text-sky-400" />
+          <h4 className="text-sm font-bold text-white">Connect a live source (webhook / API)</h4>
+          <span className="text-[9px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded-full">Activation coming</span>
+        </div>
+        <p className="text-xs text-slate-500 mb-3">
+          Register a supplier’s inventory-pricing endpoint now; live polling + secure credentials arrive in a later release.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <select value={epKind} onChange={(e) => setEpKind(e.target.value as 'webhook' | 'api')}
+            className="bg-slate-900/70 border border-slate-700/50 rounded-xl py-2 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500/40">
+            <option value="webhook">Webhook</option>
+            <option value="api">REST API</option>
+          </select>
+          <input value={epName} onChange={(e) => setEpName(e.target.value)} placeholder="Source name"
+            className="flex-1 min-w-0 bg-slate-900/70 border border-slate-700/50 rounded-xl py-2 px-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500/40" />
+          <input value={epUrl} onChange={(e) => setEpUrl(e.target.value)} placeholder="https://supplier.example/pricing"
+            className="flex-[2] min-w-0 bg-slate-900/70 border border-slate-700/50 rounded-xl py-2 px-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500/40" />
+          <button disabled={busy} onClick={registerEndpoint}
+            className="flex items-center justify-center gap-1.5 text-xs font-bold text-sky-400 hover:text-sky-300 bg-sky-500/10 border border-sky-500/30 px-3 py-2 rounded-xl transition-colors disabled:opacity-50">
+            <Plus className="w-3.5 h-3.5" /> Register
+          </button>
+        </div>
+      </div>
+
+      {sources.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">Configured sources</p>
+          {sources.map((s) => (
+            <div key={s.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-slate-900/40 border border-slate-800/50 flex-wrap">
+              {s.kind === 'csv'
+                ? <Upload className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                : <Webhook className="w-3.5 h-3.5 text-sky-400 flex-shrink-0" />}
+              <span className="font-bold text-slate-200 text-sm flex-1 min-w-0 truncate">{s.name}</span>
+              <span className="text-[10px] text-slate-500 font-mono uppercase">{s.kind}</span>
+              {s.kind === 'csv' && <span className="text-[10px] text-slate-500 font-mono">{s.item_count} item{s.item_count === 1 ? '' : 's'}</span>}
+              <PricingStatusPill status={s.status} />
+              {s.kind === 'csv' && (
+                <button disabled={busy} onClick={() => toggleSource(s)}
+                  className="text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-white px-2 py-1 rounded-lg hover:bg-slate-800/60 disabled:opacity-50">
+                  {s.status === 'active' ? 'Disable' : 'Enable'}
+                </button>
+              )}
+              <button disabled={busy} onClick={() => removeSource(s)} title="Remove" className="text-slate-400 hover:text-red-400 disabled:opacity-50">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function PricingStatusPill({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    active: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25',
+    pending: 'text-amber-300 bg-amber-500/10 border-amber-500/25',
+    disabled: 'text-slate-400 bg-slate-700/30 border-slate-600/40',
+  };
+  const label = status === 'pending' ? 'Not live' : status;
+  return <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${map[status] ?? map.disabled}`}>{label}</span>;
+}
+
 function AuthorityProfileSection() {
   const [authorityType, setAuthorityType] = useState<string | null>(null);
   const [authorityTitle, setAuthorityTitle] = useState('');

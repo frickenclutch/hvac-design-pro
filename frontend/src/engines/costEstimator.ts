@@ -23,6 +23,16 @@ export interface LineItem {
   quantity: number;
   unitCost: number;
   totalCost: number;
+  /** True when this line's price came from the org's configured pricing source
+   *  (routes/pricing.ts), not the industry-average fallback table. */
+  sourced?: boolean;
+}
+
+/** A real per-item price from the org's active pricing source. Shape mirrors
+ *  the /api/pricing/items row; kept local so this engine stays dependency-free. */
+export interface EstimatorPrice {
+  match_key: string | null;
+  unit_price: number;
 }
 
 export interface CostEstimate {
@@ -35,6 +45,9 @@ export interface CostEstimate {
   lowRange: number;
   highRange: number;
   tonnage: number;
+  /** True when at least one line item was priced from the org's configured
+   *  pricing source rather than the industry-average table. */
+  hasRealPricing: boolean;
   generatedAt: string;
   disclaimer: string;
   /** Regional adjustment applied, so the UI can show "localized for NJ". */
@@ -137,52 +150,76 @@ export function generateCostEstimate(
   conditions: DesignConditions,
   systemType: SystemType = 'heat_pump',
   state: string | null = null,
+  // Real per-item prices from the org's active pricing source (routes/pricing.ts).
+  // When a line's match_key is present here, its price overrides the industry
+  // average and the line is flagged `sourced`. Absent → the disclaimed ballpark.
+  pricingItems?: EstimatorPrice[],
 ): CostEstimate {
   const stateKey = state?.toUpperCase().trim() || null;
   const laborIndex = (stateKey && STATE_LABOR_INDEX[stateKey]) || 1.0;
   const taxRate = (stateKey && STATE_SALES_TAX[stateKey] != null) ? STATE_SALES_TAX[stateKey] : 0.07;
   const localized = !!(stateKey && (STATE_LABOR_INDEX[stateKey] != null || STATE_SALES_TAX[stateKey] != null));
 
+  // Real-price lookup: match_key → unit_price (first row wins per key).
+  const priceMap = new Map<string, number>();
+  if (pricingItems) {
+    for (const p of pricingItems) {
+      if (p.match_key && Number.isFinite(p.unit_price) && !priceMap.has(p.match_key)) {
+        priceMap.set(p.match_key, p.unit_price);
+      }
+    }
+  }
+  let anySourced = false;
+  const resolve = (matchKey: string, fallback: number): { cost: number; sourced: boolean } => {
+    const real = priceMap.get(matchKey);
+    if (real != null && Number.isFinite(real)) { anySourced = true; return { cost: Math.round(real), sourced: true }; }
+    return { cost: fallback, sourced: false };
+  };
+
   const tonnage = result.recommendedTons;
   const matchTon = closestTonnage(tonnage);
   const lineItems: LineItem[] = [];
 
-  // 1. Primary Equipment
-  const equipmentCost = EQUIPMENT_COST[matchTon][systemType];
+  // 1. Primary Equipment — the "unit being referenced". A real price for this
+  //    system-type + tonnage overrides the industry-average bucket.
+  const equip = resolve(`equipment:${systemType}:${matchTon}`, EQUIPMENT_COST[matchTon][systemType]);
   lineItems.push({
     category: 'equipment',
     description: `${formatSystemType(systemType)} — ${tonnage} Ton (${result.totalCoolingBtu.toLocaleString()} BTU/hr)`,
     quantity: 1,
-    unitCost: equipmentCost,
-    totalCost: equipmentCost,
+    unitCost: equip.cost,
+    totalCost: equip.cost,
+    sourced: equip.sourced,
   });
 
   // 2. Air Handler / Indoor Unit (for split systems)
   if (systemType !== 'packaged') {
-    const handlerCost = Math.round(equipmentCost * 0.35);
+    const ah = resolve('equipment:air_handler', Math.round(equip.cost * 0.35));
     lineItems.push({
       category: 'equipment',
       description: 'Air Handler / Indoor Unit',
       quantity: 1,
-      unitCost: handlerCost,
-      totalCost: handlerCost,
+      unitCost: ah.cost,
+      totalCost: ah.cost,
+      sourced: ah.sourced,
     });
   }
 
   // 3. Ductwork
-  const ductCostPerFt = DUCT_COST_PER_FT[conditions.ductLocation];
+  const duct = resolve(`ductwork:${conditions.ductLocation}`, DUCT_COST_PER_FT[conditions.ductLocation]);
   const ductLength = conditions.ductLengthFt || 80;
   if (systemType !== 'mini_split') {
     lineItems.push({
       category: 'ductwork',
       description: `Supply & Return Ductwork (${conditions.ductLocation} — R-${conditions.ductInsulationR})`,
       quantity: ductLength,
-      unitCost: ductCostPerFt,
-      totalCost: ductLength * ductCostPerFt,
+      unitCost: duct.cost,
+      totalCost: ductLength * duct.cost,
+      sourced: duct.sourced,
     });
 
     // Duct fittings, boots, registers — estimated at 40% of duct material
-    const fittingsCost = Math.round(ductLength * ductCostPerFt * 0.4);
+    const fittingsCost = Math.round(ductLength * duct.cost * 0.4);
     lineItems.push({
       category: 'ductwork',
       description: 'Fittings, Boots, Registers & Grilles',
@@ -193,39 +230,47 @@ export function generateCostEstimate(
   }
 
   // 4. Refrigerant Line Set
+  const lineSet = resolve('misc:lineset', 225);
   lineItems.push({
     category: 'misc',
     description: 'Refrigerant Line Set (insulated)',
     quantity: 1,
-    unitCost: 225,
-    totalCost: 225,
+    unitCost: lineSet.cost,
+    totalCost: lineSet.cost,
+    sourced: lineSet.sourced,
   });
 
   // 5. Thermostat / Controls
+  const stat = resolve('controls:thermostat', 350);
   lineItems.push({
     category: 'controls',
     description: 'Programmable Thermostat (WiFi)',
     quantity: 1,
-    unitCost: 350,
-    totalCost: 350,
+    unitCost: stat.cost,
+    totalCost: stat.cost,
+    sourced: stat.sourced,
   });
 
   // 6. Condensate Drain Kit
+  const cond = resolve('misc:condensate', 85);
   lineItems.push({
     category: 'misc',
     description: 'Condensate Drain & Safety Switch',
     quantity: 1,
-    unitCost: 85,
-    totalCost: 85,
+    unitCost: cond.cost,
+    totalCost: cond.cost,
+    sourced: cond.sourced,
   });
 
   // 7. Filter Media
+  const filter = resolve('misc:filter', 22);
   lineItems.push({
     category: 'misc',
     description: 'MERV-13 Filter (initial set)',
     quantity: 2,
-    unitCost: 22,
-    totalCost: 44,
+    unitCost: filter.cost,
+    totalCost: filter.cost * 2,
+    sourced: filter.sourced,
   });
 
   // 8. Labor — scaled by the regional labor-cost index (the largest source
@@ -273,12 +318,16 @@ export function generateCostEstimate(
     lowRange: Math.round(total * 0.85),
     highRange: Math.round(total * 1.20),
     tonnage,
+    hasRealPricing: anySourced,
     generatedAt: new Date().toISOString(),
-    disclaimer:
-      'This is an approximate cost estimate based on industry-average pricing' +
-      (localized ? `, regionally adjusted for ${stateKey}` : '') +
-      '. Actual costs vary by region, equipment brand, and installation complexity. ' +
-      'Contact your preferred HVAC distributor for a formal project quote.',
+    disclaimer: anySourced
+      ? 'This estimate uses your organisation’s configured pricing for the flagged line items' +
+        (localized ? `, regionally adjusted for ${stateKey}` : '') +
+        '. Any remaining lines use industry averages, and labor is an estimate — confirm final pricing with your distributor.'
+      : 'This is an approximate cost estimate based on industry-average pricing' +
+        (localized ? `, regionally adjusted for ${stateKey}` : '') +
+        '. Actual costs vary by region, equipment brand, and installation complexity. ' +
+        'Contact your preferred HVAC distributor for a formal project quote.',
     region: { state: stateKey, laborIndex, localized },
   };
 }

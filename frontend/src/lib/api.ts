@@ -244,6 +244,34 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  */
 export type RefreshOutcome = 'ok' | 'rejected' | 'transient';
 
+// ── Pricing engine (routes/pricing.ts) ──────────────────────────────────────
+export interface PricingSourceRow {
+  id: string;
+  kind: 'csv' | 'webhook' | 'api';
+  name: string;
+  status: 'active' | 'pending' | 'disabled';
+  config?: string;
+  item_count: number;
+  created_at?: string;
+  updated_at?: string;
+}
+export interface PricingItemRow {
+  category: string;
+  match_key: string | null;
+  model: string | null;
+  description: string | null;
+  unit: string;
+  unit_price: number;
+  currency: string;
+}
+export interface PricingStatus {
+  hasActivePricing: boolean;
+  sourceCount: number;
+  activeCount: number;
+  itemCount: number;
+  sources: PricingSourceRow[];
+}
+
 class ApiClient {
   private token: string | null = null;
   private refreshInFlight: Promise<RefreshOutcome> | null = null;
@@ -624,6 +652,38 @@ class ApiClient {
 
   async deleteAvatar() {
     return this.request<{ ok: boolean }>('/api/users/me/avatar', { method: 'DELETE' });
+  }
+
+  // ── Pricing engine ─────────────────────────────────────────────────────────
+  async pricingStatus() {
+    return this.request<PricingStatus>('/api/pricing/status');
+  }
+  async pricingItems() {
+    return this.request<{ items: PricingItemRow[] }>('/api/pricing/items');
+  }
+  async pricingListSources() {
+    return this.request<{ sources: PricingSourceRow[] }>('/api/pricing/sources');
+  }
+  async pricingAddSource(kind: 'webhook' | 'api', name: string, url: string) {
+    return this.request<PricingSourceRow>('/api/pricing/sources', {
+      method: 'POST',
+      body: JSON.stringify({ kind, name, url }),
+    });
+  }
+  async pricingUpdateSource(id: string, patch: { name?: string; status?: 'active' | 'pending' | 'disabled' }) {
+    return this.request<{ id: string; name: string; status: string }>(`/api/pricing/sources/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  }
+  async pricingDeleteSource(id: string) {
+    return this.request<{ ok: boolean }>(`/api/pricing/sources/${id}`, { method: 'DELETE' });
+  }
+  async pricingUploadCsv(name: string, csv: string) {
+    return this.request<{ sourceId: string; name: string; itemCount: number; skipped: number; errors: string[] }>(
+      '/api/pricing/csv',
+      { method: 'POST', body: JSON.stringify({ name, csv }) },
+    );
   }
 
   async listProjectFiles(projectId: string) {
