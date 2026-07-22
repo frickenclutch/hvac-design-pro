@@ -13,27 +13,36 @@
  *
  * Authority users see additional UI: claim, decision actions, internal
  * comment toggle. Submitters see status, decision notes, withdraw button.
+ *
+ * UI idiom (2026-07-22): the list is a master-detail "workbench" like
+ * Settings / Admin / Team — a metallic hero, a searchable + arrangeable rail
+ * of actionability FOLDERS (Inbox / In review / Active / Closed / Sent / All,
+ * role-adaptive; see features/permits/permitFolders.ts) each with a live
+ * count, a user-controlled refresh, and per-page persisted prefs
+ * (`permits*` in usePreferencesStore). The detail view shares the metallic
+ * hero + machined `Section` headers but keeps its document layout. Every
+ * flow/handler is unchanged from the pre-idiom version — this is a reframe.
  */
 
-import { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import {
   ShieldCheck, ArrowLeft, RefreshCw, AlertTriangle, Clock,
   Building2, FileText, MessageSquare, Send, CheckCircle2,
   XCircle, AlertCircle, EyeOff, Eye, Hash, Activity,
   PauseCircle, PlayCircle, Ban, CalendarClock, History, RotateCcw,
+  Inbox, Archive, BadgeCheck, LayoutList, Search, X,
+  ArrowUpDown, Check, GripVertical, Minus, Plus,
 } from 'lucide-react';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
+import { usePreferencesStore, type UserPreferences } from '../stores/usePreferencesStore';
 import { api } from '../lib/api';
 import AuthorityBadge from '../components/AuthorityBadge';
 import EntityAuditModal from '../components/EntityAuditModal';
 import { useAccessPolicyStore } from '../stores/useAccessPolicyStore';
 import SubmitForReviewModal from '../features/permits/SubmitForReviewModal';
+import { buildPermitFolders, type PermitFolder } from '../features/permits/permitFolders';
 import type { Project } from '../features/projects/projectStorage';
-
-type Status = 'submitted' | 'under_review' | 'approved' | 'denied'
-  | 'changes_requested' | 'withdrawn'
-  | 'suspended' | 'revoked' | 'expired';
 
 interface ListedSubmission {
   id: string; project_id: string; status: string;
@@ -74,6 +83,38 @@ function StatusChip({ status }: { status: string }) {
   );
 }
 
+// Folder → rail icon. `active` gets a checkmark badge for an authority (live
+// permits) but a clock for a submitter (in-flight applications), so the icon
+// is resolved with role context in `iconForFolder`.
+const FOLDER_ICON: Record<string, React.ReactNode> = {
+  inbox: <Inbox className="w-4 h-4" />,
+  'in-review': <Eye className="w-4 h-4" />,
+  active: <BadgeCheck className="w-4 h-4" />,
+  approved: <CheckCircle2 className="w-4 h-4" />,
+  closed: <Archive className="w-4 h-4" />,
+  sent: <Send className="w-4 h-4" />,
+  all: <LayoutList className="w-4 h-4" />,
+};
+function iconForFolder(id: string, isAuthority: boolean): React.ReactNode {
+  if (!isAuthority && id === 'active') return <Clock className="w-4 h-4" />;
+  return FOLDER_ICON[id] ?? <LayoutList className="w-4 h-4" />;
+}
+
+// Folder view-model — the pure folder plus the page's icon + live count.
+interface FolderVM extends PermitFolder {
+  icon: React.ReactNode;
+  count: number;
+}
+
+// Auto-refresh cadence choices for the queue's RefreshControl (mirrors Admin).
+const REFRESH_OPTIONS: { label: string; ms: number }[] = [
+  { label: 'Manual', ms: 0 },
+  { label: '10s', ms: 10_000 },
+  { label: '30s', ms: 30_000 },
+  { label: '1m', ms: 60_000 },
+  { label: '5m', ms: 300_000 },
+];
+
 export default function PermitsPage() {
   const { id } = useParams();
   if (id) return <PermitDetail id={id} />;
@@ -84,98 +125,154 @@ export default function PermitsPage() {
 
 function PermitList() {
   const isAuthority = useAuthStore((s) => !!s.user?.isPermitAuthority);
+  const myOrgId = useAuthStore((s) => s.organisation?.id ?? null);
   const [items, setItems] = useState<ListedSubmission[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<Status | ''>('');
+  const [lastRefreshedAt, setLastRefreshedAt] = useState(() => Date.now());
+  const [spinning, setSpinning] = useState(false);
   const navigate = useNavigate();
 
-  const refresh = async () => {
-    setLoading(true);
+  // Persisted rail state — mirrors the Settings / Admin / Team contract.
+  const navOrder = usePreferencesStore((s) => s.permitsNavOrder);
+  const navHidden = usePreferencesStore((s) => s.permitsNavHidden);
+  const lastCategory = usePreferencesStore((s) => s.permitsLastCategory);
+  const autoMs = usePreferencesStore((s) => s.permitsAutoRefreshMs);
+  const updatePrefs = usePreferencesStore((s) => s.update);
+
+  // One fetch for the whole visible queue; folders partition it client-side so
+  // every folder shows an accurate live count regardless of the active folder.
+  const refresh = useCallback(async () => {
+    setSpinning(true);
     setErr(null);
     try {
-      const r = await api.permitListSubmissions(statusFilter || undefined);
+      const r = await api.permitListSubmissions();
       setItems(r.submissions);
+      setLastRefreshedAt(Date.now());
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
+      window.setTimeout(() => setSpinning(false), 500);
     }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  // User-controlled auto-refresh — 0 = manual only. The interval bumps the same
+  // fetch the manual button does.
+  useEffect(() => {
+    if (!autoMs) return;
+    const id = window.setInterval(() => { refresh(); }, autoMs);
+    return () => window.clearInterval(id);
+  }, [autoMs, refresh]);
+
+  // Folder registry for this viewer → custom order (unknown ids append,
+  // forward-compatible) → view-models with icon + live count.
+  const folders = useMemo(() => buildPermitFolders({ isAuthority, myOrgId }), [isAuthority, myOrgId]);
+  const orderedFolders = useMemo(() => {
+    if (!navOrder) return folders;
+    const byId = new Map(folders.map((f) => [f.id, f]));
+    const known = navOrder.map((id) => byId.get(id)).filter((f): f is PermitFolder => !!f);
+    const missing = folders.filter((f) => !navOrder.includes(f.id));
+    return [...known, ...missing];
+  }, [folders, navOrder]);
+  const orderedVM: FolderVM[] = orderedFolders.map((f) => ({
+    ...f, icon: iconForFolder(f.id, isAuthority), count: items.filter(f.match).length,
+  }));
+  const railVM = orderedVM.filter((f) => !navHidden.includes(f.id));
+
+  // Active folder: URL hash → last-open pref → first visible.
+  const [active, setActive] = useState<string>(() => {
+    const hash = typeof window !== 'undefined' ? window.location.hash.replace('#', '') : '';
+    return hash || lastCategory || '';
+  });
+  const [query, setQuery] = useState('');
+  const [arrangeMode, setArrangeMode] = useState(false);
+  const [statusNarrow, setStatusNarrow] = useState('');
+
+  // Resolves against the full ordered set (a deep-linked / last-open hidden
+  // folder still renders), else the first visible folder.
+  const activeFolder = orderedVM.find((f) => f.id === active) ?? railVM[0] ?? orderedVM[0];
+  useEffect(() => {
+    if (activeFolder && activeFolder.id !== active) setActive(activeFolder.id);
+  }, [activeFolder, active]);
+
+  // Follow deep-links (Cmd+K jumps, back/forward navigations).
+  const location = useLocation();
+  useEffect(() => {
+    const h = location.hash.replace('#', '');
+    if (h) { setActive(h); setQuery(''); }
+  }, [location.hash]);
+
+  const selectFolder = (id: string) => {
+    setActive(id);
+    setStatusNarrow('');
+    updatePrefs({ permitsLastCategory: id });
+    if (typeof window !== 'undefined') window.history.replaceState(null, '', `#${id}`);
   };
+  const pickFolder = (id: string) => { setQuery(''); selectFolder(id); };
+  const enterArrange = () => { setArrangeMode(true); setQuery(''); };
 
-  useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [statusFilter]);
+  // Search runs over SUBMISSIONS (not folder names) — an officer needs to find
+  // "the Ribbeck permit" fast; folders are few and always visible.
+  const q = query.trim().toLowerCase();
+  const searching = q.length > 0;
+  const searchResults = useMemo(() => {
+    if (!searching) return [];
+    return items.filter((s) => {
+      const hay = [
+        s.project_name, s.project_address, s.project_city, s.project_state, s.project_zip,
+        s.permit_number, s.submitter_org_name, s.authority_org_name, s.authority_title,
+        s.submission_type, STATUS_PALETTE[s.status]?.label ?? s.status,
+      ].filter(Boolean).join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+  }, [searching, items, q]);
 
-  // Authority-side counts: incoming queue (submitted), in-flight (under_review),
-  // decided (approved/denied/changes). Helps the dashboard immediately convey
-  // workload at a glance.
-  const counts = items.reduce((acc, s) => {
-    acc[s.status] = (acc[s.status] ?? 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
+  // Active folder's items + optional within-folder status narrowing.
+  const folderItems = activeFolder ? items.filter(activeFolder.match) : [];
+  const shownItems = statusNarrow ? folderItems.filter((s) => s.status === statusNarrow) : folderItems;
+  const folderStatuses = (() => {
+    const set = new Set(folderItems.map((s) => s.status));
+    return Object.keys(STATUS_PALETTE).filter((k) => set.has(k));
+  })();
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-5xl mx-auto px-4 py-6 pt-8 pb-24 md:p-8 md:pt-12 md:pb-24">
+      <div className="max-w-6xl mx-auto px-4 py-6 pt-8 pb-24 md:p-8 md:pt-12 md:pb-24">
+        {/* Metallic hero — the same brushed plate as Settings / Team, in
+            Permits' amber authority identity; refresh control docks right. */}
         <header className="mb-8">
-          <div className="flex items-center gap-3 mb-2 flex-wrap">
-            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30">
-              <ShieldCheck className="w-6 h-6 text-amber-400" />
+          <div className="portal-plate portal-menu-emerge relative overflow-hidden rounded-2xl border border-slate-700/70 p-5 sm:p-6 flex items-center gap-4 sm:gap-5 flex-wrap shadow-[0_16px_50px_rgba(0,0,0,0.6)]">
+            <span aria-hidden className="portal-menu-sheen absolute inset-0 pointer-events-none" />
+            <div className="portal-button-metallic relative w-16 h-16 rounded-2xl overflow-hidden flex items-center justify-center shrink-0">
+              <span aria-hidden className="portal-ring-metallic absolute inset-[-50%]" />
+              <span aria-hidden className="absolute inset-[2px] rounded-[14px] bg-slate-950/95" />
+              <ShieldCheck className="relative z-10 w-7 h-7 text-amber-300" />
             </div>
-            <div className="flex-1 min-w-0">
-              <h2 className="text-3xl font-bold text-white">Permits</h2>
-              <p className="text-slate-400 text-sm">
+            <div className="relative z-10 min-w-0 flex-1">
+              <p className="metal-ink-soft text-[10px] font-mono font-bold uppercase tracking-[0.25em]">
+                {isAuthority ? 'Permit Authority' : 'Permit Submissions'}
+              </p>
+              <h2 className="metal-ink text-2xl sm:text-3xl font-extrabold leading-tight">Permits</h2>
+              <p className="metal-ink-soft text-xs sm:text-sm font-semibold truncate">
                 {isAuthority
                   ? 'Incoming submissions for your authority + your own outgoing submissions.'
                   : 'Permit submissions you have sent to authorities for review.'}
               </p>
             </div>
-            {isAuthority && <AuthorityBadge title="Permit Authority" />}
+            <div className="relative z-10 shrink-0">
+              <RefreshControl
+                intervalMs={autoMs}
+                onIntervalChange={(ms) => updatePrefs({ permitsAutoRefreshMs: ms })}
+                onRefresh={refresh}
+                lastRefreshedAt={lastRefreshedAt}
+                spinning={spinning}
+              />
+            </div>
           </div>
         </header>
-
-        {/* Authority-only quick counts row */}
-        {isAuthority && (
-          <div className="grid grid-cols-3 md:grid-cols-6 gap-2 mb-4">
-            {(['submitted', 'under_review', 'changes_requested', 'approved', 'denied', 'withdrawn'] as Status[]).map((st) => (
-              <button
-                key={st}
-                onClick={() => setStatusFilter(statusFilter === st ? '' : st)}
-                className={`rounded-xl border p-3 text-left transition-colors ${statusFilter === st
-                  ? `${STATUS_PALETTE[st].bg} ${STATUS_PALETTE[st].border}`
-                  : 'bg-slate-900/40 border-slate-800/40 hover:border-slate-700/60'}`}
-              >
-                <div className={`text-[10px] uppercase tracking-wider font-bold ${STATUS_PALETTE[st].text}`}>
-                  {STATUS_PALETTE[st].label}
-                </div>
-                <div className="font-bold text-white tabular-nums text-2xl">
-                  {counts[st] ?? 0}
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-
-        <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
-          <div className="flex items-center gap-2">
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as Status | '')}
-              className="bg-slate-900/60 border border-slate-700/50 rounded-xl py-2 px-3 text-sm text-slate-200"
-            >
-              <option value="">All statuses</option>
-              {Object.entries(STATUS_PALETTE).map(([k, v]) => (
-                <option key={k} value={k}>{v.label}</option>
-              ))}
-            </select>
-          </div>
-          <button
-            onClick={refresh}
-            disabled={loading}
-            className="text-xs text-slate-400 hover:text-white px-3 py-2 rounded-xl bg-slate-900/60 border border-slate-700/50 disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
 
         {err && (
           <div className="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-400">
@@ -183,64 +280,450 @@ function PermitList() {
           </div>
         )}
 
-        {!err && items.length === 0 && !loading && (
-          <div className="glass-panel rounded-2xl border border-slate-800/60 p-10 text-center">
-            <ShieldCheck className="w-10 h-10 text-slate-600 mx-auto mb-3" />
-            <p className="text-slate-400 text-sm">
-              {isAuthority ? 'No submissions in your queue yet.' : 'You haven\'t submitted any projects for review.'}
-            </p>
-            {!isAuthority && (
-              <p className="text-slate-500 text-xs mt-1">
-                Go to your Dashboard and click the shield icon on a project to submit it for review.
-              </p>
+        <div className="flex flex-col md:flex-row gap-6">
+          {/* Rail — search over submissions + arrange/hide over folders. */}
+          <nav className="md:w-56 md:shrink-0 md:sticky md:top-4 self-start w-full" aria-label="Permit folders">
+            {!arrangeMode && (
+              <div className="relative mb-2">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search submissions…"
+                  aria-label="Search submissions"
+                  className="w-full bg-slate-900/70 border border-slate-700/50 rounded-xl pl-9 pr-8 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/40 min-h-[44px]"
+                />
+                {query && (
+                  <button onClick={() => setQuery('')} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-slate-300">
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            )}
+
+            <div className="flex items-center gap-1.5 mb-3">
+              <button
+                onClick={() => (arrangeMode ? setArrangeMode(false) : enterArrange())}
+                aria-pressed={arrangeMode}
+                title={arrangeMode ? 'Done arranging' : 'Arrange folders — drag to reorder, hide what you don’t use'}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors min-h-[36px] ${arrangeMode ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50 border border-transparent'}`}
+              >
+                {arrangeMode ? <Check className="w-3.5 h-3.5" /> : <ArrowUpDown className="w-3.5 h-3.5" />}
+                {arrangeMode ? 'Done' : 'Arrange'}
+              </button>
+            </div>
+
+            {arrangeMode ? (
+              <PermitsArrangeRail
+                folders={orderedVM}
+                hidden={navHidden}
+                defaultOrder={folders.map((f) => f.id)}
+                onChange={updatePrefs}
+              />
+            ) : (
+              <PermitsRail folders={railVM} active={searching ? '' : (activeFolder?.id ?? '')} onSelect={pickFolder} />
+            )}
+          </nav>
+
+          {/* Detail pane — arrange hint, search results, or the active folder. */}
+          <div className="flex-1 min-w-0">
+            {arrangeMode ? (
+              <PermitsArrangeHint />
+            ) : searching ? (
+              <>
+                <div className="mb-4">
+                  <h3 className="text-lg font-bold text-white">
+                    {searchResults.length} result{searchResults.length === 1 ? '' : 's'}
+                    <span className="text-slate-500 font-normal"> for “{query}”</span>
+                  </h3>
+                </div>
+                {searchResults.length === 0 ? (
+                  <p className="text-sm text-slate-500 py-10 text-center">No submissions match “{query}”.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {searchResults.map((s) => (
+                      <SubmissionCard key={s.id} s={s} isAuthority={isAuthority} myOrgId={myOrgId} onOpen={() => navigate(`/permits/${s.id}`)} />
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                {activeFolder && (
+                  <FolderHeader
+                    title={activeFolder.title}
+                    count={folderItems.length}
+                    statuses={folderStatuses}
+                    narrow={statusNarrow}
+                    onNarrow={setStatusNarrow}
+                  />
+                )}
+                {loading && items.length === 0 ? (
+                  <p className="text-sm text-slate-500 py-10 text-center">Loading…</p>
+                ) : shownItems.length === 0 ? (
+                  <div className="glass-panel rounded-2xl border border-slate-800/60 p-10 text-center">
+                    <ShieldCheck className="w-10 h-10 text-slate-600 mx-auto mb-3" />
+                    <p className="text-slate-400 text-sm">
+                      {activeFolder?.id === 'inbox'
+                        ? 'Inbox is clear — no new submissions to triage.'
+                        : 'No submissions in this view.'}
+                    </p>
+                    {!isAuthority && items.length === 0 && (
+                      <p className="text-slate-500 text-xs mt-1">
+                        Go to your Dashboard and click the shield icon on a project to submit it for review.
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {shownItems.map((s) => (
+                      <SubmissionCard key={s.id} s={s} isAuthority={isAuthority} myOrgId={myOrgId} onOpen={() => navigate(`/permits/${s.id}`)} />
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
-        )}
-
-        <div className="space-y-2">
-          {items.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => navigate(`/permits/${s.id}`)}
-              className="w-full text-left glass-panel rounded-xl border border-slate-800/60 p-4 hover:border-amber-500/30 hover:bg-amber-500/5 transition-all"
-            >
-              <div className="flex items-start justify-between gap-3 mb-2 flex-wrap">
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-bold text-white text-base truncate">
-                    {s.project_name || 'Untitled project'}
-                  </h3>
-                  <p className="text-xs text-slate-500 truncate">
-                    {[s.project_address, s.project_city, s.project_state, s.project_zip].filter(Boolean).join(', ') || 'No address on file'}
-                  </p>
-                </div>
-                <StatusChip status={s.status} />
-              </div>
-              <div className="flex items-center gap-3 text-[11px] text-slate-500 flex-wrap">
-                <span className="flex items-center gap-1">
-                  <Building2 className="w-3 h-3" />
-                  {isAuthority && s.authority_org_id === useAuthStore.getState().organisation?.id
-                    ? `From ${s.submitter_org_name ?? 'unknown'}`
-                    : `To ${s.authority_org_name ?? 'unknown'}${s.authority_title ? ` · ${s.authority_title}` : ''}`}
-                </span>
-                {s.submission_type && (
-                  <span className="font-mono uppercase tracking-wider text-[9px] text-slate-600">
-                    {s.submission_type.replace(/_/g, ' ')}
-                  </span>
-                )}
-                <span className="flex items-center gap-1">
-                  <Clock className="w-3 h-3" /> {new Date(s.submitted_at).toLocaleDateString()}
-                </span>
-                {s.permit_number && (
-                  <span className="flex items-center gap-1 text-emerald-400 font-mono">
-                    <Hash className="w-3 h-3" /> {s.permit_number}
-                  </span>
-                )}
-              </div>
-            </button>
-          ))}
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Refresh control (ported from AdminPage; amber) ───────────────────────────
+function RefreshControl({ intervalMs, onIntervalChange, onRefresh, lastRefreshedAt, spinning }: {
+  intervalMs: number;
+  onIntervalChange: (ms: number) => void;
+  onRefresh: () => void;
+  lastRefreshedAt: number;
+  spinning: boolean;
+}) {
+  // Live "updated Ns ago" — re-render once a second so the label stays honest.
+  const [, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const secs = Math.max(0, Math.round((Date.now() - lastRefreshedAt) / 1000));
+  const ago = secs < 60 ? `${secs}s ago` : `${Math.floor(secs / 60)}m ${secs % 60}s ago`;
+
+  return (
+    // Seat the whole cluster on an opaque near-black panel with a faint light
+    // edge + shadow. slate-950 is darker than every metal finish (steel …
+    // cast-iron), so the control always separates from the plate — legibility
+    // no longer depends on the hero's finish colour. Text brightened to match.
+    <div className="flex items-center gap-2.5 shrink-0 rounded-xl bg-slate-950/95 border border-white/10 pl-3 pr-1.5 py-1 shadow-[0_3px_12px_rgba(0,0,0,0.6)]">
+      <span className="hidden sm:flex items-center gap-1.5 text-[10px] font-mono text-slate-300" title="When the queue last pulled fresh data">
+        <Clock className="w-3 h-3" /> updated {ago}
+      </span>
+      <div className="flex items-center rounded-lg border border-slate-600/70 bg-slate-900/80 overflow-hidden">
+        <label className="flex items-center gap-1.5 pl-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-300">
+          <RefreshCw className="w-3 h-3" /> Auto
+          <select
+            value={intervalMs}
+            onChange={(e) => onIntervalChange(Number(e.target.value))}
+            className="bg-transparent text-slate-100 text-xs font-semibold py-1.5 pr-1 focus:outline-none cursor-pointer"
+            aria-label="Auto-refresh interval"
+            title="Auto-refresh interval for the queue"
+          >
+            {REFRESH_OPTIONS.map((o) => (
+              <option key={o.ms} value={o.ms} className="bg-slate-900">{o.label}</option>
+            ))}
+          </select>
+        </label>
+        <button
+          onClick={onRefresh}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-200 bg-amber-500/15 hover:bg-amber-500/30 border-l border-slate-600/70 transition-colors min-h-[40px]"
+          title="Refresh the queue now"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${spinning ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Rail (mirrors TeamRail; amber active accent + folder count badge) ────────
+function PermitsRail({ folders, active, onSelect }: { folders: FolderVM[]; active: string; onSelect: (id: string) => void }) {
+  return (
+    <div className="flex md:flex-col gap-1 overflow-x-auto md:overflow-visible pb-2 md:pb-0 -mx-1 px-1 md:mx-0 md:px-0">
+      {folders.map((f) => {
+        const isActive = f.id === active;
+        const inboxHot = f.id === 'inbox' && f.count > 0;
+        return (
+          <button
+            key={f.id}
+            onClick={() => onSelect(f.id)}
+            aria-current={isActive ? 'page' : undefined}
+            className={`shrink-0 md:w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all min-h-[44px] whitespace-nowrap ${isActive ? 'bg-slate-800/80 text-white border border-slate-700/60 shadow-inner' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'}`}
+          >
+            <span className={isActive || inboxHot ? 'text-amber-400' : 'text-slate-500'}>{f.icon}</span>
+            <span className="flex-1 text-left">{f.title}</span>
+            <span className={`shrink-0 text-[11px] font-mono tabular-nums px-1.5 py-0.5 rounded-md ${inboxHot ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : isActive ? 'bg-slate-700/60 text-slate-200' : 'bg-slate-800/60 text-slate-500'}`}>
+              {f.count}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Arrange mode — reorder + hide folders (prefs.permitsNavOrder / permitsNavHidden).
+// The Team/Admin arrange rail, retinted amber and operating on folder VMs.
+function PermitsArrangeRail({ folders, hidden, defaultOrder, onChange }: {
+  folders: FolderVM[];
+  hidden: string[];
+  defaultOrder: string[];
+  onChange: (patch: Partial<UserPreferences>) => void;
+}) {
+  const meta = new Map(folders.map((f) => [f.id, f]));
+  const ids = folders.map((f) => f.id);
+  const visibleIds = ids.filter((id) => !hidden.includes(id));
+  const hiddenIds = ids.filter((id) => hidden.includes(id));
+
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [liveOrder, setLiveOrder] = useState<string[] | null>(null);
+  const liveOrderRef = useRef<string[] | null>(null);
+  const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const dragInfo = useRef<{ id: string; startY: number; startIndex: number; rowH: number; order: string[] } | null>(null);
+
+  const renderIds = liveOrder ?? visibleIds;
+
+  const commit = (finalVisible: string[]) => {
+    // Persist reordered VISIBLE ids with hidden ids after them (so an unhide
+    // lands sensibly). Matching the registry order exactly reverts to null.
+    const full = [...finalVisible, ...hiddenIds];
+    const isDefault = full.length === defaultOrder.length && full.every((x, i) => x === defaultOrder[i]);
+    onChange({ permitsNavOrder: isDefault ? null : full });
+  };
+
+  const onDragStart = (e: React.PointerEvent, id: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const order = [...renderIds];
+    const el = itemRefs.current[id];
+    const rowH = Math.max(20, el ? el.getBoundingClientRect().height + 4 : 48);
+    dragInfo.current = { id, startY: e.clientY, startIndex: order.indexOf(id), rowH, order };
+    setDragId(id);
+    liveOrderRef.current = order;
+    setLiveOrder(order);
+
+    const onMove = (me: PointerEvent) => {
+      const d = dragInfo.current;
+      if (!d) return;
+      const delta = Math.round((me.clientY - d.startY) / d.rowH);
+      const target = Math.max(0, Math.min(d.order.length - 1, d.startIndex + delta));
+      const next = d.order.filter((x) => x !== d.id);
+      next.splice(target, 0, d.id);
+      liveOrderRef.current = next;
+      setLiveOrder(next);
+    };
+    const onUp = () => {
+      const d = dragInfo.current;
+      dragInfo.current = null;
+      const final = liveOrderRef.current ?? (d ? d.order : null);
+      setDragId(null);
+      setLiveOrder(null);
+      liveOrderRef.current = null;
+      if (final) commit(final);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  const hideCat = (id: string) => onChange({ permitsNavHidden: [...hidden.filter((h) => h !== id), id] });
+  const restoreCat = (id: string) => onChange({ permitsNavHidden: hidden.filter((h) => h !== id) });
+  const reset = () => onChange({ permitsNavOrder: null, permitsNavHidden: [] });
+
+  return (
+    <div className="flex flex-col gap-1">
+      {renderIds.map((id) => {
+        const c = meta.get(id);
+        if (!c) return null;
+        return (
+          <div
+            key={id}
+            ref={(el) => { itemRefs.current[id] = el; }}
+            onPointerDown={(e) => onDragStart(e, id)}
+            className={`relative flex items-center gap-2 px-2.5 py-2.5 rounded-xl text-sm font-semibold cursor-grab active:cursor-grabbing transition-shadow min-h-[44px] ${dragId === id ? 'ring-2 ring-amber-400/70 bg-slate-800/80 z-10' : 'ring-1 ring-slate-700/60 hover:ring-slate-500/70 bg-slate-900/40'}`}
+          >
+            <GripVertical className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+            <span className="text-slate-500 shrink-0">{c.icon}</span>
+            <span className="text-slate-200 truncate">{c.title}</span>
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); hideCat(id); }}
+              title={`Hide ${c.title} from the rail`}
+              aria-label={`Hide ${c.title} from the rail`}
+              className="ml-auto shrink-0 w-6 h-6 rounded-full bg-slate-800 border border-slate-600 text-slate-400 hover:text-red-300 hover:border-red-400/70 flex items-center justify-center transition-colors"
+            >
+              <Minus className="w-3 h-3" />
+            </button>
+          </div>
+        );
+      })}
+
+      {hiddenIds.length > 0 && (
+        <>
+          <div className="mt-2 mb-0.5 px-1 text-[9px] font-mono font-bold uppercase tracking-widest text-slate-600 select-none">Hidden</div>
+          {hiddenIds.map((id) => {
+            const c = meta.get(id);
+            if (!c) return null;
+            return (
+              <div key={id} className="relative flex items-center gap-2 px-2.5 py-2 rounded-xl ring-1 ring-slate-800/80 bg-slate-900/30 opacity-60 hover:opacity-90 transition-opacity min-h-[40px]">
+                <span className="text-slate-600 shrink-0">{c.icon}</span>
+                <span className="text-slate-400 truncate text-sm">{c.title}</span>
+                <button
+                  onClick={() => restoreCat(id)}
+                  title={`Show ${c.title} in the rail`}
+                  aria-label={`Show ${c.title} in the rail`}
+                  className="ml-auto shrink-0 w-6 h-6 rounded-full bg-slate-800 border border-slate-600 text-slate-400 hover:text-emerald-300 hover:border-emerald-400/70 flex items-center justify-center transition-colors"
+                >
+                  <Plus className="w-3 h-3" />
+                </button>
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      <button
+        onClick={reset}
+        title="Reset to the default order with every folder shown"
+        className="mt-2 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider text-slate-500 hover:text-amber-300 hover:bg-slate-800/60 transition-colors min-h-[36px]"
+      >
+        <RotateCcw className="w-3.5 h-3.5" /> Reset order
+      </button>
+    </div>
+  );
+}
+
+function PermitsArrangeHint() {
+  return (
+    <div className="rounded-2xl border border-slate-700/60 bg-slate-900/40 p-6 text-sm text-slate-400 leading-relaxed">
+      <div className="flex items-center gap-2 mb-2 text-slate-200 font-semibold">
+        <ArrowUpDown className="w-4 h-4 text-amber-400" /> Arranging folders
+      </div>
+      <p>
+        Drag the rows on the left to reorder your Permits folders. Use the
+        <span className="inline-flex items-center justify-center align-middle mx-1 w-4 h-4 rounded-full bg-slate-800 border border-slate-600"><Minus className="w-2.5 h-2.5" /></span>
+        on a row to hide a folder from the rail — its submissions stay reachable from search and the other folders.
+        Click <span className="text-amber-300 font-semibold">Done</span> when you're finished; your layout saves automatically to this workbench.
+      </p>
+    </div>
+  );
+}
+
+// Folder header — title + count + a secondary status-narrowing chip row (only
+// when the folder spans more than one status). Preserves the exact-status
+// filtering today's dropdown offered, scoped to the active folder.
+function FolderHeader({ title, count, statuses, narrow, onNarrow }: {
+  title: string; count: number; statuses: string[]; narrow: string; onNarrow: (s: string) => void;
+}) {
+  return (
+    <div className="mb-4">
+      <div className="flex items-baseline gap-2 mb-2 flex-wrap">
+        <h3 className="text-lg font-bold text-white">{title}</h3>
+        <span className="text-sm font-mono text-slate-500 tabular-nums">{count}</span>
+      </div>
+      {statuses.length > 1 && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {statuses.map((st) => {
+            const cfg = STATUS_PALETTE[st] ?? STATUS_PALETTE.submitted;
+            const on = narrow === st;
+            return (
+              <button
+                key={st}
+                onClick={() => onNarrow(on ? '' : st)}
+                className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border transition-colors ${on ? `${cfg.bg} ${cfg.text} ${cfg.border}` : 'bg-slate-900/40 text-slate-500 border-slate-700/40 hover:text-slate-300 hover:border-slate-600/60'}`}
+              >
+                {cfg.icon}{cfg.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Submission card — the queue row (extracted from the pre-idiom list; the
+// `incoming` flag replaces the inline getState() From/To check).
+function SubmissionCard({ s, isAuthority, myOrgId, onOpen }: {
+  s: ListedSubmission; isAuthority: boolean; myOrgId: string | null; onOpen: () => void;
+}) {
+  const incoming = isAuthority && s.authority_org_id === myOrgId;
+  return (
+    <button
+      onClick={onOpen}
+      className="w-full text-left glass-panel rounded-xl border border-slate-800/60 p-4 hover:border-amber-500/30 hover:bg-amber-500/5 transition-all"
+    >
+      <div className="flex items-start justify-between gap-3 mb-2 flex-wrap">
+        <div className="flex-1 min-w-0">
+          <h3 className="font-bold text-white text-base truncate">
+            {s.project_name || 'Untitled project'}
+          </h3>
+          <p className="text-xs text-slate-500 truncate">
+            {[s.project_address, s.project_city, s.project_state, s.project_zip].filter(Boolean).join(', ') || 'No address on file'}
+          </p>
+        </div>
+        <StatusChip status={s.status} />
+      </div>
+      <div className="flex items-center gap-3 text-[11px] text-slate-500 flex-wrap">
+        <span className="flex items-center gap-1">
+          <Building2 className="w-3 h-3" />
+          {incoming
+            ? `From ${s.submitter_org_name ?? 'unknown'}`
+            : `To ${s.authority_org_name ?? 'unknown'}${s.authority_title ? ` · ${s.authority_title}` : ''}`}
+        </span>
+        {s.submission_type && (
+          <span className="font-mono uppercase tracking-wider text-[9px] text-slate-600">
+            {s.submission_type.replace(/_/g, ' ')}
+          </span>
+        )}
+        <span className="flex items-center gap-1">
+          <Clock className="w-3 h-3" /> {new Date(s.submitted_at).toLocaleDateString()}
+        </span>
+        {s.permit_number && (
+          <span className="flex items-center gap-1 text-emerald-400 font-mono">
+            <Hash className="w-3 h-3" /> {s.permit_number}
+          </span>
+        )}
+      </div>
+    </button>
+  );
+}
+
+// Metallic machined-header section — ported from TeamPage's `Section`, with an
+// optional accent (amber = action zone, violet = informational) tinting the
+// icon chip + body. The header is inert (not a collapse toggle).
+function Section({ icon, title, subtitle, action, accent = 'neutral', children }: {
+  icon: React.ReactNode; title: string; subtitle?: string; action?: React.ReactNode;
+  accent?: 'neutral' | 'amber' | 'violet';
+  children: React.ReactNode;
+}) {
+  const iconColor = accent === 'violet' ? 'text-violet-400' : 'text-amber-400';
+  const ring = accent === 'amber' ? 'border-amber-500/40' : 'border-slate-700/60';
+  const body = accent === 'amber' ? 'bg-amber-500/[0.03]' : 'bg-slate-900/60';
+  return (
+    <section className={`rounded-2xl border ${ring} overflow-hidden shadow-[0_10px_36px_rgba(0,0,0,0.45)]`}>
+      <header className="portal-plate relative px-5 py-3.5 flex items-center gap-3">
+        <span aria-hidden className="portal-menu-sheen absolute inset-0 pointer-events-none" />
+        <span className={`relative z-10 w-9 h-9 rounded-xl bg-slate-900 border-2 border-slate-950/60 flex items-center justify-center shrink-0 ${iconColor} shadow-[inset_0_1px_2px_rgba(255,255,255,0.3),0_2px_5px_rgba(0,0,0,0.5)]`}>
+          {icon}
+        </span>
+        <div className="relative z-10 min-w-0">
+          <h3 className="metal-ink text-sm font-bold uppercase tracking-widest truncate">{title}</h3>
+          {subtitle && <p className="metal-ink-soft text-[11px] font-semibold">{subtitle}</p>}
+        </div>
+        {action && <div className="relative z-10 ml-auto shrink-0">{action}</div>}
+      </header>
+      <div className={`${body} backdrop-blur-xl p-5 border-t border-slate-950/50`}>{children}</div>
+    </section>
   );
 }
 
@@ -368,26 +851,6 @@ function PermitDetail({ id }: { id: string }) {
   return (
     <div className="h-full overflow-y-auto">
       <div className="max-w-4xl mx-auto px-4 py-6 pt-8 pb-24 md:p-8 md:pt-12 md:pb-24">
-        <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
-          <Link to="/permits" className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-amber-400">
-            <ArrowLeft className="w-3.5 h-3.5" /> Back to Permits
-          </Link>
-          {/* Audit trail of every action on this submission — claim,
-              decision, comments, status changes. Critical for legal
-              defensibility of the permit decision itself. */}
-          {canViewAudit && (
-            <button
-              type="button"
-              onClick={() => setAuditOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-slate-900/60 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-emerald-300 min-h-[36px]"
-              title="Full audit trail for this permit submission"
-            >
-              <Activity className="w-3.5 h-3.5" />
-              Activity
-            </button>
-          )}
-        </div>
-
         <EntityAuditModal
           isOpen={auditOpen}
           onClose={() => setAuditOpen(false)}
@@ -413,32 +876,74 @@ function PermitDetail({ id }: { id: string }) {
           <ParentSubmissionBreadcrumb parent={data.parentSubmission} />
         )}
 
+        {/* Metallic hero — carries the submission identity + the Back / Refresh /
+            Activity affordances that used to sit in a plain top bar. */}
         {data && data.submission && (
-          <SubmissionHeader submission={data.submission} project={data.project} />
-        )}
-
-        {data && data.party === 'authority' && data.submission && (
-          <AuthorityActions
+          <DetailHero
             submission={data.submission}
-            decisionDraft={decisionDraft}
-            setDecisionDraft={setDecisionDraft}
-            permitNumberDraft={permitNumberDraft}
-            setPermitNumberDraft={setPermitNumberDraft}
-            expiresDraft={expiresDraft}
-            setExpiresDraft={setExpiresDraft}
-            acting={acting}
-            onAct={act}
+            project={data.project}
+            canViewAudit={canViewAudit}
+            loading={loading}
+            onRefresh={refresh}
+            onActivity={() => setAuditOpen(true)}
           />
         )}
 
-        {data && data.party === 'submitter' && data.submission && (
-          <SubmitterActions
-            submission={data.submission}
-            acting={acting}
-            onWithdraw={() => act('withdraw')}
-            onResubmit={() => setResubmitOpen(true)}
-          />
-        )}
+        {/* Read (details) → decide (actions) → history → payload → discussion.
+            Every card wears the shared machined Section header; handlers are
+            unchanged from the pre-idiom view. */}
+        <div className="space-y-6">
+          {data && data.submission && (
+            <SubmissionDetails submission={data.submission} />
+          )}
+
+          {data && data.party === 'authority' && data.submission && (
+            <AuthorityActions
+              submission={data.submission}
+              decisionDraft={decisionDraft}
+              setDecisionDraft={setDecisionDraft}
+              permitNumberDraft={permitNumberDraft}
+              setPermitNumberDraft={setPermitNumberDraft}
+              expiresDraft={expiresDraft}
+              setExpiresDraft={setExpiresDraft}
+              acting={acting}
+              onAct={act}
+            />
+          )}
+
+          {data && data.party === 'submitter' && data.submission && (
+            <SubmitterActions
+              submission={data.submission}
+              acting={acting}
+              onWithdraw={() => act('withdraw')}
+              onResubmit={() => setResubmitOpen(true)}
+            />
+          )}
+
+          {data && timeline.length > 0 && (
+            <LifecycleTimeline transitions={timeline} />
+          )}
+
+          {data && data.project && (
+            <ProjectPayload project={data.project} calculations={data.calculations} />
+          )}
+
+          {data && (
+            <CommentThread
+              comments={data.comments}
+              sessionUserId={sessionUser?.id ?? null}
+              isAuthority={data.party === 'authority'}
+              showInternal={showInternal}
+              setShowInternal={setShowInternal}
+              draft={draft}
+              setDraft={setDraft}
+              internalDraft={internalDraft}
+              setInternalDraft={setInternalDraft}
+              onPost={post}
+              posting={posting}
+            />
+          )}
+        </div>
 
         {/* Resubmit modal — opened by SubmitterActions on terminal non-success
             states. parentSubmissionId chains the new submission to this one
@@ -453,30 +958,6 @@ function PermitDetail({ id }: { id: string }) {
               setResubmitOpen(false);
               navigate(`/permits/${newId}`);
             }}
-          />
-        )}
-
-        {data && timeline.length > 0 && (
-          <LifecycleTimeline transitions={timeline} />
-        )}
-
-        {data && data.project && (
-          <ProjectPayload project={data.project} calculations={data.calculations} />
-        )}
-
-        {data && (
-          <CommentThread
-            comments={data.comments}
-            sessionUserId={sessionUser?.id ?? null}
-            isAuthority={data.party === 'authority'}
-            showInternal={showInternal}
-            setShowInternal={setShowInternal}
-            draft={draft}
-            setDraft={setDraft}
-            internalDraft={internalDraft}
-            setInternalDraft={setInternalDraft}
-            onPost={post}
-            posting={posting}
           />
         )}
       </div>
@@ -516,13 +997,7 @@ function ParentSubmissionBreadcrumb({ parent }: { parent: NonNullable<DetailData
 
 function LifecycleTimeline({ transitions }: { transitions: Transition[] }) {
   return (
-    <div className="mb-6 glass-panel rounded-2xl border border-slate-800/60 p-5">
-      <div className="flex items-center gap-2 mb-3">
-        <History className="w-4 h-4 text-violet-400" />
-        <h3 className="font-bold text-white text-sm uppercase tracking-wider">
-          Lifecycle ({transitions.length})
-        </h3>
-      </div>
+    <Section icon={<History className="w-4 h-4" />} title={`Lifecycle (${transitions.length})`} accent="violet">
       <ol className="space-y-2">
         {transitions.map((t) => {
           const cfg = STATUS_PALETTE[t.to_status] ?? STATUS_PALETTE.submitted;
@@ -561,7 +1036,7 @@ function LifecycleTimeline({ transitions }: { transitions: Transition[] }) {
           );
         })}
       </ol>
-    </div>
+    </Section>
   );
 }
 
@@ -588,8 +1063,87 @@ function shapeProjectForModal(p: Record<string, unknown>): Project {
   } as Project;
 }
 
-function SubmissionHeader({ submission, project }: { submission: Record<string, unknown>; project: Record<string, unknown> | null }) {
+// Metallic hero for a single submission — mark + identity + the Back / Refresh
+// / Activity controls that used to live in a plain top bar. The rich metadata
+// moves into the SubmissionDetails Section below so the plate stays clean.
+function DetailHero({ submission, project, canViewAudit, loading, onRefresh, onActivity }: {
+  submission: Record<string, unknown>;
+  project: Record<string, unknown> | null;
+  canViewAudit: boolean;
+  loading: boolean;
+  onRefresh: () => void;
+  onActivity: () => void;
+}) {
   const status = (submission.status as string) ?? 'submitted';
+  const submissionType = submission.submission_type as string | null | undefined;
+  const permitNumber = submission.permit_number as string | null | undefined;
+
+  return (
+    <header className="mb-6">
+      <div className="portal-plate portal-menu-emerge relative overflow-hidden rounded-2xl border border-slate-700/70 p-5 sm:p-6 shadow-[0_16px_50px_rgba(0,0,0,0.6)]">
+        <span aria-hidden className="portal-menu-sheen absolute inset-0 pointer-events-none" />
+        <div className="relative z-10 flex items-start gap-4 flex-wrap">
+          <div className="portal-button-metallic relative w-14 h-14 rounded-2xl overflow-hidden flex items-center justify-center shrink-0">
+            <span aria-hidden className="portal-ring-metallic absolute inset-[-50%]" />
+            <span aria-hidden className="absolute inset-[2px] rounded-[14px] bg-slate-950/95" />
+            <ShieldCheck className="relative z-10 w-6 h-6 text-amber-300" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="metal-ink-soft text-[10px] font-mono font-bold uppercase tracking-[0.25em]">
+              {submissionType ? submissionType.replace(/_/g, ' ') : 'Submission'}
+            </p>
+            <h1 className="metal-ink text-2xl font-extrabold leading-tight truncate">
+              {(project?.name as string) || 'Untitled project'}
+            </h1>
+            <p className="metal-ink-soft text-xs sm:text-sm font-semibold truncate">
+              {[project?.address, project?.city, project?.state, project?.zip].filter(Boolean).join(', ') || 'No address'}
+            </p>
+          </div>
+          <div className="flex flex-col items-end gap-2 shrink-0">
+            <StatusChip status={status} />
+            {permitNumber && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-mono text-emerald-300">
+                <Hash className="w-3 h-3" /> {permitNumber}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="relative z-10 flex items-center gap-2 mt-4 flex-wrap">
+          <Link
+            to="/permits"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-950/90 hover:bg-slate-900/90 border border-white/10 text-sm text-slate-200 hover:text-amber-300 transition-colors min-h-[40px]"
+          >
+            <ArrowLeft className="w-4 h-4" /> Back to Permits
+          </Link>
+          <button
+            onClick={onRefresh}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-950/90 hover:bg-slate-900/90 border border-white/10 text-sm text-slate-200 hover:text-white transition-colors min-h-[40px] disabled:opacity-50"
+            title="Reload this submission"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">Refresh</span>
+          </button>
+          {canViewAudit && (
+            <button
+              type="button"
+              onClick={onActivity}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-950/90 hover:bg-slate-900/90 border border-white/10 text-sm text-slate-200 hover:text-emerald-300 transition-colors min-h-[40px]"
+              title="Full audit trail for this permit submission"
+            >
+              <Activity className="w-4 h-4" />
+              <span className="hidden sm:inline">Activity</span>
+            </button>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+}
+
+// Submission metadata — the From/To grid + cover letter + decision / intake
+// notes, in the shared machined Section (was the body of SubmissionHeader).
+function SubmissionDetails({ submission }: { submission: Record<string, unknown> }) {
   const submittedAt = submission.submitted_at as string | undefined;
   const reviewedAt = submission.reviewed_at as string | null | undefined;
   const permitNumber = submission.permit_number as string | null | undefined;
@@ -602,18 +1156,8 @@ function SubmissionHeader({ submission, project }: { submission: Record<string, 
   const intakeNotes = submission.authority_intake_notes as string | null | undefined;
 
   return (
-    <header className="mb-6 glass-panel rounded-2xl border border-slate-800/60 p-6">
-      <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
-        <div>
-          <h1 className="text-2xl font-bold text-white">{(project?.name as string) || 'Untitled project'}</h1>
-          <p className="text-sm text-slate-500">
-            {[project?.address, project?.city, project?.state, project?.zip].filter(Boolean).join(', ') || 'No address'}
-          </p>
-        </div>
-        <StatusChip status={status} />
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-400 mb-3">
+    <Section icon={<FileText className="w-4 h-4" />} title="Submission details">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-400">
         <div>
           <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">From</div>
           <div className="font-semibold text-slate-200">{submitterOrgName ?? '—'}</div>
@@ -670,7 +1214,7 @@ function SubmissionHeader({ submission, project }: { submission: Record<string, 
           <p className="text-xs text-slate-400 whitespace-pre-wrap">{intakeNotes}</p>
         </div>
       )}
-    </header>
+    </Section>
   );
 }
 
@@ -693,12 +1237,7 @@ function AuthorityActions({ submission, decisionDraft, setDecisionDraft, permitN
   if (!inPreDecision && !inActiveLifecycle) return null;
 
   return (
-    <div className="mb-6 glass-panel rounded-2xl border border-amber-500/30 bg-amber-500/5 p-5">
-      <div className="flex items-center gap-2 mb-3">
-        <ShieldCheck className="w-4 h-4 text-amber-400" />
-        <h3 className="font-bold text-amber-300 text-sm uppercase tracking-wider">Authority actions</h3>
-      </div>
-
+    <Section icon={<ShieldCheck className="w-4 h-4" />} title="Authority actions" accent="amber">
       {inPreDecision && (
         <>
           {status === 'submitted' && (
@@ -837,7 +1376,7 @@ function AuthorityActions({ submission, decisionDraft, setDecisionDraft, permitN
           </div>
         </div>
       )}
-    </div>
+    </Section>
   );
 }
 
@@ -857,7 +1396,8 @@ function SubmitterActions({ submission, acting, onWithdraw, onResubmit }: {
   if (!canWithdraw && !canResubmit) return null;
 
   return (
-    <div className="mb-6 glass-panel rounded-2xl border border-slate-800/60 p-4 flex items-center justify-between gap-3 flex-wrap">
+    <Section icon={<RotateCcw className="w-4 h-4" />} title="Your actions">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
       <div className="flex items-center gap-3 flex-wrap">
         {canWithdraw && (
           <button
@@ -882,7 +1422,8 @@ function SubmitterActions({ submission, acting, onWithdraw, onResubmit }: {
         {canWithdraw && 'Removes from the authority\'s queue. '}
         {canResubmit && 'Resubmit chains the new submission to this one for context.'}
       </p>
-    </div>
+      </div>
+    </Section>
   );
 }
 
@@ -894,12 +1435,7 @@ function ProjectPayload({ project, calculations }: { project: Record<string, unk
   }, {} as Record<string, Record<string, unknown>>);
 
   return (
-    <div className="mb-6 glass-panel rounded-2xl border border-slate-800/60 p-5">
-      <div className="flex items-center gap-2 mb-3">
-        <FileText className="w-4 h-4 text-violet-400" />
-        <h3 className="font-bold text-white text-sm uppercase tracking-wider">Project payload (full visibility)</h3>
-      </div>
-
+    <Section icon={<FileText className="w-4 h-4" />} title="Project payload (full visibility)" accent="violet">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs mb-4">
         <div>
           <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Address</div>
@@ -931,7 +1467,7 @@ function ProjectPayload({ project, calculations }: { project: Record<string, unk
           ))}
         </div>
       )}
-    </div>
+    </Section>
   );
 }
 
@@ -949,21 +1485,22 @@ function CommentThread({ comments, sessionUserId, isAuthority, showInternal, set
   const internalCount = comments.filter(c => c.is_internal).length;
 
   return (
-    <>
-      <h2 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-3 flex items-center gap-2 flex-wrap">
-        <MessageSquare className="w-4 h-4 text-amber-400" />
-        Discussion ({visible.length})
-        {isAuthority && internalCount > 0 && (
+    <Section
+      icon={<MessageSquare className="w-4 h-4" />}
+      title={`Discussion (${visible.length})`}
+      accent="amber"
+      action={
+        isAuthority && internalCount > 0 ? (
           <button
             onClick={() => setShowInternal(!showInternal)}
-            className="ml-auto text-[10px] font-mono text-slate-500 hover:text-amber-400 transition-colors"
+            className="text-[10px] font-mono text-slate-400 hover:text-amber-300 transition-colors"
           >
             {showInternal ? 'Hide' : 'Show'} {internalCount} internal
           </button>
-        )}
-      </h2>
-
-      <div className="space-y-3 mb-6">
+        ) : undefined
+      }
+    >
+      <div className="space-y-3 mb-4">
         {visible.length === 0 ? (
           <p className="text-xs text-slate-500 italic px-3 py-4">No discussion yet.</p>
         ) : (
@@ -1027,6 +1564,6 @@ function CommentThread({ comments, sessionUserId, isAuthority, showInternal, set
           </button>
         </div>
       </div>
-    </>
+    </Section>
   );
 }

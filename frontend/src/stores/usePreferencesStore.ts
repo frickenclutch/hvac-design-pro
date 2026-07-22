@@ -88,6 +88,21 @@ export interface UserPreferences {
   /** Last-open Team category id — re-entry lands where you left off. */
   teamLastCategory: string;
 
+  // ── Permits queue (mirrors the Settings rail contract) ────────────────────
+  /** Auto-refresh interval (ms) for the Permits queue's live submission list.
+   *  0 = manual only. Persisted so the officer's console stays how they left
+   *  it — same "my workbench" rule as the admin/settings prefs. Mirrors
+   *  `adminAutoRefreshMs`. */
+  permitsAutoRefreshMs: number;
+  /** Custom Permits folder order (ids, top→bottom). null = registry default.
+   *  Set from the Permits rail's arrange mode. Mirrors `settingsNavOrder`. */
+  permitsNavOrder: string[] | null;
+  /** Permits folders hidden from the rail (ids). Still search-reachable —
+   *  hiding declutters, never disables. Mirrors `settingsNavHidden`. */
+  permitsNavHidden: string[];
+  /** Last-open Permits folder id — re-entry lands where you left off. */
+  permitsLastCategory: string;
+
   sidebarCollapsed: boolean;
   gridSnap: boolean;
   gridSpacing: number;       // px per foot
@@ -165,6 +180,10 @@ const defaults: UserPreferences = {
   teamNavOrder: null,
   teamNavHidden: [],
   teamLastCategory: '',
+  permitsAutoRefreshMs: 0,
+  permitsNavOrder: null,
+  permitsNavHidden: [],
+  permitsLastCategory: '',
   sidebarCollapsed: false,
   gridSnap: true,
   gridSpacing: 40,
