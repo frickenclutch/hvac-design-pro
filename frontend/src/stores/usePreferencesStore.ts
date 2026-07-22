@@ -78,6 +78,16 @@ export interface UserPreferences {
   /** Last-open admin category id — re-entry lands where you left off. */
   adminLastCategory: string;
 
+  // ── Team panel (mirrors the Settings rail contract) ───────────────────────
+  /** Custom Team category order (ids, top→bottom). null = registry default.
+   *  Set from the Team rail's arrange mode. Mirrors `settingsNavOrder`. */
+  teamNavOrder: string[] | null;
+  /** Team categories hidden from the rail (ids). Still search-reachable —
+   *  hiding declutters, never disables. Mirrors `settingsNavHidden`. */
+  teamNavHidden: string[];
+  /** Last-open Team category id — re-entry lands where you left off. */
+  teamLastCategory: string;
+
   sidebarCollapsed: boolean;
   gridSnap: boolean;
   gridSpacing: number;       // px per foot
@@ -152,6 +162,9 @@ const defaults: UserPreferences = {
   adminNavOrder: null,
   adminNavHidden: [],
   adminLastCategory: '',
+  teamNavOrder: null,
+  teamNavHidden: [],
+  teamLastCategory: '',
   sidebarCollapsed: false,
   gridSnap: true,
   gridSpacing: 40,

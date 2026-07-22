@@ -9,14 +9,15 @@
  * their own tenant.
  */
 
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState, useRef } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import {
   Users, UserPlus, Globe, Mail, Trash2, Shield, RefreshCw,
   AlertTriangle, CheckCircle2, Copy, Crown, ShieldCheck, Activity, RotateCcw,
-  Building2, ArrowRightLeft,
+  Building2, ArrowRightLeft, Search, X, ArrowUpDown, Check, GripVertical, Minus, Plus,
 } from 'lucide-react';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
+import { usePreferencesStore, type UserPreferences } from '../stores/usePreferencesStore';
 import { api } from '../lib/api';
 import AuthorityBadge from '../components/AuthorityBadge';
 import EntityAuditModal from '../components/EntityAuditModal';
@@ -56,6 +57,18 @@ interface Invite {
 type Subdivision = Awaited<ReturnType<typeof api.teamSubdivisions>>['subdivisions'][number];
 
 const ROLES: Role[] = ['admin', 'engineer', 'tech', 'viewer'];
+
+// A left-rail category — one card group per row. Mirrors the Settings
+// registry (SettingsCategoryEntry): `visible` gates by viewer, `keywords`
+// feed the rail search, `node` is the card(s) rendered in the detail pane.
+interface TeamCategoryEntry {
+  id: string;
+  title: string;
+  icon: React.ReactNode;
+  keywords: string[];
+  visible: boolean;
+  node: React.ReactNode;
+}
 
 export default function TeamPage() {
   const sessionUser = useAuthStore((s) => s.user);
@@ -147,65 +160,86 @@ export default function TeamPage() {
 
   useEffect(() => { refresh(); }, []);
 
-  return (
-    <div className="h-full overflow-y-auto">
-      <div className="max-w-5xl mx-auto px-4 py-6 pt-8 pb-24 md:p-8 md:pt-12 md:pb-24">
-        <header className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
-              <Users className="w-6 h-6 text-emerald-400" />
-            </div>
-            <div className="flex-1">
-              <h2 className="text-3xl font-bold text-white">Team</h2>
-              <p className="text-slate-400 text-sm">
-                {orgName ? `${orgName} · ` : ''}members of your organisation
-                {parentOrg && (
-                  <span className="text-slate-500"> · subdivision of <span className="text-slate-300">{parentOrg.name}</span></span>
-                )}
-              </p>
-            </div>
-            <Link
-              to="/audit-log"
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900/60 hover:bg-slate-800 border border-slate-700 text-sm text-slate-300 hover:text-emerald-300 transition-colors min-h-[44px]"
-              title="See every action taken by anyone in your organisation"
-            >
-              <Activity className="w-4 h-4" />
-              <span className="hidden md:inline">Audit log</span>
-            </Link>
-          </div>
-          {!isAdmin && (
-            <p className="text-xs text-slate-500 mt-3">
-              You're viewing as {sessionUser?.role}. Ask an admin in your tenant to invite or remove members.
-            </p>
-          )}
-        </header>
+  // ── Rail state (mirrors the Settings/Admin master-detail contract) ─────────
+  const teamNavOrder = usePreferencesStore((s) => s.teamNavOrder);
+  const teamNavHidden = usePreferencesStore((s) => s.teamNavHidden);
+  const teamLastCategory = usePreferencesStore((s) => s.teamLastCategory);
+  const updatePrefs = usePreferencesStore((s) => s.update);
 
-        {err && (
-          <div className="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-400">
-            <AlertTriangle className="w-4 h-4 flex-shrink-0" /> {err}
-          </div>
-        )}
-        {info && (
-          <div className="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-400">
-            <CheckCircle2 className="w-4 h-4 flex-shrink-0" /> {info}
-          </div>
-        )}
-
-        <div className="space-y-6">
-          <DomainCard
-            domain={domain}
-            isAdmin={isAdmin}
-            onUpdate={async (next) => {
+  // Registry → the DEFAULT (registry) order of categories visible to this
+  // viewer. Every card keeps its exact handlers; this only reframes WHERE they
+  // render. Visibility preserves today's behavior precisely: Transfers is
+  // admin-only, Subdivisions hides for orgs that are themselves a subdivision,
+  // and the pending-invite list + read-only subdivision view stay visible to
+  // non-admins (the invite/create forms inside gate on isAdmin as before).
+  const baseCategories: TeamCategoryEntry[] = [
+    {
+      id: 'members',
+      title: 'Members',
+      icon: <Users className="w-4 h-4" />,
+      keywords: ['members', 'roster', 'people', 'users', 'role', 'roles', 'deactivate', 'reactivate', 'authority', 'activity', 'seats'],
+      visible: true,
+      node: (
+        <MembersCard
+          members={members}
+          sessionUserId={sessionUser?.id ?? null}
+          isAdmin={isAdmin}
+          loading={loading}
+          onRefresh={refresh}
+          onSetRole={(userId, role) => {
+            const m = members.find((x) => x.id === userId);
+            if (!m || m.role === role) return;
+            void attemptChange(userId, m.email, role);
+          }}
+          onSetAuthority={async (userId, isAuth) => {
+            try {
+              await api.teamSetAuthorityFlag(userId, isAuth);
+              setInfo(isAuth ? 'Authority flag enabled.' : 'Authority flag removed.');
+              refresh();
+            } catch (e) {
+              setErr(e instanceof Error ? e.message : String(e));
+            }
+          }}
+          onRemove={(userId) => {
+            const m = members.find((x) => x.id === userId);
+            if (!m) return;
+            // Preflight first. If clean, it still confirms (deactivation
+            // is consequential); if blockers, the gate modal handles it.
+            void (async () => {
               try {
-                const r = await api.teamSetDomain(next);
-                setDomain({ claimed: r.domain, verifiedAt: r.verifiedAt });
-                setInfo(next ? `Claimed @${next}` : 'Domain claim removed');
+                const plan = await api.teamRoleChangePreflight(userId, null);
+                if (plan.blockers.length === 0) {
+                  if (!confirm('Deactivate this member? They lose access immediately and their live sessions are revoked. Their projects, calcs and history are preserved, and you can reactivate them later.')) return;
+                  await commitChange(userId, null);
+                } else {
+                  setGate({ userId, email: m.email, proposedRole: null, plan });
+                }
               } catch (e) {
                 setErr(e instanceof Error ? e.message : String(e));
               }
-            }}
-          />
-
+            })();
+          }}
+          onReactivate={async (userId) => {
+            try {
+              await api.teamReactivateMember(userId);
+              setInfo('Member reactivated.');
+              refresh();
+            } catch (e) {
+              setErr(e instanceof Error ? e.message : String(e));
+            }
+          }}
+          onViewActivity={(member) => setAuditTarget(member)}
+        />
+      ),
+    },
+    {
+      id: 'invitations',
+      title: 'Invitations',
+      icon: <Mail className="w-4 h-4" />,
+      keywords: ['invite', 'invitation', 'invitations', 'pending', 'email', 'redeem', 'link', 'onboard', 'send invite'],
+      visible: true,
+      node: (
+        <div className="space-y-6">
           {isAdmin && (
             <InviteCard
               defaultDomain={domain.claimed}
@@ -231,53 +265,6 @@ export default function TeamPage() {
               }}
             />
           )}
-
-          {isAdmin && (
-            <TransferCard
-              onRequest={async (email, role) => {
-                try {
-                  const r = await api.teamReparent(email, role);
-                  setInfo(
-                    r.emailSent
-                      ? `Transfer request sent to ${email} — they'll see it in-app and by email.`
-                      : `Transfer request created for ${email}. Email delivery failed — they'll still see it in-app on their next sign-in.`
-                  );
-                  refresh();
-                } catch (e) {
-                  setErr(e instanceof Error ? e.message : String(e));
-                }
-              }}
-            />
-          )}
-
-          {/* Subdivisions — hidden for orgs that are themselves a subdivision
-              (single-level tree) */}
-          {!parentOrg && (
-            <SubdivisionsCard
-              subdivisions={subdivisions}
-              isAdmin={isAdmin}
-              onCreate={async (name) => {
-                try {
-                  await api.teamCreateSubdivision(name);
-                  setInfo(`Subdivision "${name}" created. Invite its first admin from the invite card above.`);
-                  refresh();
-                } catch (e) {
-                  setErr(e instanceof Error ? e.message : String(e));
-                }
-              }}
-              onDelete={async (sub) => {
-                if (!confirm(`Remove the empty subdivision "${sub.name}"?`)) return;
-                try {
-                  await api.teamDeleteSubdivision(sub.id);
-                  setInfo(`Subdivision "${sub.name}" removed.`);
-                  refresh();
-                } catch (e) {
-                  setErr(e instanceof Error ? e.message : String(e));
-                }
-              }}
-            />
-          )}
-
           <PendingInvitesCard
             invites={invites}
             isAdmin={isAdmin}
@@ -298,82 +285,460 @@ export default function TeamPage() {
               );
             }}
           />
-
-          <MembersCard
-            members={members}
-            sessionUserId={sessionUser?.id ?? null}
-            isAdmin={isAdmin}
-            loading={loading}
-            onRefresh={refresh}
-            onSetRole={(userId, role) => {
-              const m = members.find((x) => x.id === userId);
-              if (!m || m.role === role) return;
-              void attemptChange(userId, m.email, role);
-            }}
-            onSetAuthority={async (userId, isAuth) => {
-              try {
-                await api.teamSetAuthorityFlag(userId, isAuth);
-                setInfo(isAuth ? 'Authority flag enabled.' : 'Authority flag removed.');
-                refresh();
-              } catch (e) {
-                setErr(e instanceof Error ? e.message : String(e));
-              }
-            }}
-            onRemove={(userId) => {
-              const m = members.find((x) => x.id === userId);
-              if (!m) return;
-              // Preflight first. If clean, it still confirms (deactivation
-              // is consequential); if blockers, the gate modal handles it.
-              void (async () => {
-                try {
-                  const plan = await api.teamRoleChangePreflight(userId, null);
-                  if (plan.blockers.length === 0) {
-                    if (!confirm('Deactivate this member? They lose access immediately and their live sessions are revoked. Their projects, calcs and history are preserved, and you can reactivate them later.')) return;
-                    await commitChange(userId, null);
-                  } else {
-                    setGate({ userId, email: m.email, proposedRole: null, plan });
-                  }
-                } catch (e) {
-                  setErr(e instanceof Error ? e.message : String(e));
-                }
-              })();
-            }}
-            onReactivate={async (userId) => {
-              try {
-                await api.teamReactivateMember(userId);
-                setInfo('Member reactivated.');
-                refresh();
-              } catch (e) {
-                setErr(e instanceof Error ? e.message : String(e));
-              }
-            }}
-            onViewActivity={(member) => setAuditTarget(member)}
-          />
-
-          <EntityAuditModal
-            isOpen={!!auditTarget}
-            onClose={() => setAuditTarget(null)}
-            entityType="user"
-            entityId={auditTarget?.id ?? ''}
-            label={
-              auditTarget
-                ? ([auditTarget.first_name, auditTarget.last_name].filter(Boolean).join(' ') || auditTarget.email)
-                : ''
-            }
-            context={auditTarget?.email}
-          />
-
-          {gate && (
-            <RoleChangeGate
-              email={gate.email}
-              proposedRole={gate.proposedRole}
-              blockers={gate.plan.blockers}
-              onCancel={() => { setGate(null); refresh(); }}
-              onConfirm={() => void commitChange(gate.userId, gate.proposedRole)}
-            />
-          )}
         </div>
+      ),
+    },
+    {
+      id: 'transfers',
+      title: 'Transfers',
+      icon: <ArrowRightLeft className="w-4 h-4" />,
+      keywords: ['transfer', 'transfers', 'reparent', 'move account', 'account', 'ownership', 'bring in'],
+      visible: isAdmin,
+      node: (
+        <TransferCard
+          onRequest={async (email, role) => {
+            try {
+              const r = await api.teamReparent(email, role);
+              setInfo(
+                r.emailSent
+                  ? `Transfer request sent to ${email} — they'll see it in-app and by email.`
+                  : `Transfer request created for ${email}. Email delivery failed — they'll still see it in-app on their next sign-in.`
+              );
+              refresh();
+            } catch (e) {
+              setErr(e instanceof Error ? e.message : String(e));
+            }
+          }}
+        />
+      ),
+    },
+    {
+      id: 'subdivisions',
+      title: 'Subdivisions',
+      icon: <Building2 className="w-4 h-4" />,
+      keywords: ['subdivision', 'subdivisions', 'division', 'branch', 'subsidiary', 'dba', 'child org', 'department', 'sub-org'],
+      // Hidden for orgs that are themselves a subdivision (single-level tree).
+      visible: !parentOrg,
+      node: (
+        <SubdivisionsCard
+          subdivisions={subdivisions}
+          isAdmin={isAdmin}
+          onCreate={async (name) => {
+            try {
+              await api.teamCreateSubdivision(name);
+              setInfo(`Subdivision "${name}" created. Invite its first admin from the Invitations tab.`);
+              refresh();
+            } catch (e) {
+              setErr(e instanceof Error ? e.message : String(e));
+            }
+          }}
+          onDelete={async (sub) => {
+            if (!confirm(`Remove the empty subdivision "${sub.name}"?`)) return;
+            try {
+              await api.teamDeleteSubdivision(sub.id);
+              setInfo(`Subdivision "${sub.name}" removed.`);
+              refresh();
+            } catch (e) {
+              setErr(e instanceof Error ? e.message : String(e));
+            }
+          }}
+        />
+      ),
+    },
+    {
+      id: 'domain',
+      title: 'Domain',
+      icon: <Globe className="w-4 h-4" />,
+      keywords: ['domain', 'email domain', 'claimed domain', 'dns', 'verify', 'tenant', 'signup'],
+      visible: true,
+      node: (
+        <DomainCard
+          domain={domain}
+          isAdmin={isAdmin}
+          onUpdate={async (next) => {
+            try {
+              const r = await api.teamSetDomain(next);
+              setDomain({ claimed: r.domain, verifiedAt: r.verifiedAt });
+              setInfo(next ? `Claimed @${next}` : 'Domain claim removed');
+            } catch (e) {
+              setErr(e instanceof Error ? e.message : String(e));
+            }
+          }}
+        />
+      ),
+    },
+  ].filter((c) => c.visible);
+
+  // Apply the user's custom order (arrange mode); anything shipped since they
+  // last arranged appends in registry order — same rule as Settings / CAD toolbox.
+  const orderedCategories = (() => {
+    if (!teamNavOrder) return baseCategories;
+    const byId = new Map(baseCategories.map((c) => [c.id, c]));
+    const known = teamNavOrder.map((id) => byId.get(id)).filter((c): c is TeamCategoryEntry => !!c);
+    const missing = baseCategories.filter((c) => !teamNavOrder.includes(c.id));
+    return [...known, ...missing];
+  })();
+  // Rail = ordered minus hidden; search + deep-links still reach hidden ones.
+  const railCategories = orderedCategories.filter((c) => !teamNavHidden.includes(c.id));
+
+  // Active category: URL hash → last-open pref → first visible.
+  const [active, setActive] = useState<string>(() => {
+    const hash = typeof window !== 'undefined' ? window.location.hash.replace('#', '') : '';
+    return hash || teamLastCategory || '';
+  });
+  const [query, setQuery] = useState('');
+  const [arrangeMode, setArrangeMode] = useState(false);
+
+  // Resolves against the full ordered set (so a deep-linked / last-open hidden
+  // category still renders), else falls back to the first visible category.
+  const activeCat = orderedCategories.find((c) => c.id === active) ?? railCategories[0] ?? orderedCategories[0];
+  useEffect(() => {
+    if (activeCat && activeCat.id !== active) setActive(activeCat.id);
+  }, [activeCat, active]);
+
+  // Follow deep-links (Cmd+K jumps, back/forward navigations).
+  const location = useLocation();
+  useEffect(() => {
+    const h = location.hash.replace('#', '');
+    if (h) { setActive(h); setQuery(''); }
+  }, [location.hash]);
+
+  const selectCategory = (id: string) => {
+    setActive(id);
+    updatePrefs({ teamLastCategory: id });
+    if (typeof window !== 'undefined') window.history.replaceState(null, '', `#${id}`);
+  };
+  const pickCategory = (id: string) => { setQuery(''); selectCategory(id); };
+  const enterArrange = () => { setArrangeMode(true); setQuery(''); };
+
+  const q = query.trim().toLowerCase();
+  const searching = q.length > 0;
+  const filteredList = searching
+    ? orderedCategories.filter((c) => `${c.title} ${c.keywords.join(' ')}`.toLowerCase().includes(q))
+    : [];
+
+  return (
+    <div className="h-full overflow-y-auto">
+      <div className="max-w-6xl mx-auto px-4 py-6 pt-8 pb-24 md:p-8 md:pt-12 md:pb-24">
+        {/* Metallic portal-plate hero — the same brushed-steel plate, sheen and
+            engraved metal-ink as the Settings hero, carrying Team's own mark. */}
+        <header className="mb-8">
+          <div className="portal-plate portal-menu-emerge relative overflow-hidden rounded-2xl border border-slate-700/70 p-5 sm:p-6 flex items-center gap-4 sm:gap-5 shadow-[0_16px_50px_rgba(0,0,0,0.6)]">
+            <span aria-hidden className="portal-menu-sheen absolute inset-0 pointer-events-none" />
+            {/* Team's identity in the metallic ring frame (not the portal's
+                black-hole — this is Team, not the Creation Portal). */}
+            <div className="portal-button-metallic relative w-16 h-16 rounded-2xl overflow-hidden flex items-center justify-center shrink-0">
+              <span aria-hidden className="portal-ring-metallic absolute inset-[-50%]" />
+              <span aria-hidden className="absolute inset-[2px] rounded-[14px] bg-slate-950/95" />
+              <Users className="relative z-10 w-7 h-7 text-emerald-300" />
+            </div>
+            <div className="relative z-10 min-w-0 flex-1">
+              <p className="metal-ink-soft text-[10px] font-mono font-bold uppercase tracking-[0.25em]">Organisation</p>
+              <h2 className="metal-ink text-2xl sm:text-3xl font-extrabold leading-tight">Team</h2>
+              <p className="metal-ink-soft text-xs sm:text-sm font-semibold truncate">
+                {orgName ? `${orgName} · ` : ''}members of your organisation
+                {parentOrg && <span> · subdivision of {parentOrg.name}</span>}
+              </p>
+            </div>
+            <Link
+              to="/audit-log"
+              className="relative z-10 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-950/50 hover:bg-slate-900/70 border border-slate-700/70 text-sm text-slate-300 hover:text-emerald-300 transition-colors min-h-[44px] shrink-0"
+              title="See every action taken by anyone in your organisation"
+            >
+              <Activity className="w-4 h-4" />
+              <span className="hidden md:inline">Audit log</span>
+            </Link>
+          </div>
+          {!isAdmin && (
+            <p className="text-xs text-slate-500 mt-3">
+              You're viewing as {sessionUser?.role}. Ask an admin in your tenant to invite or remove members.
+            </p>
+          )}
+        </header>
+
+        {err && (
+          <div className="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-400">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" /> {err}
+          </div>
+        )}
+        {info && (
+          <div className="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-400">
+            <CheckCircle2 className="w-4 h-4 flex-shrink-0" /> {info}
+          </div>
+        )}
+
+        <div className="flex flex-col md:flex-row gap-6">
+          {/* Left rail — mirrors Settings: search + arrange/hide over a
+              registry-driven category list. Horizontal-scroll on mobile,
+              sticky vertical list on desktop. */}
+          <nav className="md:w-56 md:shrink-0 md:sticky md:top-4 self-start w-full" aria-label="Team categories">
+            {!arrangeMode && (
+              <div className="relative mb-2">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search team…"
+                  aria-label="Search team"
+                  className="w-full bg-slate-900/70 border border-slate-700/50 rounded-xl pl-9 pr-8 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 min-h-[44px]"
+                />
+                {query && (
+                  <button onClick={() => setQuery('')} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-slate-300">
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Rail toolbar — Arrange (reorder / hide). Compact + muted so it
+                stays out of the way of everyday use. */}
+            <div className="flex items-center gap-1.5 mb-3">
+              <button
+                onClick={() => (arrangeMode ? setArrangeMode(false) : enterArrange())}
+                aria-pressed={arrangeMode}
+                title={arrangeMode ? 'Done arranging' : 'Arrange categories — drag to reorder, hide what you don’t use'}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors min-h-[36px] ${arrangeMode ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50 border border-transparent'}`}
+              >
+                {arrangeMode ? <Check className="w-3.5 h-3.5" /> : <ArrowUpDown className="w-3.5 h-3.5" />}
+                {arrangeMode ? 'Done' : 'Arrange'}
+              </button>
+            </div>
+
+            {arrangeMode ? (
+              <TeamArrangeRail
+                categories={orderedCategories}
+                hidden={teamNavHidden}
+                defaultOrder={baseCategories.map((c) => c.id)}
+                onChange={updatePrefs}
+              />
+            ) : (
+              <TeamRail categories={railCategories} active={searching ? '' : (activeCat?.id ?? '')} onSelect={pickCategory} />
+            )}
+          </nav>
+
+          {/* Detail pane — the arrange hint, the search results, or the active
+              category's card(s). #id anchors keep categories deep-linkable. */}
+          <div className="flex-1 min-w-0 space-y-6">
+            {arrangeMode ? (
+              <TeamArrangeHint />
+            ) : searching ? (
+              filteredList.length === 0 ? (
+                <p className="text-sm text-slate-500 py-10 text-center">No team categories match “{query}”.</p>
+              ) : (
+                filteredList.map((c) => (
+                  <div key={c.id} id={c.id} className="scroll-mt-24">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1.5 ml-1">{c.title}</p>
+                    {c.node}
+                  </div>
+                ))
+              )
+            ) : (
+              activeCat && <div key={activeCat.id} id={activeCat.id} className="scroll-mt-24">{activeCat.node}</div>
+            )}
+          </div>
+        </div>
+
+        {/* Overlays — unchanged behavior, lifted out of the flow so they render
+            above whichever category is open. */}
+        <EntityAuditModal
+          isOpen={!!auditTarget}
+          onClose={() => setAuditTarget(null)}
+          entityType="user"
+          entityId={auditTarget?.id ?? ''}
+          label={
+            auditTarget
+              ? ([auditTarget.first_name, auditTarget.last_name].filter(Boolean).join(' ') || auditTarget.email)
+              : ''
+          }
+          context={auditTarget?.email}
+        />
+
+        {gate && (
+          <RoleChangeGate
+            email={gate.email}
+            proposedRole={gate.proposedRole}
+            blockers={gate.plan.blockers}
+            onCancel={() => { setGate(null); refresh(); }}
+            onConfirm={() => void commitChange(gate.userId, gate.proposedRole)}
+          />
+        )}
       </div>
+    </div>
+  );
+}
+
+// ── Left rail (mirrors SettingsRail / SettingsArrangeRail) ──────────────────
+// Duplicated per-page, exactly as the Admin panel duplicated it — extracting a
+// shared rail would mean refactoring two working, shipped pages, a riskier
+// separate unit. See the DRY-cleanup follow-up.
+function TeamRail({ categories, active, onSelect }: { categories: TeamCategoryEntry[]; active: string; onSelect: (id: string) => void }) {
+  return (
+    <div className="flex md:flex-col gap-1 overflow-x-auto md:overflow-visible pb-2 md:pb-0 -mx-1 px-1 md:mx-0 md:px-0">
+      {categories.map((c) => {
+        const isActive = c.id === active;
+        return (
+          <button
+            key={c.id}
+            onClick={() => onSelect(c.id)}
+            aria-current={isActive ? 'page' : undefined}
+            className={`shrink-0 md:w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all min-h-[44px] whitespace-nowrap ${isActive ? 'bg-slate-800/80 text-white border border-slate-700/60 shadow-inner' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'}`}
+          >
+            <span className={isActive ? 'text-emerald-400' : 'text-slate-500'}>{c.icon}</span>
+            {c.title}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Arrange mode — reorder + hide categories, mirroring SettingsArrangeRail
+// (prefs.teamNavOrder / teamNavHidden). Rows become draggable; the − button
+// sends a category to the hidden tray; hidden categories stay reachable from
+// search. Reset restores the registry's default order and the full set.
+function TeamArrangeRail({ categories, hidden, defaultOrder, onChange }: {
+  categories: TeamCategoryEntry[];   // full viewer-visible set, current order
+  hidden: string[];
+  defaultOrder: string[];            // registry order of viewer-visible ids
+  onChange: (patch: Partial<UserPreferences>) => void;
+}) {
+  const meta = new Map(categories.map((c) => [c.id, c]));
+  const ids = categories.map((c) => c.id);
+  const visibleIds = ids.filter((id) => !hidden.includes(id));
+  const hiddenIds = ids.filter((id) => hidden.includes(id));
+
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [liveOrder, setLiveOrder] = useState<string[] | null>(null);
+  const liveOrderRef = useRef<string[] | null>(null);
+  const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const dragInfo = useRef<{ id: string; startY: number; startIndex: number; rowH: number; order: string[] } | null>(null);
+
+  const renderIds = liveOrder ?? visibleIds;
+
+  const commit = (finalVisible: string[]) => {
+    // Persist the reordered VISIBLE ids, keeping hidden ids after them so an
+    // unhide later drops the category back at a sensible spot. Matching the
+    // registry order exactly reverts to null (default order, no divergence).
+    const full = [...finalVisible, ...hiddenIds];
+    const isDefault = full.length === defaultOrder.length && full.every((x, i) => x === defaultOrder[i]);
+    onChange({ teamNavOrder: isDefault ? null : full });
+  };
+
+  const onDragStart = (e: React.PointerEvent, id: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const order = [...renderIds];
+    const el = itemRefs.current[id];
+    const rowH = Math.max(20, el ? el.getBoundingClientRect().height + 4 : 48);
+    dragInfo.current = { id, startY: e.clientY, startIndex: order.indexOf(id), rowH, order };
+    setDragId(id);
+    liveOrderRef.current = order;
+    setLiveOrder(order);
+
+    const onMove = (me: PointerEvent) => {
+      const d = dragInfo.current;
+      if (!d) return;
+      const delta = Math.round((me.clientY - d.startY) / d.rowH);
+      const target = Math.max(0, Math.min(d.order.length - 1, d.startIndex + delta));
+      const next = d.order.filter((x) => x !== d.id);
+      next.splice(target, 0, d.id);
+      liveOrderRef.current = next;
+      setLiveOrder(next);
+    };
+    const onUp = () => {
+      const d = dragInfo.current;
+      dragInfo.current = null;
+      const final = liveOrderRef.current ?? (d ? d.order : null);
+      setDragId(null);
+      setLiveOrder(null);
+      liveOrderRef.current = null;
+      if (final) commit(final);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  const hideCat = (id: string) => onChange({ teamNavHidden: [...hidden.filter((h) => h !== id), id] });
+  const restoreCat = (id: string) => onChange({ teamNavHidden: hidden.filter((h) => h !== id) });
+  const reset = () => onChange({ teamNavOrder: null, teamNavHidden: [] });
+
+  return (
+    <div className="flex flex-col gap-1">
+      {renderIds.map((id) => {
+        const c = meta.get(id);
+        if (!c) return null;
+        return (
+          <div
+            key={id}
+            ref={(el) => { itemRefs.current[id] = el; }}
+            onPointerDown={(e) => onDragStart(e, id)}
+            className={`relative flex items-center gap-2 px-2.5 py-2.5 rounded-xl text-sm font-semibold cursor-grab active:cursor-grabbing transition-shadow min-h-[44px] ${dragId === id ? 'ring-2 ring-emerald-400/70 bg-slate-800/80 z-10' : 'ring-1 ring-slate-700/60 hover:ring-slate-500/70 bg-slate-900/40'}`}
+          >
+            <GripVertical className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+            <span className="text-slate-500 shrink-0">{c.icon}</span>
+            <span className="text-slate-200 truncate">{c.title}</span>
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); hideCat(id); }}
+              title={`Hide ${c.title} from the rail`}
+              aria-label={`Hide ${c.title} from the rail`}
+              className="ml-auto shrink-0 w-6 h-6 rounded-full bg-slate-800 border border-slate-600 text-slate-400 hover:text-red-300 hover:border-red-400/70 flex items-center justify-center transition-colors"
+            >
+              <Minus className="w-3 h-3" />
+            </button>
+          </div>
+        );
+      })}
+
+      {hiddenIds.length > 0 && (
+        <>
+          <div className="mt-2 mb-0.5 px-1 text-[9px] font-mono font-bold uppercase tracking-widest text-slate-600 select-none">Hidden</div>
+          {hiddenIds.map((id) => {
+            const c = meta.get(id);
+            if (!c) return null;
+            return (
+              <div key={id} className="relative flex items-center gap-2 px-2.5 py-2 rounded-xl ring-1 ring-slate-800/80 bg-slate-900/30 opacity-60 hover:opacity-90 transition-opacity min-h-[40px]">
+                <span className="text-slate-600 shrink-0">{c.icon}</span>
+                <span className="text-slate-400 truncate text-sm">{c.title}</span>
+                <button
+                  onClick={() => restoreCat(id)}
+                  title={`Show ${c.title} in the rail`}
+                  aria-label={`Show ${c.title} in the rail`}
+                  className="ml-auto shrink-0 w-6 h-6 rounded-full bg-slate-800 border border-slate-600 text-slate-400 hover:text-emerald-300 hover:border-emerald-400/70 flex items-center justify-center transition-colors"
+                >
+                  <Plus className="w-3 h-3" />
+                </button>
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      <button
+        onClick={reset}
+        title="Reset to the default order with every category shown"
+        className="mt-2 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider text-slate-500 hover:text-amber-300 hover:bg-slate-800/60 transition-colors min-h-[36px]"
+      >
+        <RotateCcw className="w-3.5 h-3.5" /> Reset order
+      </button>
+    </div>
+  );
+}
+
+function TeamArrangeHint() {
+  return (
+    <div className="rounded-2xl border border-slate-700/60 bg-slate-900/40 p-6 text-sm text-slate-400 leading-relaxed">
+      <div className="flex items-center gap-2 mb-2 text-slate-200 font-semibold">
+        <ArrowUpDown className="w-4 h-4 text-emerald-400" /> Arranging categories
+      </div>
+      <p>
+        Drag the rows on the left to reorder your Team categories. Use the
+        <span className="inline-flex items-center justify-center align-middle mx-1 w-4 h-4 rounded-full bg-slate-800 border border-slate-600"><Minus className="w-2.5 h-2.5" /></span>
+        on a row to hide a category from the rail — it stays reachable from search.
+        Click <span className="text-emerald-300 font-semibold">Done</span> when you're finished; your layout saves automatically to this workbench.
+      </p>
     </div>
   );
 }
@@ -462,20 +827,24 @@ function RoleChangeGate({ email, proposedRole, blockers, onCancel, onConfirm }: 
 
 function Section({ icon, title, subtitle, action, children }: { icon: React.ReactNode; title: string; subtitle?: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section className="glass-panel rounded-2xl border border-slate-800/60 p-5">
-      <header className="flex items-center justify-between mb-4 gap-3 flex-wrap">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-slate-800/60 flex items-center justify-center text-emerald-400">
-            {icon}
-          </div>
-          <div>
-            <h3 className="font-bold text-white text-base">{title}</h3>
-            {subtitle && <p className="text-[11px] text-slate-500">{subtitle}</p>}
-          </div>
+    <section className="rounded-2xl border border-slate-700/60 overflow-hidden shadow-[0_10px_36px_rgba(0,0,0,0.45)]">
+      {/* Machined header strip — the brushed-steel plate, sheen, enamel icon
+          chip, and engraved metal-ink of the Creation Portal / Settings
+          surfaces. Not a collapse toggle (cards carry an optional `action`
+          button, e.g. Members' refresh, so the header stays inert). */}
+      <header className="portal-plate relative px-5 py-3.5 flex items-center gap-3">
+        <span aria-hidden className="portal-menu-sheen absolute inset-0 pointer-events-none" />
+        <span className="relative z-10 w-9 h-9 rounded-xl bg-slate-900 border-2 border-slate-950/60 flex items-center justify-center shrink-0 text-emerald-400 shadow-[inset_0_1px_2px_rgba(255,255,255,0.3),0_2px_5px_rgba(0,0,0,0.5)]">
+          {icon}
+        </span>
+        <div className="relative z-10 min-w-0">
+          <h3 className="metal-ink text-sm font-bold uppercase tracking-widest truncate">{title}</h3>
+          {subtitle && <p className="metal-ink-soft text-[11px] font-semibold">{subtitle}</p>}
         </div>
-        {action}
+        {action && <div className="relative z-10 ml-auto shrink-0">{action}</div>}
       </header>
-      {children}
+      {/* Dark body keeps the form controls legible below the metal header. */}
+      <div className="bg-slate-900/60 backdrop-blur-xl p-5 border-t border-slate-950/50">{children}</div>
     </section>
   );
 }
@@ -701,7 +1070,7 @@ function SubdivisionsCard({ subdivisions, isAdmin, onCreate, onDelete }: {
         </div>
       )}
       <p className="text-[11px] text-slate-500 mt-3">
-        Each subdivision is a full workspace with its own members and projects. Staff it via the invite card above (choose the subdivision as the destination); its first member must be an admin. Only empty subdivisions can be removed.
+        Each subdivision is a full workspace with its own members and projects. Staff it from the Invitations tab (choose the subdivision as the destination); its first member must be an admin. Only empty subdivisions can be removed.
       </p>
     </Section>
   );
