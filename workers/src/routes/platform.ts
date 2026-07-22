@@ -142,6 +142,89 @@ platformRoutes.get('/metrics', async (c) => {
   });
 });
 
+// ── GET /api/platform/usage ─────────────────────────────────────────────────
+// Per-tenant usage of the cost-bearing + activity features. Aggregated from the
+// real entity tables (usage_events only meters calc_run today) so the view
+// reflects actual AND historical consumption. Cross-tenant (L0) by design.
+//   COST DRIVERS: AI vision extractions (Anthropic tokens — read from the audit
+//   log where the extraction is recorded), R2 storage bytes (file_uploads),
+//   calc runs. Seats / projects / drawings are activity, not direct cost.
+platformRoutes.get('/usage', async (c) => {
+  const db = c.env.DB;
+
+  // Sequential (matches /metrics) — a handful of indexed GROUP BYs on a small DB.
+  const orgs = await db.prepare(
+    `SELECT id, name, plan, billing_status, org_type FROM organisations`
+  ).all();
+  const calcs = await db.prepare(
+    `SELECT org_id, COUNT(*) AS calc_count,
+            SUM(CASE WHEN created_at > datetime('now','-30 days') THEN 1 ELSE 0 END) AS calc_30d
+     FROM calculations GROUP BY org_id`
+  ).all();
+  const storage = await db.prepare(
+    `SELECT org_id, COUNT(*) AS file_count, COALESCE(SUM(size_bytes),0) AS bytes
+     FROM file_uploads GROUP BY org_id`
+  ).all();
+  // AI usage lives in the audit log (ai.ts records the extraction there with the
+  // token counts in detail JSON). json_extract is safe — these rows are always
+  // machine-written valid JSON.
+  const ai = await db.prepare(
+    `SELECT org_id,
+            COUNT(*) AS ai_calls,
+            COALESCE(SUM(CAST(json_extract(detail,'$.inputTokens')  AS INTEGER)),0) AS in_tok,
+            COALESCE(SUM(CAST(json_extract(detail,'$.outputTokens') AS INTEGER)),0) AS out_tok,
+            SUM(CASE WHEN created_at > datetime('now','-30 days') THEN 1 ELSE 0 END) AS ai_30d
+     FROM audit_log WHERE action = 'ai.blueprint_extract' GROUP BY org_id`
+  ).all();
+  const drawings = await db.prepare(
+    `SELECT org_id, COUNT(*) AS drawing_count FROM cad_drawings GROUP BY org_id`
+  ).all();
+  const projects = await db.prepare(
+    `SELECT org_id, COUNT(*) AS project_count FROM projects GROUP BY org_id`
+  ).all();
+  const seats = await db.prepare(
+    `SELECT org_id, COUNT(*) AS seat_count FROM users WHERE status = 'active' GROUP BY org_id`
+  ).all();
+
+  const indexByOrg = (rows: unknown[]) => {
+    const m = new Map<string, Record<string, unknown>>();
+    for (const r of rows as Array<Record<string, unknown>>) m.set(String(r.org_id), r);
+    return m;
+  };
+  const calcM = indexByOrg(calcs.results);
+  const storM = indexByOrg(storage.results);
+  const aiM = indexByOrg(ai.results);
+  const drawM = indexByOrg(drawings.results);
+  const projM = indexByOrg(projects.results);
+  const seatM = indexByOrg(seats.results);
+  const num = (v: unknown) => Number(v ?? 0);
+
+  const tenants = (orgs.results as Array<Record<string, unknown>>).map((o) => {
+    const id = String(o.id);
+    const cc = calcM.get(id); const st = storM.get(id); const a = aiM.get(id);
+    return {
+      org_id: id,
+      org_name: o.name as string,
+      plan: o.plan as string,
+      billing_status: o.billing_status as string,
+      org_type: o.org_type as string,
+      seats: num(seatM.get(id)?.seat_count),
+      projects: num(projM.get(id)?.project_count),
+      drawings: num(drawM.get(id)?.drawing_count),
+      calcs: num(cc?.calc_count),
+      calcs_30d: num(cc?.calc_30d),
+      ai_calls: num(a?.ai_calls),
+      ai_calls_30d: num(a?.ai_30d),
+      ai_input_tokens: num(a?.in_tok),
+      ai_output_tokens: num(a?.out_tok),
+      storage_files: num(st?.file_count),
+      storage_bytes: num(st?.bytes),
+    };
+  });
+
+  return c.json({ tenants, generatedAt: new Date().toISOString() });
+});
+
 // ── GET /api/platform/audit ─────────────────────────────────────────────────
 // Recent cross-org audit events. Capped at 200 for now; paginate when needed.
 platformRoutes.get('/audit', async (c) => {

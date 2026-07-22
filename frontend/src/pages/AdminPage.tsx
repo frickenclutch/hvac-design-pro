@@ -529,7 +529,145 @@ function MetricsSection() {
           <RawJsonDrawer payload={state.data} />
         </>
       )}
+      <TenantUsagePanel />
     </SectionShell>
+  );
+}
+
+// Per-tenant usage — who is consuming what, with the cost-bearing features
+// (AI vision tokens, R2 storage) called out. Loads independently of the
+// platform totals above; both refresh on the global tick.
+type UsageRow = {
+  org_id: string; org_name: string; plan: string; billing_status: string; org_type: string;
+  seats: number; projects: number; drawings: number;
+  calcs: number; calcs_30d: number;
+  ai_calls: number; ai_calls_30d: number; ai_input_tokens: number; ai_output_tokens: number;
+  storage_files: number; storage_bytes: number;
+};
+
+function fmtBytes(n: number): string {
+  if (n <= 0) return '0';
+  if (n < 1024) return `${n} B`;
+  if (n < 1048576) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1073741824) return `${(n / 1048576).toFixed(1)} MB`;
+  return `${(n / 1073741824).toFixed(2)} GB`;
+}
+function fmtTokens(n: number): string {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(2)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+function TenantUsagePanel() {
+  const tick = useRefreshTick();
+  const [state] = useLoad(() => api.platformUsage(), [tick]);
+  const [sortKey, setSortKey] = useState<keyof UsageRow>('ai_output_tokens');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const rows = useMemo<UsageRow[]>(() => {
+    if (state.status !== 'ok') return [];
+    const r = [...state.data.tenants];
+    r.sort((a, b) => {
+      const av = a[sortKey]; const bv = b[sortKey];
+      if (typeof av === 'number' && typeof bv === 'number') return sortDir === 'desc' ? bv - av : av - bv;
+      return sortDir === 'desc' ? String(bv).localeCompare(String(av)) : String(av).localeCompare(String(bv));
+    });
+    return r;
+  }, [state, sortKey, sortDir]);
+
+  const sortBy = (k: keyof UsageRow) => {
+    if (k === sortKey) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setSortKey(k); setSortDir('desc'); }
+  };
+
+  return (
+    <div className="rounded-xl border border-slate-800/40 bg-slate-900/40 p-3 mt-4">
+      <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Gauge className="w-4 h-4 text-amber-400" />
+          <h3 className="font-bold text-white text-sm">Per-tenant usage</h3>
+        </div>
+        <span className="text-[10px] text-slate-500 flex items-center gap-1">
+          <span className="text-amber-400">●</span> cost-bearing · click a header to sort
+        </span>
+      </div>
+
+      {state.status === 'loading' && <p className="text-xs text-slate-500">Loading…</p>}
+      {state.status === 'error' && <ErrorBlock message={state.message} />}
+      {state.status === 'ok' && (
+        rows.length === 0 ? (
+          <p className="text-xs text-slate-600 italic">No tenants yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-slate-800/60">
+                  <UsageTh label="Tenant" k="org_name" sortKey={sortKey} sortDir={sortDir} onSort={sortBy} />
+                  <UsageTh label="AI calls" k="ai_calls" sortKey={sortKey} sortDir={sortDir} onSort={sortBy} cost right />
+                  <UsageTh label="AI tokens" k="ai_output_tokens" sortKey={sortKey} sortDir={sortDir} onSort={sortBy} cost right />
+                  <UsageTh label="Storage" k="storage_bytes" sortKey={sortKey} sortDir={sortDir} onSort={sortBy} cost right />
+                  <UsageTh label="Calcs" k="calcs" sortKey={sortKey} sortDir={sortDir} onSort={sortBy} right />
+                  <UsageTh label="Seats" k="seats" sortKey={sortKey} sortDir={sortDir} onSort={sortBy} right />
+                  <UsageTh label="Projects" k="projects" sortKey={sortKey} sortDir={sortDir} onSort={sortBy} right />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((t) => {
+                  const tok = t.ai_input_tokens + t.ai_output_tokens;
+                  return (
+                    <tr key={t.org_id} className="border-b border-slate-800/30 hover:bg-slate-800/20">
+                      <td className="py-1.5 pr-2">
+                        <div className="font-semibold text-slate-200 truncate max-w-[160px]">{t.org_name}</div>
+                        <div className="text-[9px] text-slate-600">{t.plan} · {t.billing_status}</div>
+                      </td>
+                      <td className="py-1.5 px-2 text-right tabular-nums">
+                        <span className={t.ai_calls ? 'text-amber-300' : 'text-slate-600'}>{t.ai_calls || '—'}</span>
+                        {t.ai_calls_30d > 0 && <span className="text-[9px] text-slate-600"> {t.ai_calls_30d}/30d</span>}
+                      </td>
+                      <td className="py-1.5 px-2 text-right tabular-nums">
+                        <span className={tok ? 'text-amber-300' : 'text-slate-600'}>{tok ? fmtTokens(tok) : '—'}</span>
+                      </td>
+                      <td className="py-1.5 px-2 text-right tabular-nums">
+                        <span className={t.storage_bytes ? 'text-amber-300' : 'text-slate-600'}>{t.storage_bytes ? fmtBytes(t.storage_bytes) : '—'}</span>
+                        {t.storage_files > 0 && <span className="text-[9px] text-slate-600"> {t.storage_files}f</span>}
+                      </td>
+                      <td className="py-1.5 px-2 text-right tabular-nums text-slate-300">
+                        {t.calcs || '—'}{t.calcs_30d > 0 && <span className="text-[9px] text-slate-600"> {t.calcs_30d}/30d</span>}
+                      </td>
+                      <td className="py-1.5 px-2 text-right tabular-nums text-slate-400">{t.seats}</td>
+                      <td className="py-1.5 px-2 text-right tabular-nums text-slate-400">{t.projects}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+
+      <p className="text-[10px] text-slate-600 mt-2 leading-relaxed">
+        <span className="text-amber-400">●</span> Cost-bearing: <strong>AI</strong> = Claude vision blueprint extractions (Anthropic input+output tokens) · <strong>Storage</strong> = R2 file uploads. Calcs = saved Manual J/D/S runs (plan-metered). Seats / projects / drawings are activity, not direct marginal cost.
+      </p>
+    </div>
+  );
+}
+
+function UsageTh({ label, k, sortKey, sortDir, onSort, right, cost }: {
+  label: string; k: keyof UsageRow; sortKey: keyof UsageRow; sortDir: 'asc' | 'desc';
+  onSort: (k: keyof UsageRow) => void; right?: boolean; cost?: boolean;
+}) {
+  const active = sortKey === k;
+  return (
+    <th
+      onClick={() => onSort(k)}
+      className={`py-1.5 ${right ? 'px-2 text-right' : 'pr-2 text-left'} text-[10px] uppercase tracking-wider font-bold cursor-pointer select-none whitespace-nowrap hover:text-slate-200 ${active ? 'text-slate-200' : cost ? 'text-amber-400/70' : 'text-slate-500'}`}
+    >
+      <span className="inline-flex items-center gap-0.5">
+        {cost && <span className="text-amber-400">●</span>}
+        {label}
+        {active && <span>{sortDir === 'desc' ? '↓' : '↑'}</span>}
+      </span>
+    </th>
   );
 }
 
