@@ -442,7 +442,7 @@ export default function TeamPage() {
             </div>
             <Link
               to="/audit-log"
-              className="relative z-10 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-950/50 hover:bg-slate-900/70 border border-slate-700/70 text-sm text-slate-300 hover:text-emerald-300 transition-colors min-h-[44px] shrink-0"
+              className="relative z-10 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-950/90 hover:bg-slate-900/90 border border-white/10 text-sm text-slate-200 hover:text-emerald-300 transition-colors min-h-[44px] shrink-0"
               title="See every action taken by anyone in your organisation"
             >
               <Activity className="w-4 h-4" />
