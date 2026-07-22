@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { usePreferencesStore, preferenceDefaults, type ThemeMode, type UIDensity, type UnitSystem, type EngineVersion, type MetalFinish, type UserPreferences } from '../stores/usePreferencesStore';
-import { Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle, Pencil, HardDrive, ChevronDown, Search, X, ArrowUpDown, GripVertical, Minus, Plus, ListFilter, Tag, Webhook } from 'lucide-react';
+import { Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle, Pencil, HardDrive, ChevronDown, Search, X, ArrowUpDown, GripVertical, Minus, Plus, ListFilter, Tag, Webhook, Bell } from 'lucide-react';
 import { api, type PricingSourceRow } from '../lib/api';
 import A11yPanel from '../components/accessibility/A11yPanel';
 import TotpQr from '../components/TotpQr';
@@ -9,6 +9,7 @@ import FeedbackAnnotator from '../components/FeedbackAnnotator';
 import cadPortalBlackhole from '../assets/brand/cad-portal-blackhole.png';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { useAccessPolicyStore } from '../stores/useAccessPolicyStore';
+import { useNotificationStore, NOTIFICATION_KIND_META, resolveDelivery, type NotificationPolicy, type PolicyMode } from '../stores/useNotificationStore';
 import { toast } from '../stores/useToastStore';
 import { avatarUrl, downscaleImage } from '../utils/avatar';
 
@@ -525,6 +526,10 @@ function buildSettingsCategories(ctx: RegistryCtx): SettingsCategoryEntry[] {
     ] },
     { id: 'appearance', title: 'Appearance', icon: <Palette className="w-4 h-4" />, sections: [
       { id: 'appearance', title: 'Appearance', icon: <Palette className="w-5 h-5 text-violet-400" />, keywords: ['theme', 'dark', 'light', 'midnight', 'density', 'metal', 'finish', 'animation', 'tooltip', 'color'], visible: true, prefKeys: ['theme', 'density', 'animationsEnabled', 'showTooltips', 'metalFinish'], node: <AppearanceSection /> },
+    ] },
+    { id: 'notifications', title: 'Notifications', icon: <Bell className="w-4 h-4" />, sections: [
+      { id: 'notification-preferences', title: 'Notification Preferences', icon: <Bell className="w-5 h-5 text-cyan-400" />, keywords: ['notification', 'notifications', 'alerts', 'bell', 'mute', 'do not disturb', 'dnd', 'calc', 'permit', 'team', 'community', 'security', 'system'], visible: !!ctx.user, node: <NotificationPreferencesSection /> },
+      { id: 'notification-policy', title: 'Organization Notification Policy', icon: <ShieldCheck className="w-5 h-5 text-amber-400" />, keywords: ['notification', 'policy', 'org', 'organization', 'admin', 'force', 'require', 'mandate', 'governance', 'alerts'], visible: isAdmin || isL0, node: <NotificationPolicySection /> },
     ] },
     { id: 'workspace', title: 'Workspace', icon: <Grid3X3 className="w-4 h-4" />, sections: [
       { id: 'units', title: 'Units & Defaults', icon: <Ruler className="w-5 h-5 text-sky-400" />, keywords: ['units', 'imperial', 'metric', 'ceiling', 'r-value', 'u-value', 'defaults'], visible: true, prefKeys: ['units', 'defaultCeilingHeight', 'defaultWallRValue', 'defaultWindowUValue'], node: <UnitsSection /> },
@@ -2043,6 +2048,167 @@ function AccessPolicySection() {
           className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-500/20 border border-emerald-500/30 transition-all disabled:opacity-50 min-h-[44px]"
         >
           <Save className="w-4 h-4" /> {saving ? 'Saving…' : 'Save access policy'}
+        </button>
+      </div>
+    </Section>
+  );
+}
+
+// ── Notification Preferences (every member) ─────────────────────────────────
+// The member's own control: the master Alerts (DND) switch + a per-kind toggle
+// for each notification type. Kinds the org forces on/off render locked, with
+// the org's decision shown — the member can't override those.
+function NotificationPreferencesSection() {
+  const enabled = useNotificationStore((s) => s.enabled);
+  const setEnabled = useNotificationStore((s) => s.setEnabled);
+  const userPrefs = useNotificationStore((s) => s.userPrefs);
+  const setUserPref = useNotificationStore((s) => s.setUserPref);
+  const orgPolicy = useNotificationStore((s) => s.orgPolicy);
+  const refreshOrgPolicy = useNotificationStore((s) => s.refreshOrgPolicy);
+
+  // Freshen the org policy on open so the lock states reflect the admin's
+  // current choices, even if the session cache is stale.
+  useEffect(() => { void refreshOrgPolicy(); }, [refreshOrgPolicy]);
+
+  return (
+    <Section icon={<Bell className="w-5 h-5 text-cyan-400" />} title="Notification Preferences">
+      <p className="text-xs text-slate-500 mb-4">
+        Choose which notifications you receive and whether alerts interrupt you. Some kinds may be required or disabled
+        by your organization — those are locked here.
+      </p>
+
+      <div className="mb-2">
+        <SwitchOption
+          label="Alerts"
+          description="Master switch. When off, notifications still collect quietly but nothing pings or animates the bell (Do Not Disturb)."
+          checked={enabled}
+          onChange={setEnabled}
+        />
+      </div>
+
+      <div className="h-px bg-slate-800/60 my-3" />
+
+      <OptionGroup label="Notification types">
+        <div className="space-y-0.5">
+          {NOTIFICATION_KIND_META.map((m) => {
+            const mode = orgPolicy[m.kind] ?? 'user_choice';
+            if (mode !== 'user_choice') {
+              const on = resolveDelivery(mode, userPrefs[m.kind] ?? true);
+              return (
+                <div key={m.kind} className="flex items-center justify-between py-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-white flex items-center gap-1.5">
+                      {m.label}
+                      <Lock className="w-3 h-3 text-amber-400/80" />
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {mode === 'forced_on'
+                        ? 'Required by your organization — always on.'
+                        : 'Turned off by your organization.'}
+                    </p>
+                  </div>
+                  <span className={`shrink-0 text-[11px] font-bold uppercase tracking-wide px-2 py-1 rounded-md ${on ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-700/50 text-slate-400'}`}>
+                    {on ? 'On' : 'Off'}
+                  </span>
+                </div>
+              );
+            }
+            return (
+              <SwitchOption
+                key={m.kind}
+                label={m.label}
+                description={m.description}
+                checked={userPrefs[m.kind] ?? true}
+                onChange={(v) => setUserPref(m.kind, v)}
+              />
+            );
+          })}
+        </div>
+      </OptionGroup>
+    </Section>
+  );
+}
+
+// ── Organization Notification Policy (tenant admin / L0) ─────────────────────
+// The admin ultimately decides. Per kind: require it, disable it, or leave it
+// to each member. Server-backed + audited; members can only change the kinds
+// left to them.
+const NOTIFICATION_MODE_OPTIONS = [
+  { value: 'user_choice', label: 'Members choose' },
+  { value: 'forced_on', label: 'Always on' },
+  { value: 'forced_off', label: 'Always off' },
+];
+
+function defaultNotificationPolicy(): NotificationPolicy {
+  return { calc: 'user_choice', permit: 'user_choice', team: 'user_choice', community: 'user_choice', security: 'user_choice', system: 'user_choice' };
+}
+
+function NotificationPolicySection() {
+  const refreshOrgPolicy = useNotificationStore((s) => s.refreshOrgPolicy);
+  const [policy, setPolicy] = useState<NotificationPolicy>(defaultNotificationPolicy);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.getNotificationPolicy();
+        if (!cancelled) setPolicy({ ...defaultNotificationPolicy(), ...res.policy });
+      } catch {
+        // Keep neutral defaults; the server still governs.
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.setNotificationPolicy(policy);
+      // Refresh the store's cached policy so THIS admin's own delivery reflects
+      // the change immediately (e.g. they just forced a kind off for the org).
+      await refreshOrgPolicy();
+      toast.success('Notification policy updated.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save notification policy');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return null;
+
+  return (
+    <Section icon={<ShieldCheck className="w-5 h-5 text-amber-400" />} title="Organization Notification Policy">
+      <p className="text-xs text-slate-500 mb-4">
+        You decide notifications for everyone in your organization. For each type, require it (Always on), disable it
+        (Always off), or leave it to each member (Members choose). The server enforces this — members can only change the
+        types you leave to them. Platform owners (L0) can adjust any organization.
+      </p>
+
+      <div className="space-y-4">
+        {NOTIFICATION_KIND_META.map((m) => (
+          <OptionGroup key={m.kind} label={m.label}>
+            <ToggleRow
+              options={NOTIFICATION_MODE_OPTIONS}
+              value={policy[m.kind]}
+              onChange={(v) => setPolicy((p) => ({ ...p, [m.kind]: v as PolicyMode }))}
+            />
+            <p className="text-[11px] text-slate-600 mt-1.5">{m.description}</p>
+          </OptionGroup>
+        ))}
+      </div>
+
+      <div className="flex justify-end pt-4">
+        <button
+          onClick={save}
+          disabled={saving}
+          className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-500/20 border border-emerald-500/30 transition-all disabled:opacity-50 min-h-[44px]"
+        >
+          <Save className="w-4 h-4" /> {saving ? 'Saving…' : 'Save notification policy'}
         </button>
       </div>
     </Section>
