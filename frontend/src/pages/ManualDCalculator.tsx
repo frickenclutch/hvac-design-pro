@@ -11,7 +11,6 @@ import {
 } from '../engines/manualD';
 import { useCadStore } from '../features/cad/store/useCadStore';
 import { useProjectStore } from '../stores/useProjectStore';
-import Mason from '../components/Mason';
 import ProjectContextBar from '../components/ProjectContextBar';
 import ProjectGateDialog from '../components/ProjectGateDialog';
 import { scopedKey } from '../utils/storage';
@@ -836,8 +835,6 @@ export default function ManualDCalculator() {
         )}
       </div>
 
-      {/* Mason AI Assistant */}
-      <Mason context="manual-d" position="bottom-left" />
     </div>
   );
 }

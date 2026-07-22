@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuthStore, type OrgType, type RegionCode, type Address } from '../features/auth/store/useAuthStore';
 import { SecureInput, SecurityBadge } from '../features/auth/components/SecurityComponents';
-import { Building2, Globe, User, ArrowRight, ArrowLeft, ChevronRight, MapPin, Phone, Mail, Lock, Eye, EyeOff, CheckCircle2, AlertCircle, ShieldCheck } from 'lucide-react';
+import { Building2, Globe, User, ArrowRight, ArrowLeft, ChevronRight, MapPin, Phone, Mail, Lock, Eye, EyeOff, CheckCircle2, AlertCircle, ShieldCheck, Zap } from 'lucide-react';
+import { usePreferencesStore } from '../stores/usePreferencesStore';
+import MasonPlacementPicker from '../components/MasonPlacementPicker';
 
 interface InvitePreview {
   invitedEmail: string;
@@ -345,6 +347,12 @@ function OnboardingWizard() {
   const navigate = useNavigate();
   const { register, authLoading, authError, clearError } = useAuthStore();
 
+  // Mason placement — offered here as the first-run "where should Mason ride?"
+  // choice. The write only lands post-registration (step 5), when the session
+  // is live and prefs route to the new user's scope.
+  const masonPlacement = usePreferencesStore((s) => s.masonPlacement);
+  const updatePrefs = usePreferencesStore((s) => s.update);
+
   const handleComplete = async () => {
     if (!role || !orgName || !fullName || !email || !password) return;
     if (password !== confirmPassword) return;
@@ -595,9 +603,34 @@ function OnboardingWizard() {
               <CheckCircle2 className="w-10 h-10 text-emerald-400" />
             </div>
             <h1 className="text-4xl font-extrabold text-white mb-3 tracking-tight">Account Created</h1>
-            <p className="text-slate-400 text-lg leading-relaxed max-w-md mx-auto mb-10">
+            <p className="text-slate-400 text-lg leading-relaxed max-w-md mx-auto mb-8">
               Welcome to HVAC DesignPro. Your engineering workspace is ready.
             </p>
+
+            {/* Meet Mason — introduce the always-on assistant + set his corner */}
+            <div className="max-w-md mx-auto mb-10 text-left rounded-2xl border border-slate-800 bg-slate-900/40 p-5 space-y-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center flex-shrink-0">
+                  <Zap className="w-4.5 h-4.5 text-amber-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-white">Meet Mason</p>
+                  <p className="text-xs text-slate-400">Your AI assistant — and your one-tap line to our team.</p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Mason rides along on every screen, so help — and bug reports straight to the{' '}
+                <span className="text-amber-400/90 font-semibold">C4 Technologies team of experts</span> — are always a
+                tap away. Pick the corner he should live in (change it any time in Settings).
+              </p>
+              <div className="flex justify-center">
+                <MasonPlacementPicker
+                  value={masonPlacement}
+                  onChange={(p) => updatePrefs({ masonPlacement: p, masonPos: null })}
+                />
+              </div>
+            </div>
+
             <button
               onClick={() => navigate('/dashboard')}
               className="bg-emerald-500 text-slate-950 px-12 py-4 rounded-2xl font-bold text-lg hover:bg-emerald-400 hover:shadow-[0_0_40px_rgba(16,185,129,0.4)] transition-all transform hover:-translate-y-1 active:scale-95 shadow-xl inline-flex items-center gap-2"

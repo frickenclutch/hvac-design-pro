@@ -18,7 +18,6 @@ import { generateCadFloorFromManualJ, type LayoutAlgorithm } from '../engines/ma
 import { useCadStore } from '../features/cad/store/useCadStore';
 import RetailerFinderPanel from '../features/retailer/components/RetailerFinderPanel';
 import { useRetailerStore } from '../features/retailer/store/useRetailerStore';
-import Mason from '../components/Mason';
 import ProjectContextBar from '../components/ProjectContextBar';
 import ProjectGateDialog from '../components/ProjectGateDialog';
 import { useProjectStore } from '../stores/useProjectStore';
@@ -1388,8 +1387,6 @@ export default function ManualJCalculator() {
         )}
       </div>
 
-      {/* Mason — AI HVAC Assistant */}
-      <Mason context="manualj" />
     </div>
   );
 }

@@ -35,6 +35,11 @@ const TeamPage = lazy(() => import('./pages/TeamPage'));
 const CommunityPage = lazy(() => import('./pages/CommunityPage'));
 const PermitsPage = lazy(() => import('./pages/PermitsPage'));
 const AuditLogPage = lazy(() => import('./pages/AuditLogPage'));
+// Mason — the AI assistant + one-tap feedback launcher. Lazy so his knowledge
+// base stays out of the initial bundle, but mounted globally (see AppLayout)
+// so a help/bug-report route rides along on every authenticated screen.
+const Mason = lazy(() => import('./components/Mason'));
+import type { MasonContext } from './components/Mason';
 import { useAuthStore } from './features/auth/store/useAuthStore';
 import { usePreferencesStore } from './stores/usePreferencesStore';
 import { useAccessPolicyStore } from './stores/useAccessPolicyStore';
@@ -322,6 +327,18 @@ function AppLayout() {
       <ImpersonationBanner />
       <TransferRequestNotice />
 
+      {/* Mason — global AI assistant + one-tap feedback launcher. A single
+          mount so a help/bug-report route rides along on every authenticated
+          screen (bugs can surface anywhere). The user picks which corner he
+          docks in — Settings → Mason Assistant, or during first-run setup.
+          Route drives his knowledge context. Lazy with a null fallback so he
+          never blocks paint. */}
+      {isAuthenticated && (
+        <Suspense fallback={null}>
+          <Mason context={masonContextForPath(location.pathname)} />
+        </Suspense>
+      )}
+
       {/* Main Content Area */}
       <main id="main-content" role="main" className={`flex-1 relative overflow-y-auto ${isPublicScrollPage ? '' : 'md:overflow-hidden'} bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black`}>
         <ErrorBoundary label="Application" fullPage key={location.pathname}>
@@ -372,6 +389,17 @@ function AppLayout() {
       </main>
     </div>
   );
+}
+
+/** Route → Mason knowledge context. Calculator/CAD routes tailor his answers;
+ *  everywhere else he's the general help + feedback assistant. */
+function masonContextForPath(pathname: string): MasonContext {
+  if (pathname.includes('/cad')) return 'cad';
+  if (pathname.startsWith('/calculator')) return 'manualj';
+  if (pathname.startsWith('/manual-d')) return 'manual-d';
+  if (pathname.startsWith('/manual-s')) return 'manual-s';
+  if (pathname.startsWith('/aed')) return 'aed';
+  return 'general';
 }
 
 function MobileNavLink({ to, icon, label, onClick }: { to: string; icon: React.ReactNode; label: string; onClick: () => void }) {

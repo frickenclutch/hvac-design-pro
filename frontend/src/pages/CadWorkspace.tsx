@@ -18,7 +18,6 @@ import { api } from '../lib/api';
 import { useAutoSave, loadDrawing } from '../features/cad/hooks/useAutoSave';
 import { useCadStore, type SerializedDrawing } from '../features/cad/store/useCadStore';
 import { useAccessPolicyStore } from '../stores/useAccessPolicyStore';
-import Mason from '../components/Mason';
 import ErrorBoundary from '../components/ErrorBoundary';
 import ProjectGateDialog from '../components/ProjectGateDialog';
 import { useProjectStore } from '../stores/useProjectStore';
@@ -287,9 +286,6 @@ export default function CadWorkspace() {
 
       {/* Blueprint intake: PDF page picker + scale calibration */}
       <BlueprintDialogs />
-
-      {/* Mason — AI HVAC Assistant (complete help & docs built in) */}
-      <Mason context="cad" position="bottom-left" />
 
       {/* Help Center modal */}
       <HelpCenter isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
