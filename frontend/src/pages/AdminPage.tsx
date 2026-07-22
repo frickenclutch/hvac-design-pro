@@ -298,17 +298,20 @@ function RefreshControl({
   const ago = secs < 60 ? `${secs}s ago` : `${Math.floor(secs / 60)}m ${secs % 60}s ago`;
 
   return (
-    <div className="flex items-center gap-2 shrink-0">
-      <span className="hidden sm:flex items-center gap-1.5 text-[10px] font-mono text-slate-500" title="When the monitored panels last pulled fresh data">
+    // Opaque near-black panel so the control reads on the hero regardless of its
+    // backdrop — matches the Permits queue RefreshControl (slate-950 is darker
+    // than any metal finish, so the cluster always separates).
+    <div className="flex items-center gap-2.5 shrink-0 rounded-xl bg-slate-950/95 border border-white/10 pl-3 pr-1.5 py-1 shadow-[0_3px_12px_rgba(0,0,0,0.6)]">
+      <span className="hidden sm:flex items-center gap-1.5 text-[10px] font-mono text-slate-300" title="When the monitored panels last pulled fresh data">
         <Clock className="w-3 h-3" /> updated {ago}
       </span>
-      <div className="flex items-center rounded-xl border border-slate-700/60 bg-slate-900/60 overflow-hidden">
-        <label className="flex items-center gap-1.5 pl-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+      <div className="flex items-center rounded-lg border border-slate-600/70 bg-slate-900/80 overflow-hidden">
+        <label className="flex items-center gap-1.5 pl-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-300">
           <RefreshCw className="w-3 h-3" /> Auto
           <select
             value={intervalMs}
             onChange={(e) => onIntervalChange(Number(e.target.value))}
-            className="bg-transparent text-slate-200 text-xs font-semibold py-1.5 pr-1 focus:outline-none cursor-pointer"
+            className="bg-transparent text-slate-100 text-xs font-semibold py-1.5 pr-1 focus:outline-none cursor-pointer"
             aria-label="Auto-refresh interval"
             title="Auto-refresh interval for the monitored panels"
           >
@@ -319,7 +322,7 @@ function RefreshControl({
         </label>
         <button
           onClick={onRefresh}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-300 bg-amber-500/10 hover:bg-amber-500/25 border-l border-slate-700/60 transition-colors min-h-[40px]"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-200 bg-amber-500/15 hover:bg-amber-500/30 border-l border-slate-600/70 transition-colors min-h-[40px]"
           title="Refresh the monitored panels now"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${spinning ? 'animate-spin' : ''}`} />
