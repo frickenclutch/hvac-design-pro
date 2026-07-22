@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   PackageCheck, Snowflake, Flame, Gauge, ArrowRight, RotateCcw,
-  AlertTriangle, CheckCircle, Info, Mountain, PackageSearch,
+  AlertTriangle, CheckCircle, Info, Mountain, PackageSearch, MapPin,
 } from 'lucide-react';
 import {
   calculateManualS, coolingStatusLabel, heatingStatusLabel,
@@ -21,6 +21,10 @@ import CatalogPickerModal from '../components/CatalogPickerModal';
 import type { ApiCatalogProductRow } from '../lib/api';
 import { scopedKey } from '../utils/storage';
 import { syncCalcToD1 } from '../features/calculations/calcStorage';
+import { useRetailerStore } from '../features/retailer/store/useRetailerStore';
+import RetailerFinderPanel from '../features/retailer/components/RetailerFinderPanel';
+import { getCachedProject } from '../features/projects/projectStorage';
+import type { SystemType } from '../engines/costEstimator';
 
 // ── User + project scoped persistence ────────────────────────────────────────
 function getStorageKey(projectId: string | null): string {
@@ -167,6 +171,51 @@ export default function ManualSCalculator() {
   const resultsRef = useRef<HTMLDivElement>(null);
 
   const derivedLatent = Math.max(0, totalCoolingBtu - sensibleCoolingBtu);
+
+  // ── Retailer finder inputs (mirrors the Manual J feature) ──────────────────
+  // The shared RetailerFinderPanel + costEstimator are Manual J-shaped: they read
+  // recommendedTons / totalCoolingBtu / ventilationCFM off a WholeHouseResult and
+  // ductLocation / ductLengthFt / ductInsulationR off DesignConditions. Manual S
+  // never holds either, so project the minimal fields those consume from the
+  // loads + selected equipment. Only the read fields are meaningful — hence the
+  // documented cast. Tonnage tracks the SELECTED cooling capacity when present,
+  // else the cooling load (same half-ton snap Manual J uses); duct assumptions
+  // are neutral residential defaults for the rough estimate.
+  const retailerInputs = useMemo(() => {
+    const coolBasis = coolTotalCap > 0 ? coolTotalCap : totalCoolingBtu;
+    const recommendedTons = coolBasis > 0 ? Math.max(1.5, Math.ceil((coolBasis / 12000) * 2) / 2) : 1.5;
+    const wholeHouse = {
+      recommendedTons,
+      totalCoolingBtu,
+      totalCoolingSensible: sensibleCoolingBtu,
+      totalCoolingLatent: derivedLatent,
+      totalHeatingBtu: heatingBtu,
+      ventilationCFM: 0,
+    } as unknown as WholeHouseResult;
+    const conditions = {
+      ductLocation: 'attic',
+      ductLengthFt: 80,
+      ductInsulationR: 6,
+    } as unknown as DesignConditions;
+    // Map the Manual S cooling selection onto the estimator's system types.
+    const systemType: SystemType = coolingType === 'heat_pump' ? 'heat_pump' : 'ac_furnace';
+    return { wholeHouse, conditions, systemType };
+  }, [coolTotalCap, totalCoolingBtu, sensibleCoolingBtu, derivedLatent, heatingBtu, coolingType]);
+
+  const openRetailerFinder = useCallback(() => {
+    // Anchor pricing/branch ranking to the JOB SITE — derive it from the active
+    // project's saved address (Manual S has no ZIP field of its own). Location
+    // must be set BEFORE generateEstimate so pricing is regionally localized.
+    const proj = activeProjectId ? getCachedProject(activeProjectId) : null;
+    const loc = proj?.state
+      ? { zip: proj.zip ?? '', city: proj.city ?? '', state: proj.state }
+      : null;
+    const store = useRetailerStore.getState();
+    store.setProjectLocation(loc);
+    store.setSystemType(retailerInputs.systemType);
+    store.open();
+    store.generateEstimate(retailerInputs.wholeHouse, retailerInputs.conditions);
+  }, [activeProjectId, retailerInputs]);
 
   // Reload data when the active project changes
   useEffect(() => {
@@ -663,6 +712,11 @@ export default function ManualSCalculator() {
             className="flex-1 py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold text-base sm:text-lg hover:bg-emerald-400 hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all flex items-center justify-center gap-3 min-h-[48px]">
             Check Equipment Selection <ArrowRight className="w-5 h-5" />
           </button>
+          <button onClick={openRetailerFinder}
+            title="Find nearby suppliers for this equipment and get a regional cost estimate"
+            className="py-4 px-6 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 font-bold hover:bg-amber-500/20 hover:border-amber-500/50 transition-all flex items-center justify-center gap-2 min-h-[48px]">
+            <MapPin className="w-5 h-5" /> Find Retailer &amp; Estimate
+          </button>
           <button onClick={resetAll}
             className="py-4 px-6 rounded-2xl bg-slate-800 text-slate-400 font-bold hover:text-white transition-colors flex items-center justify-center gap-2 min-h-[48px]">
             <RotateCcw className="w-5 h-5" /> Reset
@@ -776,6 +830,14 @@ export default function ManualSCalculator() {
           onClose={() => setPickerMode(null)}
         />
       )}
+
+      {/* Retailer finder slide-over — same panel as Manual J, fed a synthetic
+          Manual J result projected from the Manual S loads + selected equipment. */}
+      <RetailerFinderPanel
+        wholeHouse={retailerInputs.wholeHouse}
+        conditions={retailerInputs.conditions}
+        onExportPdf={exportPdf}
+      />
 
       {/* Mason AI Assistant */}
       <Mason context="manual-s" position="bottom-left" />
