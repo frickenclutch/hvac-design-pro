@@ -353,6 +353,66 @@ body {
   box-shadow: 0 0 26px rgb(214 150 110 / 0.5), 0 0 10px rgb(226 232 240 / 0.25), 0 4px 15px rgb(0 0 0 / 0.4);
 }
 
+/* ── Notification bell — the Elemental Notification Bell ──────────────────────
+   Idle is dead-still. Pending wreathes the tri-metal bell in two orbiting energy
+   ribbons + a cyan bloom and gives it a faint resonant sway. The global
+   .reduce-motion / .a11y-reduced-motion rules already freeze all of this; the
+   @media guard below covers OS-level preference too. The swirls stay DRAWN when
+   frozen, so the pending state still reads without any motion. */
+@keyframes bell-orbit {
+  to { transform: rotate(360deg); }
+}
+@keyframes bell-flow {
+  to { stroke-dashoffset: -180; }
+}
+@keyframes bell-sway {
+  0%, 100% { transform: rotate(-2.4deg); }
+  50%      { transform: rotate(2.4deg); }
+}
+@keyframes bell-bloom {
+  0%, 100% { opacity: 0.45; transform: scale(0.9); }
+  50%      { opacity: 0.9;  transform: scale(1.08); }
+}
+
+/* Orbit the whole ribbon group around the bell's center (viewBox 24,24) */
+.bell-swirls {
+  transform-box: view-box;
+  transform-origin: 24px 24px;
+  animation: bell-orbit 9s linear infinite;
+}
+/* Energy flowing along each ribbon, at offset speeds/directions */
+.bell-swirl { stroke-dasharray: 26 64; }
+.bell-swirl-a { animation: bell-flow 2.4s linear infinite; }
+.bell-swirl-b { animation: bell-flow 3.4s linear infinite reverse; }
+
+.bell-glow {
+  transform-box: view-box;
+  transform-origin: 24px 24px;
+  animation: bell-bloom 2.8s ease-in-out infinite;
+}
+
+/* Resonant sway pivots from the yoke (viewBox 24,7) */
+.bell-body {
+  transform-box: view-box;
+  transform-origin: 24px 7px;
+}
+.bell-icon.is-pending .bell-body {
+  animation: bell-sway 3.6s ease-in-out infinite;
+}
+
+.bell-icon.is-muted { opacity: 0.5; }
+.bell-mute-slash { filter: drop-shadow(0 0 1px rgba(2, 6, 23, 0.9)); }
+
+@media (prefers-reduced-motion: reduce) {
+  .bell-swirls,
+  .bell-swirl-a,
+  .bell-swirl-b,
+  .bell-glow,
+  .bell-icon.is-pending .bell-body {
+    animation: none;
+  }
+}
+
 /* ── Metal finish (configurable in Accessibility) ───────────────────────────
    Each finish washes the shared brushed-steel texture with a translucent tint
    and picks an engraved-ink color for strong contrast on THAT finish — so the

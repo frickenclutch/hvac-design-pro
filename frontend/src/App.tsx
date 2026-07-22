@@ -38,7 +38,8 @@ const AuditLogPage = lazy(() => import('./pages/AuditLogPage'));
 import { useAuthStore } from './features/auth/store/useAuthStore';
 import { usePreferencesStore } from './stores/usePreferencesStore';
 import { useAccessPolicyStore } from './stores/useAccessPolicyStore';
-import { toast } from './stores/useToastStore';
+import { notify, useNotificationStore } from './stores/useNotificationStore';
+import NotificationCenter from './components/NotificationCenter';
 import SpotlightSearch, { SpotlightTrigger } from './features/spotlight/SpotlightSearch';
 import SkipLinks from './components/accessibility/SkipLinks';
 import A11yProvider from './components/accessibility/A11yProvider';
@@ -69,6 +70,10 @@ function AppLayout() {
   useEffect(() => {
     if (isAuthenticated) {
       void refreshAccessPolicy();
+      // Pull the org's notification policy so client-side delivery resolution
+      // reflects what the tenant admin has forced on/off. (The store also
+      // refetches on a user-id change; this covers the already-signed-in boot.)
+      void useNotificationStore.getState().refreshOrgPolicy();
     } else {
       resetAccessPolicy();
     }
@@ -113,7 +118,11 @@ function AppLayout() {
         await refreshAccessPolicy();
         const after = snapshot();
         if (after !== before) {
-          toast.info('Your access level was updated — the workspace has adjusted to your current role.');
+          // Durable + transient: records a security notification (bell) AND
+          // flashes the same message as a toast for immediacy.
+          notify.security('Your access level was updated — the workspace has adjusted to your current role.', {
+            severity: 'info',
+          });
         }
       } catch {
         /* failure-safe: stores keep last-good state; try again next tick */
@@ -173,6 +182,7 @@ function AppLayout() {
             <span className="text-sm font-bold premium-gradient-text">HVAC Design Pro</span>
           </div>
           <div className="flex items-center gap-1">
+            <NotificationCenter variant="compact" align="right" />
             <button onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))}
               className="p-2.5 rounded-xl hover:bg-slate-800/50 text-slate-400 hover:text-emerald-400 min-w-[44px] min-h-[44px] flex items-center justify-center">
               <Search className="w-5 h-5" />
@@ -273,6 +283,7 @@ function AppLayout() {
           </div>
 
           <div className="px-2.5 space-y-1">
+            <NotificationCenter variant="sidebar" collapsed={sidebarCollapsed} dropUp align="left" />
             <button
               onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))}
               className={`flex w-full items-center gap-2.5 p-3 rounded-xl text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors group min-h-[44px] ${sidebarCollapsed ? 'justify-center' : ''}`}
