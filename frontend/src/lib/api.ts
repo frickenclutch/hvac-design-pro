@@ -849,6 +849,31 @@ class ApiClient {
     );
   }
 
+  // ── Per-tenant usage (L0) — cost-bearing + activity meters per org ─────────
+  async platformUsage() {
+    return this.request<{
+      tenants: Array<{
+        org_id: string;
+        org_name: string;
+        plan: string;
+        billing_status: string;
+        org_type: string;
+        seats: number;
+        projects: number;
+        drawings: number;
+        calcs: number;
+        calcs_30d: number;
+        ai_calls: number;
+        ai_calls_30d: number;
+        ai_input_tokens: number;
+        ai_output_tokens: number;
+        storage_files: number;
+        storage_bytes: number;
+      }>;
+      generatedAt: string;
+    }>('/api/platform/usage');
+  }
+
   // ── L0 org impersonation ────────────────────────────────────────────────
   // Mints a 30-minute, access-only, READ-ONLY session scoped to the target
   // tenant. The auth store stashes the admin's real pair and swaps this
