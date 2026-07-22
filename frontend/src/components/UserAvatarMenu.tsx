@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { Settings, LogOut, ChevronDown, ShieldCheck } from 'lucide-react';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
-import { usePreferencesStore } from '../stores/usePreferencesStore';
+import { avatarUrl } from '../utils/avatar';
 
 interface UserAvatarMenuProps {
   /** px size of the avatar circle */
@@ -29,7 +29,6 @@ export default function UserAvatarMenu({
   className = '',
 }: UserAvatarMenuProps) {
   const { user, organisation, logout } = useAuthStore();
-  const avatarDataUrl = usePreferencesStore((s) => s.avatarDataUrl);
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -119,6 +118,7 @@ export default function UserAvatarMenu({
 
   const initials = `${user.firstName?.[0] ?? ''}${user.lastName?.[0] ?? ''}`.toUpperCase() || '?';
   const fullName = `${user.firstName} ${user.lastName}`.trim();
+  const avatarSrc = avatarUrl(user.id, user.avatarKey);
 
   const dropdown = open
     ? createPortal(
@@ -137,8 +137,8 @@ export default function UserAvatarMenu({
           <div className="px-4 py-3 border-b border-slate-800/60">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-full overflow-hidden bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-xs font-bold shrink-0">
-                {avatarDataUrl
-                  ? <img src={avatarDataUrl} alt="" className="w-full h-full object-cover" />
+                {avatarSrc
+                  ? <img src={avatarSrc} alt="" className="w-full h-full object-cover" />
                   : initials}
               </div>
               <div className="min-w-0">
@@ -199,8 +199,8 @@ export default function UserAvatarMenu({
           className="flex items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400 font-bold select-none border border-emerald-500/30 flex-shrink-0 overflow-hidden"
           style={{ width: size, height: size, fontSize: size * 0.38 }}
         >
-          {avatarDataUrl
-            ? <img src={avatarDataUrl} alt="" className="w-full h-full object-cover" />
+          {avatarSrc
+            ? <img src={avatarSrc} alt="" className="w-full h-full object-cover" />
             : initials}
         </div>
         {showName && (

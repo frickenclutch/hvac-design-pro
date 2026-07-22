@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { api } from '../lib/api';
+import { avatarUrl } from '../utils/avatar';
 
 type Sort = 'recent' | 'oldest' | 'comments';
 
@@ -45,6 +46,9 @@ interface Comment {
   author_org_id: string;
   author_first_name: string | null;
   author_last_name: string | null;
+  // Optional so the frontend tolerates an older worker that predates the
+  // avatar column (Pages deploys on merge; the worker deploys separately).
+  author_avatar_key?: string | null;
   author_org_name: string | null;
 }
 
@@ -289,12 +293,21 @@ function CommunityProjectDetail({ id }: { id: string }) {
                 data.comments.map((c) => {
                   const isMine = c.author_user_id === sessionUser?.id;
                   const author = [c.author_first_name, c.author_last_name].filter(Boolean).join(' ') || 'A user';
+                  const authorAvatar = avatarUrl(c.author_user_id, c.author_avatar_key);
+                  const authorInitials = [c.author_first_name?.[0], c.author_last_name?.[0]].filter(Boolean).join('').toUpperCase() || '?';
                   return (
                     <div key={c.id} className="glass-panel rounded-xl border border-slate-800/60 p-4">
                       <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-                        <div className="text-xs text-slate-400">
-                          <span className="font-bold text-white">{author}</span>
-                          {c.author_org_name && <span className="text-slate-500"> · {c.author_org_name}</span>}
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="w-7 h-7 rounded-full overflow-hidden bg-violet-500/20 border border-violet-500/30 flex items-center justify-center text-violet-300 text-[10px] font-bold shrink-0 select-none">
+                            {authorAvatar
+                              ? <img src={authorAvatar} alt="" className="w-full h-full object-cover" />
+                              : authorInitials}
+                          </div>
+                          <div className="text-xs text-slate-400 min-w-0">
+                            <span className="font-bold text-white">{author}</span>
+                            {c.author_org_name && <span className="text-slate-500"> · {c.author_org_name}</span>}
+                          </div>
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] text-slate-600 font-mono">
