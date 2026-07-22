@@ -1099,7 +1099,10 @@ function DetailHero({ submission, project, canViewAudit, loading, onRefresh, onA
               {[project?.address, project?.city, project?.state, project?.zip].filter(Boolean).join(', ') || 'No address'}
             </p>
           </div>
-          <div className="flex flex-col items-end gap-2 shrink-0">
+          {/* Status + permit number on an opaque backing so the submission's
+              state is legible on the hero at all times, whatever the finish
+              (the status pill's translucent colour is tuned for dark cards). */}
+          <div className="flex flex-col items-end gap-1.5 shrink-0 rounded-xl bg-slate-950/90 border border-white/10 px-3 py-2 shadow-[0_3px_12px_rgba(0,0,0,0.5)]">
             <StatusChip status={status} />
             {permitNumber && (
               <span className="inline-flex items-center gap-1 text-[11px] font-mono text-emerald-300">
