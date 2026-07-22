@@ -10,6 +10,7 @@ import cadPortalBlackhole from '../assets/brand/cad-portal-blackhole.png';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { useAccessPolicyStore } from '../stores/useAccessPolicyStore';
 import { toast } from '../stores/useToastStore';
+import { avatarUrl, downscaleImage } from '../utils/avatar';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
@@ -1100,65 +1101,110 @@ function StampUpload({ label, dataUrl, onUpload, onClear }: { label: string; dat
   );
 }
 
-// Avatar that represents the user everywhere (menu, sidebar, Creation Portal).
-// Upload → optionally mark it up with the platform's own drawing tool
-// (FeedbackAnnotator, the same editor the bug reporter uses) → save. Stored as
-// a data URL in preferences (per-user scoped, quota-managed).
+// Avatar that represents the user everywhere (menu, sidebar, Creation Portal,
+// and the community thread). Upload → optionally mark it up with the platform's
+// own drawing tool (FeedbackAnnotator) → it's downscaled and stored SERVER-SIDE
+// on the user row (migration 0019), so it persists across reloads and follows
+// the user to every device. Served publicly by GET /avatars/:id; the auth-store
+// avatarKey is the source of truth (rendered via avatarUrl()).
 function AvatarField({ initials }: { initials: string }) {
-  const avatarDataUrl = usePreferencesStore(s => s.avatarDataUrl);
-  const update = usePreferencesStore(s => s.update);
+  const user = useAuthStore(s => s.user);
+  const setAvatarKey = useAuthStore(s => s.setAvatarKey);
   const fileRef = useRef<HTMLInputElement>(null);
   // The image currently open in the annotator (null = closed).
   const [editing, setEditing] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const src = user ? avatarUrl(user.id, user.avatarKey) : null;
 
   const pickFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    if (file.size > 4 * 1024 * 1024) { toast.error('Image must be under 4MB.'); return; }
+    // Generous ceiling on the SOURCE — we downscale to a 256px webp before
+    // upload, so the stored/served avatar is a few KB regardless.
+    if (file.size > 8 * 1024 * 1024) { toast.error('Image must be under 8MB.'); return; }
     const reader = new FileReader();
     reader.onload = () => { if (typeof reader.result === 'string') setEditing(reader.result); };
     reader.onerror = () => toast.error('Could not read that image.');
     reader.readAsDataURL(file);
   };
 
-  const handleDone = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') { update({ avatarDataUrl: reader.result }); toast.success('Avatar updated.'); }
-      setEditing(null);
-    };
-    reader.onerror = () => { toast.error('Could not save that avatar.'); setEditing(null); };
-    reader.readAsDataURL(file);
+  // Re-open the saved avatar in the annotator. The server image is fetched to a
+  // data URL first (the annotator works on data URLs); /avatars is CORS-enabled.
+  const editCurrent = async () => {
+    if (!src) return;
+    try {
+      const res = await fetch(src);
+      const blob = await res.blob();
+      const reader = new FileReader();
+      reader.onload = () => { if (typeof reader.result === 'string') setEditing(reader.result); };
+      reader.onerror = () => toast.error('Could not open the avatar for editing.');
+      reader.readAsDataURL(blob);
+    } catch {
+      toast.error('Could not open the avatar for editing.');
+    }
+  };
+
+  // Annotator "done" → downscale to a small square, upload to the server, then
+  // point the session user at the returned key (setAvatarKey re-persists it, so
+  // a reload shows it without waiting for the next /me).
+  const handleDone = async (file: File) => {
+    setEditing(null);
+    setBusy(true);
+    try {
+      const blob = await downscaleImage(file, 256, 'image/webp');
+      const upload = new File([blob], 'avatar.webp', { type: 'image/webp' });
+      const { avatarKey } = await api.uploadAvatar(upload);
+      setAvatarKey(avatarKey);
+      toast.success('Avatar updated.');
+    } catch {
+      // api.request already surfaced the error toast; just release the busy state.
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeAvatar = async () => {
+    setBusy(true);
+    try {
+      await api.deleteAvatar();
+      setAvatarKey(null);
+      toast.success('Avatar removed.');
+    } catch {
+      /* api.request already surfaced the error toast */
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <div className="flex items-center gap-5 pb-5 mb-5 border-b border-slate-800/60">
-      <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={pickFile} className="hidden" />
+      <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={pickFile} className="hidden" />
       <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-emerald-500/30 bg-emerald-500/10 flex items-center justify-center shrink-0 shadow-[0_0_20px_rgba(16,185,129,0.15)]">
-        {avatarDataUrl
-          ? <img src={avatarDataUrl} alt="Your avatar" className="w-full h-full object-cover" />
+        {src
+          ? <img src={src} alt="Your avatar" className="w-full h-full object-cover" />
           : <span className="text-2xl font-bold text-emerald-400 select-none">{initials}</span>}
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold text-white">Profile photo</p>
-        <p className="text-xs text-slate-500 mb-3">Represents you across the platform. Add a few marks with the drawing tool before you save.</p>
+        <p className="text-xs text-slate-500 mb-3">Represents you across the platform and in the community. Add a few marks with the drawing tool before you save.</p>
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 text-xs font-bold text-sky-400 hover:text-sky-300 bg-sky-500/10 border border-sky-500/30 px-3 py-2 rounded-lg transition-colors">
-            <Upload className="w-3.5 h-3.5" /> {avatarDataUrl ? 'Replace' : 'Upload'}
+          <button disabled={busy} onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 text-xs font-bold text-sky-400 hover:text-sky-300 bg-sky-500/10 border border-sky-500/30 px-3 py-2 rounded-lg transition-colors disabled:opacity-50">
+            <Upload className="w-3.5 h-3.5" /> {src ? 'Replace' : 'Upload'}
           </button>
-          {avatarDataUrl && (
+          {src && (
             <>
-              <button onClick={() => setEditing(avatarDataUrl)} className="flex items-center gap-1.5 text-xs font-bold text-slate-300 hover:text-white bg-slate-700/40 border border-slate-600/40 px-3 py-2 rounded-lg transition-colors">
+              <button disabled={busy} onClick={editCurrent} className="flex items-center gap-1.5 text-xs font-bold text-slate-300 hover:text-white bg-slate-700/40 border border-slate-600/40 px-3 py-2 rounded-lg transition-colors disabled:opacity-50">
                 <Pencil className="w-3.5 h-3.5" /> Edit
               </button>
-              <button onClick={() => { update({ avatarDataUrl: '' }); toast.success('Avatar removed.'); }} className="flex items-center gap-1.5 text-xs font-bold text-red-400 hover:text-red-300 bg-red-500/5 border border-red-500/20 px-3 py-2 rounded-lg transition-colors">
+              <button disabled={busy} onClick={removeAvatar} className="flex items-center gap-1.5 text-xs font-bold text-red-400 hover:text-red-300 bg-red-500/5 border border-red-500/20 px-3 py-2 rounded-lg transition-colors disabled:opacity-50">
                 <Trash2 className="w-3.5 h-3.5" /> Remove
               </button>
             </>
           )}
         </div>
-        <p className="text-[10px] text-slate-600 mt-2">PNG, JPG, or WebP — max 4MB. Stored on this device.</p>
+        <p className="text-[10px] text-slate-600 mt-2">PNG, JPG, WebP, or GIF. Saved to your account — synced across your devices.</p>
       </div>
       {editing && (
         <FeedbackAnnotator imageDataUrl={editing} onDone={handleDone} onCancel={() => setEditing(null)} />

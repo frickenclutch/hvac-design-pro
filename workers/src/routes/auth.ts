@@ -231,7 +231,7 @@ authRoutes.post('/login', async (c) => {
 
   const user = await db.prepare(
     `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.is_platform_admin, u.is_permit_authority, u.org_id,
-            u.password_hash, u.status,
+            u.password_hash, u.status, u.avatar_key,
             o.name as org_name, o.org_type, o.slug, o.region_code
      FROM users u JOIN organisations o ON o.id = u.org_id
      WHERE u.email = ?`
@@ -366,6 +366,7 @@ authRoutes.post('/login', async (c) => {
       lastName: user.last_name, role: user.role, isVerified: true,
       isPlatformAdmin: Number(user.is_platform_admin ?? 0) === 1,
       isPermitAuthority: Number(user.is_permit_authority ?? 0) === 1,
+      avatarKey: (user.avatar_key as string | null) ?? null,
     },
     organisation: {
       id: user.org_id, name: user.org_name, type: user.org_type,
@@ -1418,7 +1419,7 @@ authRoutes.get('/me', async (c) => {
   // Bound ISO now, not datetime('now') — see utils/time.ts for why.
   const result = await db.prepare(
     `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.is_platform_admin, u.is_permit_authority,
-            s.org_id, s.is_impersonation,
+            u.avatar_key, s.org_id, s.is_impersonation,
             o.name as org_name, o.org_type, o.slug, o.region_code
      FROM sessions s
      JOIN users u ON u.id = s.user_id
@@ -1435,6 +1436,7 @@ authRoutes.get('/me', async (c) => {
       lastName: result.last_name, role: result.role, isVerified: !!result.is_verified,
       isPlatformAdmin: Number(result.is_platform_admin ?? 0) === 1,
       isPermitAuthority: Number(result.is_permit_authority ?? 0) === 1,
+      avatarKey: (result.avatar_key as string | null) ?? null,
     },
     organisation: {
       // Session-scoped org: during impersonation this is the TARGET tenant.

@@ -7,6 +7,7 @@ import { calcRoutes } from './routes/calculations';
 import { uploadRoutes } from './routes/uploads';
 import { cadRoutes } from './routes/cad';
 import { orgRoutes } from './routes/org';
+import { userRoutes, avatarPublicRoutes } from './routes/users';
 import { feedbackRoutes } from './routes/feedback';
 import { platformRoutes } from './routes/platform';
 import { forumRoutes } from './routes/forum';
@@ -84,6 +85,13 @@ app.route('/api/auth', authRoutes);
 // ahead of authMiddleware, so the chain doesn't 401 them.
 app.route('/api/webhooks', webhookRoutes);
 
+// Public avatar bytes — PUBLIC by design, and mounted OUTSIDE /api/* so the
+// authMiddleware below never sees it. An <img src> (how avatars render in the
+// menu, sidebar, and community thread) cannot send a bearer header, so this
+// must be unauthenticated. Exposure is negligible: random, non-enumerable user
+// ids and non-sensitive identity photos. See routes/users.ts.
+app.route('/avatars', avatarPublicRoutes);
+
 // Protected routes
 app.use('/api/*', authMiddleware);
 // Audit middleware runs AFTER auth so user context is on c — every mutation
@@ -108,6 +116,9 @@ app.use('/api/*', async (c, next) => {
   await next();
 });
 app.route('/api/org', orgRoutes);
+// Self-service avatar upload/remove (own account only). Authed. The public
+// read counterpart is /avatars above (an <img> can't send a bearer).
+app.route('/api/users', userRoutes);
 app.route('/api/projects', projectRoutes);
 app.route('/api/catalog', catalogRoutes);
 app.route('/api/calculations', calcRoutes);

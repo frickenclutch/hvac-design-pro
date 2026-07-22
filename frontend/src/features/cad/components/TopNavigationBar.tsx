@@ -10,7 +10,7 @@ import { useCadStore } from '../store/useCadStore';
 import { useAuthStore } from '../../auth/store/useAuthStore';
 import { useProjectStore } from '../../../stores/useProjectStore';
 import { useAccessPolicyStore } from '../../../stores/useAccessPolicyStore';
-import { usePreferencesStore } from '../../../stores/usePreferencesStore';
+import { avatarUrl } from '../../../utils/avatar';
 
 // Lazy-load heavy dependencies (Three.js ~1.2MB, jsPDF ~200KB)
 const Viewer3D = lazy(() => import('./Viewer3D'));
@@ -24,7 +24,7 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
   const canViewVersions = useAccessPolicyStore((s) => s.capabilities.canViewVersions);
   const [showSearch, setShowSearch] = useState(false);
   const { user, organisation, logout } = useAuthStore();
-  const avatarDataUrl = usePreferencesStore((s) => s.avatarDataUrl);
+  const avatarSrc = avatarUrl(user?.id, user?.avatarKey);
   const { activeProjectName, activeProjectType, activeProjectAddress, renameProject, createProject, activeProjectId } = useProjectStore();
 
   // Identity for the Creation Portal header (the avatar now lives inside the portal).
@@ -401,8 +401,8 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                  {/* Identity — the user's avatar now lives in the portal */}
                  <div className="px-2.5 pt-2 pb-2.5 flex items-center gap-3 border-b border-slate-950/15">
                    <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-slate-900/40 bg-slate-800 flex items-center justify-center shrink-0 shadow-[inset_0_1px_2px_rgba(255,255,255,0.4),0_1px_3px_rgba(0,0,0,0.4)]">
-                     {avatarDataUrl
-                       ? <img src={avatarDataUrl} alt="" className="w-full h-full object-cover" />
+                     {avatarSrc
+                       ? <img src={avatarSrc} alt="" className="w-full h-full object-cover" />
                        : <span className="text-sm font-bold text-slate-100">{initials}</span>}
                    </div>
                    <div className="min-w-0">

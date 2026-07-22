@@ -1,0 +1,29 @@
+-- 0019_user_avatar.sql — per-user avatar that persists across sessions/devices.
+--
+-- WHY
+-- The profile avatar was a base64 data URL kept only in the browser's
+-- localStorage (usePreferencesStore.avatarDataUrl). Two failure modes fell
+-- out of that: (1) the preferences persist() drops the avatar the moment
+-- localStorage quota is exceeded — a single phone photo does it — so it
+-- vanished on the next reload; (2) localStorage never leaves the device, so
+-- the avatar never followed the user to another browser or machine. Moving
+-- the avatar server-side onto the user row fixes both: it hydrates from
+-- /api/auth/me on every boot and is identical on every device.
+--
+-- WHAT
+-- `avatar_key` is the R2 object key for the user's current avatar
+-- (avatars/<userId>/<rand>.<ext>), or NULL for the initials fallback. The
+-- random segment changes on every upload so the client can cache-bust with
+-- ?v=<avatar_key>. Served by GET /api/users/:id/avatar — deliberately
+-- cross-tenant (the community board renders authors from other orgs), and
+-- low-sensitivity: avatar bytes only, the same identity class as the
+-- author name + org the forum already exposes cross-tenant.
+--
+-- WHY ALTER-ONLY (not edited into 0001): a genuinely new, forward-authored
+-- column — same class as 0009's `status`, the opposite of the 0006/0008
+-- schema-reconciliation edits. Adding it to 0001 too would make a fresh
+-- rebuild run CREATE (with the column) then this ALTER (duplicate column →
+-- failure). Owning it solely here keeps both paths identical: fresh rebuild
+-- runs 0001 (no avatar_key) → 0019 ALTER adds it; production runs 0019
+-- ALTER adds it. No ordering hazard.
+ALTER TABLE users ADD COLUMN avatar_key TEXT;

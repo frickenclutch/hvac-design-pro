@@ -150,6 +150,7 @@ forumRoutes.get('/projects/:id', async (c) => {
             pc.author_user_id, pc.author_org_id,
             u.first_name AS author_first_name,
             u.last_name AS author_last_name,
+            u.avatar_key AS author_avatar_key,
             o.name AS author_org_name
      FROM project_comments pc
      LEFT JOIN users u         ON u.id = pc.author_user_id

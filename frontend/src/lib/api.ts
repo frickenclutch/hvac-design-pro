@@ -611,6 +611,21 @@ class ApiClient {
     return `${API_BASE}/api/uploads/${id}${token ? `?token=${token}` : ''}`;
   }
 
+  // Avatar (own account) — sets/removes users.avatar_key + the R2 object. The
+  // public read counterpart is GET /avatars/:id (see utils/avatar.ts).
+  async uploadAvatar(file: File) {
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.request<{ avatarKey: string }>('/api/users/me/avatar', {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  async deleteAvatar() {
+    return this.request<{ ok: boolean }>('/api/users/me/avatar', { method: 'DELETE' });
+  }
+
   async listProjectFiles(projectId: string) {
     return this.request<{ files: ApiFileRow[] }>(`/api/uploads/project/${projectId}`);
   }

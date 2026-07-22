@@ -38,6 +38,13 @@ export interface User {
    * sidebar link and unlocks decision actions on incoming submissions.
    */
   isPermitAuthority?: boolean;
+  /**
+   * R2 object key for the user's avatar, or null/undefined for the initials
+   * fallback. Server-backed (users.avatar_key) so it persists across reloads
+   * and devices; rendered via avatarUrl() from utils/avatar. Changes on every
+   * upload, which doubles as the image cache-buster.
+   */
+  avatarKey?: string | null;
 }
 
 export interface Organisation {
@@ -159,6 +166,9 @@ interface AuthState {
   register: (data: { email: string; password: string; firstName: string; lastName: string; orgName?: string; orgType?: OrgType; regionCode?: RegionCode; addressLine1?: string; city?: string; state?: string; zip?: string; country?: string; phone?: string }) => Promise<void>;
   logout: () => void;
   setAuthenticated: (isAuthenticated: boolean) => void;
+  /** Update the session user's avatar key after an upload/removal and
+   *  re-persist, so a reload reflects it immediately without waiting for /me. */
+  setAvatarKey: (avatarKey: string | null) => void;
   setOnboarding: (isOnboarding: boolean) => void;
   restoreSession: () => Promise<void>;
   clearError: () => void;
@@ -687,6 +697,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   setAuthenticated: (isAuthenticated) => set({ isAuthenticated }),
+
+  setAvatarKey: (avatarKey) => set((s) => {
+    if (!s.user) return {};
+    const user = { ...s.user, avatarKey };
+    // Re-persist so a reload shows the new avatar immediately, without waiting
+    // for the next /me. persistSession needs a live token + org — both present.
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (token && s.organisation) persistSession(token, user, s.organisation);
+    return { user };
+  }),
 
   setOnboarding: (isOnboarding) => set({ isOnboarding }),
 
