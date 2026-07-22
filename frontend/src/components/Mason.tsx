@@ -3,6 +3,7 @@ import { X, Send, Zap, Thermometer, Wind, Calculator, Phone, Command, MessageSqu
 import { useProjectStore } from '../stores/useProjectStore';
 import { useCadStore } from '../features/cad/store/useCadStore';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
+import { usePreferencesStore, type ToolboxPosition } from '../stores/usePreferencesStore';
 import { api } from '../lib/api';
 import { scopedKey } from '../utils/storage';
 import FeedbackAnnotator from './FeedbackAnnotator';
@@ -11,8 +12,21 @@ import FeedbackAnnotator from './FeedbackAnnotator';
 // Named after the masons who've built the world's buildings, brick by brick.
 // Unified across CAD workspace and Manual J Calculator.
 
+// ── Free-drag tuning ─────────────────────────────────────────────────────────
+/** Min px Mason keeps from any viewport edge when dragged free. */
+const MASON_EDGE_MARGIN = 12;
+/** Pointer travel (px) past which a press becomes a drag, not a click-to-open. */
+const MASON_DRAG_THRESHOLD = 8;
+/** Touch/pen hold (ms) that "picks Mason up" for dragging — long enough that a
+ *  quick tap still opens him and a scroll-y swipe doesn't move him. */
+const MASON_LONGPRESS_MS = 350;
+
 // ── Context mode determines which knowledge is prioritized ─────────────────────
-export type MasonContext = 'cad' | 'manualj' | 'manual-d' | 'manual-s' | 'aed';
+// 'general' is the whole-app context: Mason mounts globally (Dashboard,
+// Settings, Team, Permits, …) so a help + feedback route is always in reach,
+// even off the calculators. The calc/CAD contexts still tailor his knowledge
+// when the user is on those pages.
+export type MasonContext = 'cad' | 'manualj' | 'manual-d' | 'manual-s' | 'aed' | 'general';
 
 // ── Knowledge base ─────────────────────────────────────────────────────────────
 interface KBEntry {
@@ -794,9 +808,11 @@ All values are presets that you can override — the room type just gives you a 
 
   // ── Feedback ────────────────────────────────────────────────────────────────
   {
-    keywords: ['feedback', 'bug report', 'submit bug', 'report issue', 'feature request', 'idea'],
-    contexts: ['manualj', 'manual-d', 'cad'],
+    keywords: ['feedback', 'bug report', 'submit bug', 'report issue', 'feature request', 'idea', 'support', 'contact'],
+    contexts: ['manualj', 'manual-d', 'manual-s', 'aed', 'cad', 'general'],
     answer: `**Submit Feedback** directly from Mason!
+
+I ride along on **every screen**, so a bug report is always one tap away — no matter where in the app something goes sideways. Grab and drag me to whichever corner or spot suits you (I stay put).
 
 Click the **+** button in my header to open the feedback form.
 
@@ -814,7 +830,9 @@ Click the **+** button in my header to open the feedback form.
 Attached images now appear inline in the report email (and are archived).
 Supports images, videos, PDFs, docs, and text files (up to 5 files, 10MB each).
 
-Submissions go to the C4 Technologies support team and are tracked in our system.`,
+Submissions go **straight to the C4 Technologies team of experts** — our founder and engineers — and are tracked in our system. You always have a direct line to support from anywhere in the app.
+
+**Tip:** put me wherever you like — **grab and drag me** anywhere on the page (click-drag, or long-press then drag on touch), or pick a corner in **Settings → Mason Assistant** or during first-time setup.`,
   },
 
   // ── Session Persistence ─────────────────────────────────────────────────────
@@ -1399,7 +1417,9 @@ function processCommands(query: string, context: MasonContext): string | null {
     const workspaceLabel = context === 'manualj' ? 'Manual J Calculator'
       : context === 'manual-d' ? 'Manual D Calculator'
       : context === 'aed' ? 'AED Analysis'
-      : 'CAD Workspace';
+      : context === 'manual-s' ? 'Manual S Calculator'
+      : context === 'cad' ? 'CAD Workspace'
+      : 'HVAC Design Pro';
 
     return `**Live Workspace Status**
 
@@ -1734,17 +1754,123 @@ const QUICK_TOPICS: Record<MasonContext, string[]> = {
     'Altitude derate',
     'Import from Manual J',
   ],
+  general: [
+    'Getting started',
+    'Keyboard shortcuts',
+    'Manual J basics',
+    'Duct sizing basics',
+    'What is AED?',
+    'Equipment sizing',
+    'Import a blueprint',
+    'Submit feedback',
+    "What's new",
+  ],
 };
 
 // ── Props ───────────────────────────────────────────────────────────────────
 interface MasonProps {
   context: MasonContext;
-  /** Position offset for different pages */
-  position?: 'bottom-right' | 'bottom-left';
 }
 
-export default function Mason({ context, position = 'bottom-right' }: MasonProps) {
+export default function Mason({ context }: MasonProps) {
+  // Screen corner is a user preference, applied platform-wide — Mason is
+  // mounted once globally (App.tsx), so this is the single source of truth
+  // for where he docks. Pick it during setup or in Settings → Mason Assistant.
+  const masonPlacement = usePreferencesStore((s) => s.masonPlacement);
+  // Free-drag override: null → docked to the corner; {x,y} → dragged loose.
+  const masonPos = usePreferencesStore((s) => s.masonPos);
+  const updatePrefs = usePreferencesStore((s) => s.update);
   const [isOpen, setIsOpen] = useState(false);
+
+  // ── Grab-and-drag: move Mason anywhere on the page ─────────────────────────
+  // Pointer-type aware so a plain tap/click still OPENS him:
+  //   • mouse → grab and drag (engages once you move past a small threshold)
+  //   • touch/pen → long-press (~350 ms) to pick up, then drag
+  // Local `pos` tracks the live drag; the pref is only written on drop.
+  const [pos, setPos] = useState<ToolboxPosition | null>(masonPos);
+  const [carrying, setCarrying] = useState(false);
+  const posRef = useRef<ToolboxPosition | null>(masonPos);
+  const movedRef = useRef(false);
+  const armedRef = useRef(false);
+  const suppressClickRef = useRef(false);
+  const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dragStartRef = useRef({ mx: 0, my: 0, ox: 0, oy: 0 });
+
+  // Re-sync when the pref changes elsewhere (e.g. Settings "dock to corner").
+  useEffect(() => { posRef.current = masonPos; setPos(masonPos); }, [masonPos]);
+  // Never leak the long-press timer if Mason unmounts mid-press.
+  useEffect(() => () => { if (longPressRef.current) clearTimeout(longPressRef.current); }, []);
+
+  const beginLauncherDrag = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return; // left button only
+    const el = e.currentTarget;
+    const rect = el.getBoundingClientRect();
+    const origin = posRef.current ?? { x: Math.round(rect.left), y: Math.round(rect.top) };
+    dragStartRef.current = { mx: e.clientX, my: e.clientY, ox: origin.x, oy: origin.y };
+    movedRef.current = false;
+    const touch = e.pointerType === 'touch' || e.pointerType === 'pen';
+    armedRef.current = !touch; // mouse arms now; touch waits for the long-press
+    try { el.setPointerCapture(e.pointerId); } catch { /* capture unsupported */ }
+
+    if (touch) {
+      longPressRef.current = setTimeout(() => {
+        armedRef.current = true;
+        setCarrying(true);
+        // Re-seed origin from where he actually sits (pos may have been null).
+        const r = el.getBoundingClientRect();
+        dragStartRef.current.ox = posRef.current?.x ?? Math.round(r.left);
+        dragStartRef.current.oy = posRef.current?.y ?? Math.round(r.top);
+      }, MASON_LONGPRESS_MS);
+    }
+
+    const onMove = (me: PointerEvent) => {
+      const dx = me.clientX - dragStartRef.current.mx;
+      const dy = me.clientY - dragStartRef.current.my;
+      if (!armedRef.current) {
+        // Touch, pre-arm: real movement means it's a swipe, not a hold → cancel.
+        if (Math.hypot(dx, dy) > 10 && longPressRef.current) {
+          clearTimeout(longPressRef.current);
+          longPressRef.current = null;
+        }
+        return;
+      }
+      if (!movedRef.current && Math.hypot(dx, dy) < MASON_DRAG_THRESHOLD) return;
+      movedRef.current = true;
+      setCarrying(true);
+      const box = el.getBoundingClientRect();
+      const maxX = window.innerWidth - box.width - MASON_EDGE_MARGIN;
+      const maxY = window.innerHeight - box.height - MASON_EDGE_MARGIN;
+      const next = {
+        x: Math.round(Math.max(MASON_EDGE_MARGIN, Math.min(maxX, dragStartRef.current.ox + dx))),
+        y: Math.round(Math.max(MASON_EDGE_MARGIN, Math.min(maxY, dragStartRef.current.oy + dy))),
+      };
+      posRef.current = next;
+      setPos(next);
+    };
+
+    const onUp = () => {
+      if (longPressRef.current) { clearTimeout(longPressRef.current); longPressRef.current = null; }
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      setCarrying(false);
+      armedRef.current = false;
+      if (movedRef.current) {
+        // A real drag happened — persist, and swallow the trailing click so it
+        // doesn't also open him. Cleared next tick in case no click fires.
+        suppressClickRef.current = true;
+        updatePrefs({ masonPos: posRef.current });
+        setTimeout(() => { suppressClickRef.current = false; }, 0);
+      }
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, [updatePrefs]);
+
+  const onLauncherClick = useCallback((e: React.MouseEvent) => {
+    if (suppressClickRef.current) { e.preventDefault(); e.stopPropagation(); return; }
+    setIsOpen(true);
+  }, []);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [activeCalc, setActiveCalc] = useState<string | null>(null);
@@ -1919,25 +2045,53 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
     setActiveCalc(null);
   };
 
-  const posClass = position === 'bottom-left' ? 'left-6' : 'right-6';
-  const tooltipSide = position === 'bottom-left' ? 'left-full ml-3' : 'right-full mr-3';
-  const tooltipPointerSide = position === 'bottom-left'
+  // Anchor Mason to the user's chosen corner. Mobile nudges keep him clear of
+  // fixed chrome: top placements clear the mobile top bar (~57px); bottom-right
+  // clears the mobile Spotlight FAB (which lives at bottom-6 right-6).
+  const isLeft = masonPlacement.endsWith('left');
+  const isTop = masonPlacement.startsWith('top');
+  const hClass = isLeft ? 'left-6' : 'right-6';
+  const vClass = isTop
+    ? 'top-20 md:top-6'
+    : isLeft
+    ? 'bottom-6'
+    : 'bottom-24 md:bottom-6';
+  const anchorClass = `${vClass} ${hClass}`;
+
+  // Floating override (dragged loose). Clamp into view at render so a resize
+  // or a stale pref can never strand him off-screen.
+  const clampIntoView = (p: ToolboxPosition, w: number, h: number): { left: number; top: number } => ({
+    left: Math.round(Math.max(MASON_EDGE_MARGIN, Math.min(p.x, window.innerWidth - w - MASON_EDGE_MARGIN))),
+    top: Math.round(Math.max(MASON_EDGE_MARGIN, Math.min(p.y, window.innerHeight - h - MASON_EDGE_MARGIN))),
+  });
+  const launcherStyle = pos ? clampIntoView(pos, 56, 56) : undefined;
+  const panelFloatStyle = pos
+    ? clampIntoView(pos, Math.min(400, window.innerWidth - 32), Math.min(window.innerHeight * 0.75, 560))
+    : undefined;
+
+  // Tooltip + panel expand toward the roomier side: the dock corner when
+  // docked, the screen half he's in when floating.
+  const sideLeft = pos ? pos.x < window.innerWidth / 2 : isLeft;
+  const tooltipSide = sideLeft ? 'left-full ml-3' : 'right-full mr-3';
+  const tooltipPointerSide = sideLeft
     ? 'absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-2 bg-slate-800/90 border-l border-b border-slate-700 rotate-45'
     : 'absolute top-1/2 -right-1 -translate-y-1/2 w-2 h-2 bg-slate-800/90 border-r border-t border-slate-700 rotate-45';
 
   if (!isOpen) {
     return (
       <button
-        onClick={() => setIsOpen(true)}
-        className={`fixed bottom-6 ${posClass} z-[60] p-3.5 rounded-2xl glass-panel border border-amber-500/20 backdrop-blur-xl bg-slate-900/80 text-amber-400 hover:text-amber-300 hover:border-amber-500/40 hover:bg-slate-800/80 transition-all shadow-[0_0_30px_rgba(0,0,0,0.5),0_0_15px_rgba(245,158,11,0.1)] group`}
-        aria-label="Ask Mason — HVAC AI Assistant"
+        onPointerDown={beginLauncherDrag}
+        onClick={onLauncherClick}
+        style={launcherStyle}
+        className={`fixed ${pos ? '' : anchorClass} z-[60] p-3.5 rounded-2xl glass-panel border backdrop-blur-xl bg-slate-900/80 text-amber-400 hover:text-amber-300 hover:bg-slate-800/80 touch-none select-none cursor-grab active:cursor-grabbing transition-[transform,background-color,border-color,color,box-shadow] shadow-[0_0_30px_rgba(0,0,0,0.5),0_0_15px_rgba(245,158,11,0.1)] group ${carrying ? 'scale-110 border-amber-500/60 ring-2 ring-amber-400/50 shadow-[0_0_45px_rgba(245,158,11,0.35)]' : 'border-amber-500/20 hover:border-amber-500/40'}`}
+        aria-label="Ask Mason — HVAC AI Assistant. Click to open; drag to move."
       >
         <div className="relative">
           <Zap className="w-5 h-5" />
           <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
         </div>
         <div className={`absolute ${tooltipSide} top-1/2 -translate-y-1/2 px-3 py-2 bg-slate-800/95 border border-slate-700 text-slate-200 text-xs font-medium rounded-xl opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none backdrop-blur-md shadow-xl`}>
-          <span className="font-bold text-amber-400">Mason</span> — AI HVAC Assistant
+          <span className="font-bold text-amber-400">Mason</span> — click to open · drag to move
           <div className={tooltipPointerSide} />
         </div>
       </button>
@@ -1946,8 +2100,8 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
 
   return (
     <div
-      style={capturing ? { opacity: 0, pointerEvents: 'none' } : undefined}
-      className={`fixed bottom-6 ${posClass} z-[60] w-[400px] max-h-[75vh] glass-panel rounded-2xl flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.6),0_0_20px_rgba(245,158,11,0.05)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/85 overflow-hidden animate-in zoom-in-95 fade-in duration-200`}
+      style={{ ...(panelFloatStyle ?? {}), ...(capturing ? { opacity: 0, pointerEvents: 'none' } : {}) }}
+      className={`fixed ${pos ? '' : anchorClass} z-[60] w-[min(400px,calc(100vw-2rem))] max-h-[75vh] glass-panel rounded-2xl flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.6),0_0_20px_rgba(245,158,11,0.05)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/85 overflow-hidden animate-in zoom-in-95 fade-in duration-200`}
     >
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-gradient-to-r from-slate-900/80 to-amber-950/20 flex-shrink-0">
@@ -1962,7 +2116,8 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
                 : context === 'manual-d' ? 'Manual D Assistant'
                 : context === 'manual-s' ? 'Manual S Assistant'
                 : context === 'aed' ? 'AED Analysis Assistant'
-                : 'CAD & HVAC Assistant'}
+                : context === 'cad' ? 'CAD & HVAC Assistant'
+                : 'Help & Feedback'}
             </p>
           </div>
           <span className="text-[8px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wider ml-1">Online</span>
@@ -2012,8 +2167,10 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
                   <>Hey, I'm <strong className="text-amber-400">Mason</strong>. I'll help you size ducts per Manual D — friction rates, critical paths, fitting lengths, velocity limits. Import your Manual J loads with <code className="text-amber-400">/import</code>. Tap a topic or ask.</>
                 ) : context === 'manual-s' ? (
                   <>Hey, I'm <strong className="text-amber-400">Mason</strong>. I'll help you select equipment per Manual S — the 115% cooling cap, sensible &amp; latent adequacy, heat-pump balance points and supplemental heat. Import your Manual J loads with <code className="text-amber-400">/import</code>. Tap a topic or ask.</>
-                ) : (
+                ) : context === 'cad' ? (
                   <>Hey, I'm <strong className="text-amber-400">Mason</strong> — your HVAC engineering assistant. I know every tool, shortcut, and feature in this platform inside and out. Ask me anything — drawing walls, 3D view, keyboard shortcuts, load calcs, duct sizing, you name it. Tap a topic below or just ask.</>
+                ) : (
+                  <>Hey, I'm <strong className="text-amber-400">Mason</strong> — your HVAC assistant, riding along on every screen. Ask me about any tool, calc, or workflow. And if something looks off anywhere in the app, hit the <strong className="text-amber-400">+</strong> up top — your report goes straight to the C4 Technologies team of experts. Tap a topic or just ask.</>
                 )}
               </div>
             </div>
@@ -2154,8 +2311,8 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
               <p className="text-sm font-bold text-emerald-400">Feedback Submitted</p>
               <p className="text-[10px] text-slate-500">
                 {feedbackRoutedTo.length > 0
-                  ? <>Sent to <span className="text-slate-400 font-mono">{feedbackRoutedTo.join(', ')}</span> — our team will review this.</>
-                  : <>Our team will review this shortly.</>
+                  ? <>Sent to <span className="text-slate-400 font-mono">{feedbackRoutedTo.join(', ')}</span> — the C4 Technologies team will review it.</>
+                  : <>The C4 Technologies team of experts will review it shortly.</>
                 }
               </p>
               <button onClick={() => { setShowFeedback(false); setFeedbackSubmitted(false); setFeedbackError(null); setFeedbackRoutedTo([]); }} className="text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 mx-auto mt-2">
@@ -2168,6 +2325,11 @@ export default function Mason({ context, position = 'bottom-right' }: MasonProps
                 <p className="text-xs font-bold text-slate-300">Submit Feedback</p>
                 <button onClick={() => { setShowFeedback(false); setFeedbackError(null); }} className="text-[10px] text-slate-500 hover:text-slate-300">Cancel</button>
               </div>
+
+              {/* Where it goes — the founder's promise: no black-hole queue. */}
+              <p className="text-[10px] text-slate-500 leading-relaxed">
+                Goes straight to the <span className="text-amber-400 font-semibold">C4 Technologies team of experts</span> — our founder and engineers read and triage every report.
+              </p>
 
               {/* Type selector */}
               <div className="flex gap-2">

@@ -14,7 +14,6 @@ import {
 } from '../engines/manualJToManualS';
 import type { WholeHouseResult, DesignConditions } from '../engines/manualJ';
 import { useProjectStore } from '../stores/useProjectStore';
-import Mason from '../components/Mason';
 import ProjectContextBar from '../components/ProjectContextBar';
 import ProjectGateDialog from '../components/ProjectGateDialog';
 import CatalogPickerModal from '../components/CatalogPickerModal';
@@ -839,8 +838,6 @@ export default function ManualSCalculator() {
         onExportPdf={exportPdf}
       />
 
-      {/* Mason AI Assistant */}
-      <Mason context="manual-s" position="bottom-left" />
     </div>
   );
 }

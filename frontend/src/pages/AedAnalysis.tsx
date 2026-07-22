@@ -5,7 +5,6 @@ import { type Exposure, roundForDisplay } from '../engines/manualJ';
 import { wallExposure } from '../engines/orientation';
 import ProjectContextBar from '../components/ProjectContextBar';
 import ProjectGateDialog from '../components/ProjectGateDialog';
-import Mason from '../components/Mason';
 import { useProjectStore } from '../stores/useProjectStore';
 import { useCadStore } from '../features/cad/store/useCadStore';
 import { toast } from '../stores/useToastStore';
@@ -543,8 +542,6 @@ export default function AedAnalysis() {
         )}
       </div>
 
-      {/* Mason — AI HVAC Assistant (AED context) */}
-      <Mason context="aed" />
     </div>
   );
 }
