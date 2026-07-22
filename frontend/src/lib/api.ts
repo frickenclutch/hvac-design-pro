@@ -1,5 +1,6 @@
 import { toast } from '../stores/useToastStore';
 import type { User, Organisation } from '../features/auth/store/useAuthStore';
+import type { NotificationPolicy } from '../stores/useNotificationStore';
 
 // API base URL — set VITE_API_BASE_URL in environment (Cloudflare Pages / .env.local)
 // When unset, API calls go to same origin (Pages functions or local dev proxy)
@@ -856,6 +857,28 @@ class ApiClient {
         canEditPolicy: boolean;
       };
     }>('/api/org/access-policy', {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    });
+  }
+
+  // ── Notification policy (per-tenant, admin-set) ─────────────────────────
+  // Each notification kind is forced_on / forced_off / user_choice. Any
+  // member may GET (to resolve their own delivery); only the tenant admin or
+  // L0 may PUT (server-gated). Stored in organisations.settings, like the
+  // access policy above.
+  async getNotificationPolicy() {
+    return this.request<{
+      policy: NotificationPolicy;
+      canEditPolicy: boolean;
+    }>('/api/org/notification-policy');
+  }
+
+  async setNotificationPolicy(patch: Partial<NotificationPolicy>) {
+    return this.request<{
+      policy: NotificationPolicy;
+      canEditPolicy: boolean;
+    }>('/api/org/notification-policy', {
       method: 'PUT',
       body: JSON.stringify(patch),
     });
