@@ -10,6 +10,11 @@ import {
   mergeAccessPolicyIntoSettings,
   capabilitiesFor,
 } from '../utils/accessPolicy';
+import {
+  resolveNotificationPolicy,
+  sanitizeNotificationPolicyPatch,
+  mergeNotificationPolicyIntoSettings,
+} from '../utils/notificationPolicy';
 
 interface Env {
   DB: D1Database;
@@ -243,6 +248,62 @@ orgRoutes.put('/access-policy', async (c) => {
     next,
   );
   return c.json({ policy: next, capabilities });
+});
+
+// ── GET /api/org/notification-policy ────────────────────────────────────────
+// Any member reads their org's notification policy so the client can resolve
+// which notification kinds are forced-on, forced-off, or left to the member.
+orgRoutes.get('/notification-policy', async (c) => {
+  const user = c.get('user');
+  const org = await c.env.DB.prepare(
+    `SELECT settings FROM organisations WHERE id = ?`
+  ).bind(user.orgId).first();
+  if (!org) return c.json({ error: 'Organisation not found' }, 404);
+
+  const policy = resolveNotificationPolicy(org.settings);
+  const canEditPolicy = user.role === 'admin' || !!user.isPlatformAdmin;
+  return c.json({ policy, canEditPolicy });
+});
+
+// ── PUT /api/org/notification-policy ────────────────────────────────────────
+// Tenant admin OR L0 sets the org's notification policy. Partial — only the
+// kinds present in the body change; others keep their current value. Other
+// settings JSON keys are preserved. Audited like the access policy.
+orgRoutes.put('/notification-policy', async (c) => {
+  const user = c.get('user');
+  if (user.role !== 'admin' && !user.isPlatformAdmin) {
+    return c.json({ error: 'Only the tenant admin or platform owner can change the notification policy' }, 403);
+  }
+
+  const body = await c.req.json().catch(() => ({}));
+  const patch = sanitizeNotificationPolicyPatch(body);
+  if (Object.keys(patch).length === 0) {
+    return c.json({ error: 'No valid policy fields. Expected { kind: mode } where kind ∈ calc|permit|team|community|security|system and mode ∈ user_choice|forced_on|forced_off.' }, 400);
+  }
+
+  const org = await c.env.DB.prepare(
+    `SELECT settings FROM organisations WHERE id = ?`
+  ).bind(user.orgId).first();
+  if (!org) return c.json({ error: 'Organisation not found' }, 404);
+
+  const before = resolveNotificationPolicy(org.settings);
+  const next = { ...before, ...patch };
+  const mergedSettings = mergeNotificationPolicyIntoSettings(org.settings, next);
+
+  await c.env.DB.prepare(
+    `UPDATE organisations SET settings = ? WHERE id = ?`
+  ).bind(mergedSettings, user.orgId).run();
+
+  setAudit(c, {
+    action: 'org.notification_policy.update',
+    entityType: 'organisation',
+    entityId: user.orgId,
+    beforeValue: before as unknown as Record<string, unknown>,
+    afterValue: next as unknown as Record<string, unknown>,
+    detail: { fieldsChanged: Object.keys(patch) },
+  });
+
+  return c.json({ policy: next, canEditPolicy: true });
 });
 
 // ── GET /api/org — get current user's org profile ───────────────────────────
