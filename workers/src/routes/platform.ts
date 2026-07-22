@@ -706,3 +706,141 @@ platformRoutes.get('/me', async (c) => {
     orgId: user.orgId,
   });
 });
+
+// ── Feedback inbox — the READ side of the Mason feedback loop ─────────────────
+// Users submit bug/idea/question from Mason (POST /api/feedback, org-scoped);
+// this surfaces those submissions cross-tenant for L0 triage. org_id is
+// intentionally UNSCOPED here — the acknowledged platform exception — so the
+// creator can see everything landing across the platform, screenshots and all.
+
+const FEEDBACK_TYPES = ['bug', 'suggestion', 'question'];
+const FEEDBACK_STATUSES = ['open', 'in_progress', 'resolved', 'closed'];
+
+/** Base64-encode an ArrayBuffer, chunked so a large buffer doesn't blow the
+ *  String.fromCharCode argument limit. (Mirrors the helper in feedback.ts.) */
+function feedbackBufToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+// GET /api/platform/feedback — filterable, cursor-paginated list + a queue tally.
+platformRoutes.get('/feedback', async (c) => {
+  const db = c.env.DB;
+  const type = c.req.query('type');
+  const status = c.req.query('status');
+  const limit = Math.min(Number(c.req.query('limit')) || 50, 200);
+  const cursor = c.req.query('cursor');
+
+  const where: string[] = [];
+  const binds: unknown[] = [];
+  if (type && FEEDBACK_TYPES.includes(type)) { where.push('f.type = ?'); binds.push(type); }
+  if (status && FEEDBACK_STATUSES.includes(status)) { where.push('f.status = ?'); binds.push(status); }
+  if (cursor) { where.push('f.created_at < ?'); binds.push(cursor); }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  const { results } = await db.prepare(
+    `SELECT f.id, f.type, f.status, f.text, f.context, f.user_agent, f.created_at,
+            f.org_id, o.name AS org_name,
+            u.first_name, u.last_name, u.email AS user_email, u.role AS user_role,
+            (SELECT COUNT(*) FROM feedback_attachments a WHERE a.feedback_id = f.id) AS attachment_count
+       FROM feedback f
+       JOIN users u ON u.id = f.user_id
+       JOIN organisations o ON o.id = f.org_id
+       ${whereSql}
+       ORDER BY f.created_at DESC
+       LIMIT ?`
+  ).bind(...binds, limit + 1).all();
+
+  const rows = results as Array<Record<string, unknown>>;
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  const nextCursor = hasMore ? (page[page.length - 1].created_at as string) : null;
+
+  const counts = await db.prepare(
+    `SELECT
+       COUNT(*) AS total,
+       SUM(CASE WHEN status IN ('open','in_progress') THEN 1 ELSE 0 END) AS open,
+       SUM(CASE WHEN type = 'bug' THEN 1 ELSE 0 END) AS bugs,
+       SUM(CASE WHEN type = 'suggestion' THEN 1 ELSE 0 END) AS ideas,
+       SUM(CASE WHEN type = 'question' THEN 1 ELSE 0 END) AS questions
+     FROM feedback`
+  ).first();
+
+  return c.json({ feedback: page, nextCursor, counts });
+});
+
+// GET /api/platform/feedback/:id — full record + attachments (images inlined
+// as data URLs so the reviewer sees the screenshot without a second fetch).
+platformRoutes.get('/feedback/:id', async (c) => {
+  const db = c.env.DB;
+  const id = c.req.param('id');
+
+  const feedback = await db.prepare(
+    `SELECT f.*, o.name AS org_name,
+            u.first_name, u.last_name, u.email AS user_email, u.role AS user_role
+       FROM feedback f
+       JOIN users u ON u.id = f.user_id
+       JOIN organisations o ON o.id = f.org_id
+      WHERE f.id = ?`
+  ).bind(id).first();
+  if (!feedback) return c.json({ error: 'Not found' }, 404);
+
+  const { results: attachRows } = await db.prepare(
+    `SELECT id, r2_key, filename, content_type, size_bytes
+       FROM feedback_attachments WHERE feedback_id = ?`
+  ).bind(id).all();
+
+  const MAX_INLINE = 6 * 1024 * 1024; // inline images up to 6 MB
+  const attachments: Array<Record<string, unknown>> = [];
+  for (const a of attachRows as Array<Record<string, unknown>>) {
+    const contentType = (a.content_type as string) || '';
+    const size = Number(a.size_bytes ?? 0);
+    let dataUrl: string | null = null;
+    if (contentType.startsWith('image/') && size > 0 && size <= MAX_INLINE) {
+      const obj = await c.env.STORAGE.get(a.r2_key as string);
+      if (obj) dataUrl = `data:${contentType};base64,${feedbackBufToBase64(await obj.arrayBuffer())}`;
+    }
+    attachments.push({
+      id: a.id, filename: a.filename, content_type: a.content_type,
+      size_bytes: a.size_bytes, dataUrl,
+    });
+  }
+
+  return c.json({ feedback, attachments });
+});
+
+// PATCH /api/platform/feedback/:id — triage: move the status. Audited.
+platformRoutes.patch('/feedback/:id', async (c) => {
+  const db = c.env.DB;
+  const id = c.req.param('id');
+  const body = await c.req.json().catch(() => ({})) as { status?: string };
+  const status = body.status;
+  if (!status || !FEEDBACK_STATUSES.includes(status)) {
+    return c.json({ error: 'Invalid status' }, 400);
+  }
+
+  const existing = await db.prepare(
+    'SELECT id, org_id, status, type, text FROM feedback WHERE id = ?'
+  ).bind(id).first();
+  if (!existing) return c.json({ error: 'Not found' }, 404);
+
+  await db.prepare('UPDATE feedback SET status = ? WHERE id = ?').bind(status, id).run();
+
+  setAudit(c, {
+    action: 'platform.feedback.status',
+    entityType: 'feedback',
+    entityId: id,
+    entityLabel: String(existing.text ?? '').slice(0, 80),
+    targetOrgId: existing.org_id as string,
+    isPlatformAction: true,
+    beforeValue: { status: existing.status },
+    afterValue: { status },
+  });
+
+  return c.json({ ok: true, status });
+});

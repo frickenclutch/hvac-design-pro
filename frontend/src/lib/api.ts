@@ -805,6 +805,50 @@ class ApiClient {
     );
   }
 
+  // ── Feedback inbox (L0) — read side of the Mason feedback loop ─────────────
+  async platformFeedback(params: { type?: string; status?: string; limit?: number; cursor?: string } = {}) {
+    const q = new URLSearchParams();
+    if (params.type) q.set('type', params.type);
+    if (params.status) q.set('status', params.status);
+    if (params.limit) q.set('limit', String(params.limit));
+    if (params.cursor) q.set('cursor', params.cursor);
+    const qs = q.toString();
+    return this.request<{
+      feedback: Array<{
+        id: string;
+        type: 'bug' | 'suggestion' | 'question';
+        status: 'open' | 'in_progress' | 'resolved' | 'closed';
+        text: string;
+        context: string | null;
+        user_agent: string | null;
+        created_at: string;
+        org_id: string;
+        org_name: string;
+        first_name: string | null;
+        last_name: string | null;
+        user_email: string;
+        user_role: string;
+        attachment_count: number;
+      }>;
+      nextCursor: string | null;
+      counts: { total: number; open: number; bugs: number; ideas: number; questions: number };
+    }>(`/api/platform/feedback${qs ? `?${qs}` : ''}`);
+  }
+
+  async platformFeedbackDetail(id: string) {
+    return this.request<{
+      feedback: Record<string, unknown>;
+      attachments: Array<{ id: string; filename: string; content_type: string | null; size_bytes: number | null; dataUrl: string | null }>;
+    }>(`/api/platform/feedback/${encodeURIComponent(id)}`);
+  }
+
+  async platformUpdateFeedback(id: string, status: string) {
+    return this.request<{ ok: true; status: string }>(
+      `/api/platform/feedback/${encodeURIComponent(id)}`,
+      { method: 'PATCH', body: JSON.stringify({ status }) },
+    );
+  }
+
   // ── L0 org impersonation ────────────────────────────────────────────────
   // Mints a 30-minute, access-only, READ-ONLY session scoped to the target
   // tenant. The auth store stashes the admin's real pair and swaps this
