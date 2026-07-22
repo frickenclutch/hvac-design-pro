@@ -25,6 +25,9 @@ export default function RetailerFinderPanel({ wholeHouse, conditions, onExportPd
   // (set by the calculator before opening) — we do NOT auto-request GPS.
   useEffect(() => {
     store.generateEstimate(wholeHouse, conditions);
+    // Load the org's real pricing (if any); loadPricing re-prices the estimate
+    // in place when active pricing exists.
+    void store.loadPricing();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -81,6 +84,20 @@ export default function RetailerFinderPanel({ wholeHouse, conditions, onExportPd
             </div>
           </section>
 
+          {/* ═══ No real pricing configured → how to get it ═══ */}
+          {store.pricingStatus && !store.pricingStatus.hasActivePricing && (
+            <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 px-4 py-3">
+              <p className="text-xs font-bold text-amber-300 mb-1 flex items-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" /> For real-world pricing from your chosen retailer
+              </p>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Have them configure integrations on their end. In the meantime, select your desired store
+                below — call, email, or visit them online. The numbers here are an industry-average budget
+                estimate, not a quote.
+              </p>
+            </div>
+          )}
+
           {/* ═══ Cost Estimate ═══ */}
           {estimate && (
             <section className="glass-panel rounded-2xl border border-slate-800/60 overflow-hidden">
@@ -92,6 +109,11 @@ export default function RetailerFinderPanel({ wholeHouse, conditions, onExportPd
                     Localized · {estimate.region.state}
                   </span>
                 )}
+                {estimate.hasRealPricing && (
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                    Your pricing
+                  </span>
+                )}
                 <span className="ml-auto text-xs text-slate-500">{estimate.tonnage} Ton</span>
               </div>
 
@@ -99,7 +121,12 @@ export default function RetailerFinderPanel({ wholeHouse, conditions, onExportPd
                 {estimate.lineItems.map((li, i) => (
                   <div key={i} className="px-4 py-2.5 flex items-center justify-between">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-slate-200 truncate">{li.description}</p>
+                      <p className="text-sm text-slate-200 flex items-center gap-1.5">
+                        <span className="truncate">{li.description}</span>
+                        {li.sourced && (
+                          <span title="Priced from your organisation’s configured pricing" className="shrink-0 text-[9px] font-bold uppercase tracking-wide text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-1 rounded">real</span>
+                        )}
+                      </p>
                       <p className="text-xs text-slate-500">
                         {li.quantity > 1 ? `${li.quantity} × $${li.unitCost.toLocaleString()}` : categoryLabel(li.category)}
                       </p>
