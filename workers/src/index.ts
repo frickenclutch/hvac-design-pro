@@ -8,6 +8,7 @@ import { uploadRoutes } from './routes/uploads';
 import { cadRoutes } from './routes/cad';
 import { orgRoutes } from './routes/org';
 import { userRoutes, avatarPublicRoutes } from './routes/users';
+import { pricingRoutes } from './routes/pricing';
 import { feedbackRoutes } from './routes/feedback';
 import { platformRoutes } from './routes/platform';
 import { forumRoutes } from './routes/forum';
@@ -116,6 +117,9 @@ app.use('/api/*', async (c, next) => {
   await next();
 });
 app.route('/api/org', orgRoutes);
+// Admin-configured per-org real pricing (CSV live; webhook/api registered).
+// Reads (/status, /items) open to any member; writes admin-gated. Org-scoped.
+app.route('/api/pricing', pricingRoutes);
 // Self-service avatar upload/remove (own account only). Authed. The public
 // read counterpart is /avatars above (an <img> can't send a bearer).
 app.route('/api/users', userRoutes);

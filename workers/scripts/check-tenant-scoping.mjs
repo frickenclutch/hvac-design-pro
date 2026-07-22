@@ -75,6 +75,12 @@ const STRICT_TABLES = [
   'invoices',
   // ── Product/inventory catalog (migration 0013, routes/catalog.ts) ─────────
   'catalog_products',
+  // ── Pricing engine (migration 0020, routes/pricing.ts) ────────────────────
+  // Both org-owned (org_id NOT NULL + indexed). Every pricing.ts query carries
+  // `AND org_id = ?` bound to c.get('user').orgId (the /items join also scopes
+  // pricing_sources by the same org_id). Admin-gated writes, member reads.
+  'pricing_sources',
+  'pricing_items',
 ];
 
 /**
