@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Send, Zap, Thermometer, Wind, Calculator, Phone, Command, MessageSquarePlus, Camera, Check, ArrowLeft, Paperclip, Trash2, AlertTriangle } from 'lucide-react';
+import { Send, Zap, Thermometer, Wind, Calculator, Phone, Command, MessageSquarePlus, Camera, Check, ArrowLeft, Paperclip, Trash2, AlertTriangle, ChevronDown, GripVertical, Fan } from 'lucide-react';
 import { useProjectStore } from '../stores/useProjectStore';
 import { useCadStore } from '../features/cad/store/useCadStore';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
@@ -12,13 +12,12 @@ import FeedbackAnnotator from './FeedbackAnnotator';
 // Named after the masons who've built the world's buildings, brick by brick.
 // Unified across CAD workspace and Manual J Calculator.
 
-// ── Free-drag tuning ─────────────────────────────────────────────────────────
-/** Min px Mason keeps from any viewport edge when dragged free. */
+// ── Drag tuning ──────────────────────────────────────────────────────────────
+/** Min px Mason keeps from any viewport edge when dragged. */
 const MASON_EDGE_MARGIN = 12;
-/** Pointer travel (px) past which a press becomes a drag, not a click-to-open. */
+/** Pointer travel (px) past which an orb press becomes a drag, not a click. */
 const MASON_DRAG_THRESHOLD = 8;
-/** Touch/pen hold (ms) that "picks Mason up" for dragging — long enough that a
- *  quick tap still opens him and a scroll-y swipe doesn't move him. */
+/** Touch/pen hold (ms) that "picks the orb up" — long enough a tap still opens. */
 const MASON_LONGPRESS_MS = 350;
 
 // ── Context mode determines which knowledge is prioritized ─────────────────────
@@ -812,7 +811,7 @@ All values are presets that you can override — the room type just gives you a 
     contexts: ['manualj', 'manual-d', 'manual-s', 'aed', 'cad', 'general'],
     answer: `**Submit Feedback** directly from Mason!
 
-I ride along on **every screen**, so a bug report is always one tap away — no matter where in the app something goes sideways. Grab and drag me to whichever corner or spot suits you (I stay put).
+I ride along on **every screen** — look for my little fan orb. Open me, and a bug report is always one tap away, no matter where in the app something goes sideways. Drag the orb (or the open panel's header) anywhere you like — I stay put.
 
 Click the **+** button in my header to open the feedback form.
 
@@ -832,7 +831,7 @@ Supports images, videos, PDFs, docs, and text files (up to 5 files, 10MB each).
 
 Submissions go **straight to the C4 Technologies team of experts** — our founder and engineers — and are tracked in our system. You always have a direct line to support from anywhere in the app.
 
-**Tip:** put me wherever you like — **grab and drag me** anywhere on the page (click-drag, or long-press then drag on touch), or pick a corner in **Settings → Mason Assistant** or during first-time setup.`,
+**Tip:** put me wherever you like — **drag my fan orb** (or the open panel's header) anywhere on screen. Double-click the panel header to re-center, and click the orb to reopen.`,
   },
 
   // ── Session Persistence ─────────────────────────────────────────────────────
@@ -1773,65 +1772,106 @@ interface MasonProps {
 }
 
 export default function Mason({ context }: MasonProps) {
-  // Screen corner is a user preference, applied platform-wide — Mason is
-  // mounted once globally (App.tsx), so this is the single source of truth
-  // for where he docks. Pick it during setup or in Settings → Mason Assistant.
-  const masonPlacement = usePreferencesStore((s) => s.masonPlacement);
-  // Free-drag override: null → docked to the corner; {x,y} → dragged loose.
+  // Mason's free position = the OPEN panel's top-left. null → docked at the
+  // default bottom-center spot. Dragging the panel header moves it anywhere;
+  // the minimize chevron tucks him to a bottom-edge arrow tab. Single source of
+  // truth (Mason is mounted once globally in App.tsx).
   const masonPos = usePreferencesStore((s) => s.masonPos);
   const updatePrefs = usePreferencesStore((s) => s.update);
   const [isOpen, setIsOpen] = useState(false);
 
-  // ── Grab-and-drag: move Mason anywhere on the page ─────────────────────────
-  // Pointer-type aware so a plain tap/click still OPENS him:
-  //   • mouse → grab and drag (engages once you move past a small threshold)
-  //   • touch/pen → long-press (~350 ms) to pick up, then drag
-  // Local `pos` tracks the live drag; the pref is only written on drop.
+  // Live drag position (persisted to the pref only on drop).
   const [pos, setPos] = useState<ToolboxPosition | null>(masonPos);
-  const [carrying, setCarrying] = useState(false);
   const posRef = useRef<ToolboxPosition | null>(masonPos);
+  const draggingRef = useRef(false);
+  const dragStartRef = useRef({ mx: 0, my: 0, ox: 0, oy: 0 });
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Re-sync when the pref changes elsewhere.
+  useEffect(() => { posRef.current = masonPos; setPos(masonPos); }, [masonPos]);
+
+  // Orb (collapsed) drag: click-vs-drag disambiguation so a plain tap still
+  // OPENS him — mouse drags past a small threshold; touch/pen long-presses
+  // (~350 ms) to pick up. A real drag suppresses the trailing open-click.
+  const [carrying, setCarrying] = useState(false);
   const movedRef = useRef(false);
   const armedRef = useRef(false);
   const suppressClickRef = useRef(false);
   const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dragStartRef = useRef({ mx: 0, my: 0, ox: 0, oy: 0 });
-
-  // Re-sync when the pref changes elsewhere (e.g. Settings "dock to corner").
-  useEffect(() => { posRef.current = masonPos; setPos(masonPos); }, [masonPos]);
-  // Never leak the long-press timer if Mason unmounts mid-press.
   useEffect(() => () => { if (longPressRef.current) clearTimeout(longPressRef.current); }, []);
 
-  const beginLauncherDrag = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
-    if (e.pointerType === 'mouse' && e.button !== 0) return; // left button only
+  // Drag the OPEN panel by its header — the CAD FloorSelector idiom. A
+  // pointerdown on the header (but not on its buttons) pops the panel off its
+  // dock; it follows the cursor, clamped to the viewport, and the spot persists
+  // on drop. Pointer events cover mouse + touch alike.
+  const onHeaderDragStart = useCallback((e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).closest('button, a, input, textarea, select')) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    const rect = panelRef.current?.getBoundingClientRect();
+    const origin = posRef.current ?? (rect ? { x: Math.round(rect.left), y: Math.round(rect.top) } : { x: MASON_EDGE_MARGIN, y: MASON_EDGE_MARGIN });
+    if (!posRef.current) { posRef.current = origin; setPos(origin); }
+    dragStartRef.current = { mx: e.clientX, my: e.clientY, ox: origin.x, oy: origin.y };
+    draggingRef.current = true;
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* capture unsupported */ }
+
+    const onMove = (me: PointerEvent) => {
+      if (!draggingRef.current) return;
+      const box = panelRef.current?.getBoundingClientRect();
+      const w = box?.width ?? 400;
+      const h = box?.height ?? 480;
+      const maxX = Math.max(MASON_EDGE_MARGIN, window.innerWidth - w - MASON_EDGE_MARGIN);
+      const maxY = Math.max(MASON_EDGE_MARGIN, window.innerHeight - h - MASON_EDGE_MARGIN);
+      const next = {
+        x: Math.round(Math.max(MASON_EDGE_MARGIN, Math.min(maxX, dragStartRef.current.ox + (me.clientX - dragStartRef.current.mx)))),
+        y: Math.round(Math.max(MASON_EDGE_MARGIN, Math.min(maxY, dragStartRef.current.oy + (me.clientY - dragStartRef.current.my)))),
+      };
+      posRef.current = next;
+      setPos(next);
+    };
+
+    const onUp = () => {
+      draggingRef.current = false;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      if (posRef.current) updatePrefs({ masonPos: posRef.current });
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, [updatePrefs]);
+
+  // Double-click the panel header to re-center him (bottom-right dock).
+  const resetPosition = useCallback(() => {
+    posRef.current = null;
+    setPos(null);
+    updatePrefs({ masonPos: null });
+  }, [updatePrefs]);
+
+  const beginOrbDrag = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
     const el = e.currentTarget;
     const rect = el.getBoundingClientRect();
     const origin = posRef.current ?? { x: Math.round(rect.left), y: Math.round(rect.top) };
     dragStartRef.current = { mx: e.clientX, my: e.clientY, ox: origin.x, oy: origin.y };
     movedRef.current = false;
     const touch = e.pointerType === 'touch' || e.pointerType === 'pen';
-    armedRef.current = !touch; // mouse arms now; touch waits for the long-press
+    armedRef.current = !touch;
     try { el.setPointerCapture(e.pointerId); } catch { /* capture unsupported */ }
-
     if (touch) {
       longPressRef.current = setTimeout(() => {
         armedRef.current = true;
         setCarrying(true);
-        // Re-seed origin from where he actually sits (pos may have been null).
         const r = el.getBoundingClientRect();
         dragStartRef.current.ox = posRef.current?.x ?? Math.round(r.left);
         dragStartRef.current.oy = posRef.current?.y ?? Math.round(r.top);
       }, MASON_LONGPRESS_MS);
     }
-
     const onMove = (me: PointerEvent) => {
       const dx = me.clientX - dragStartRef.current.mx;
       const dy = me.clientY - dragStartRef.current.my;
       if (!armedRef.current) {
-        // Touch, pre-arm: real movement means it's a swipe, not a hold → cancel.
-        if (Math.hypot(dx, dy) > 10 && longPressRef.current) {
-          clearTimeout(longPressRef.current);
-          longPressRef.current = null;
-        }
+        if (Math.hypot(dx, dy) > 10 && longPressRef.current) { clearTimeout(longPressRef.current); longPressRef.current = null; }
         return;
       }
       if (!movedRef.current && Math.hypot(dx, dy) < MASON_DRAG_THRESHOLD) return;
@@ -1847,7 +1887,6 @@ export default function Mason({ context }: MasonProps) {
       posRef.current = next;
       setPos(next);
     };
-
     const onUp = () => {
       if (longPressRef.current) { clearTimeout(longPressRef.current); longPressRef.current = null; }
       window.removeEventListener('pointermove', onMove);
@@ -1855,22 +1894,20 @@ export default function Mason({ context }: MasonProps) {
       setCarrying(false);
       armedRef.current = false;
       if (movedRef.current) {
-        // A real drag happened — persist, and swallow the trailing click so it
-        // doesn't also open him. Cleared next tick in case no click fires.
         suppressClickRef.current = true;
         updatePrefs({ masonPos: posRef.current });
         setTimeout(() => { suppressClickRef.current = false; }, 0);
       }
     };
-
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
   }, [updatePrefs]);
 
-  const onLauncherClick = useCallback((e: React.MouseEvent) => {
+  const onOrbClick = useCallback((e: React.MouseEvent) => {
     if (suppressClickRef.current) { e.preventDefault(); e.stopPropagation(); return; }
     setIsOpen(true);
   }, []);
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [activeCalc, setActiveCalc] = useState<string | null>(null);
@@ -2045,67 +2082,54 @@ export default function Mason({ context }: MasonProps) {
     setActiveCalc(null);
   };
 
-  // Anchor Mason to the user's chosen corner. Mobile nudges keep him clear of
-  // fixed chrome: top placements clear the mobile top bar (~57px); bottom-right
-  // clears the mobile Spotlight FAB (which lives at bottom-6 right-6).
-  const isLeft = masonPlacement.endsWith('left');
-  const isTop = masonPlacement.startsWith('top');
-  const hClass = isLeft ? 'left-6' : 'right-6';
-  const vClass = isTop
-    ? 'top-20 md:top-6'
-    : isLeft
-    ? 'bottom-6'
-    : 'bottom-24 md:bottom-6';
-  const anchorClass = `${vClass} ${hClass}`;
-
-  // Floating override (dragged loose). Clamp into view at render so a resize
-  // or a stale pref can never strand him off-screen.
+  // ── Position: bottom-right dock by default, free-floating once dragged ─────
+  const PANEL_W = Math.min(400, window.innerWidth - 32);
   const clampIntoView = (p: ToolboxPosition, w: number, h: number): { left: number; top: number } => ({
     left: Math.round(Math.max(MASON_EDGE_MARGIN, Math.min(p.x, window.innerWidth - w - MASON_EDGE_MARGIN))),
     top: Math.round(Math.max(MASON_EDGE_MARGIN, Math.min(p.y, window.innerHeight - h - MASON_EDGE_MARGIN))),
   });
-  const launcherStyle = pos ? clampIntoView(pos, 56, 56) : undefined;
-  const panelFloatStyle = pos
-    ? clampIntoView(pos, Math.min(400, window.innerWidth - 32), Math.min(window.innerHeight * 0.75, 560))
+  // Collapsed fan orb: inline pos when dragged, else bottom-right (nudged up on
+  // mobile to clear the Spotlight FAB at bottom-6 right-6).
+  const orbStyle = pos ? clampIntoView(pos, 48, 48) : undefined;
+  const orbPosClass = pos ? '' : 'bottom-24 right-6 md:bottom-6';
+  // Open panel: inline pos when dragged, else bottom-right.
+  const panelStyleBase: React.CSSProperties | undefined = pos
+    ? clampIntoView(pos, PANEL_W, Math.min(window.innerHeight * 0.75, 560))
     : undefined;
-
-  // Tooltip + panel expand toward the roomier side: the dock corner when
-  // docked, the screen half he's in when floating.
-  const sideLeft = pos ? pos.x < window.innerWidth / 2 : isLeft;
-  const tooltipSide = sideLeft ? 'left-full ml-3' : 'right-full mr-3';
-  const tooltipPointerSide = sideLeft
-    ? 'absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-2 bg-slate-800/90 border-l border-b border-slate-700 rotate-45'
-    : 'absolute top-1/2 -right-1 -translate-y-1/2 w-2 h-2 bg-slate-800/90 border-r border-t border-slate-700 rotate-45';
+  const panelPosClass = pos ? '' : 'bottom-6 right-6';
 
   if (!isOpen) {
+    // Collapsed: a small moveable floating fan orb — drag to move, click to open.
     return (
       <button
-        onPointerDown={beginLauncherDrag}
-        onClick={onLauncherClick}
-        style={launcherStyle}
-        className={`fixed ${pos ? '' : anchorClass} z-[60] p-3.5 rounded-2xl glass-panel border backdrop-blur-xl bg-slate-900/80 text-amber-400 hover:text-amber-300 hover:bg-slate-800/80 touch-none select-none cursor-grab active:cursor-grabbing transition-[transform,background-color,border-color,color,box-shadow] shadow-[0_0_30px_rgba(0,0,0,0.5),0_0_15px_rgba(245,158,11,0.1)] group ${carrying ? 'scale-110 border-amber-500/60 ring-2 ring-amber-400/50 shadow-[0_0_45px_rgba(245,158,11,0.35)]' : 'border-amber-500/20 hover:border-amber-500/40'}`}
-        aria-label="Ask Mason — HVAC AI Assistant. Click to open; drag to move."
+        onPointerDown={beginOrbDrag}
+        onClick={onOrbClick}
+        style={orbStyle}
+        className={`fixed ${orbPosClass} z-[60] w-12 h-12 rounded-full flex items-center justify-center glass-panel border backdrop-blur-xl bg-slate-900/85 text-amber-400 hover:text-amber-300 touch-none select-none cursor-grab active:cursor-grabbing transition-[transform,box-shadow,border-color] shadow-[0_6px_24px_rgba(0,0,0,0.5),0_0_18px_rgba(245,158,11,0.15)] group ${carrying ? 'scale-110 border-amber-500/60 ring-2 ring-amber-400/50 shadow-[0_0_42px_rgba(245,158,11,0.4)]' : 'border-amber-500/30 hover:border-amber-500/50'}`}
+        aria-label="Open Mason — HVAC AI assistant and feedback. Drag to move."
+        title="Mason — click to open · drag to move"
       >
-        <div className="relative">
-          <Zap className="w-5 h-5" />
-          <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
-        </div>
-        <div className={`absolute ${tooltipSide} top-1/2 -translate-y-1/2 px-3 py-2 bg-slate-800/95 border border-slate-700 text-slate-200 text-xs font-medium rounded-xl opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none backdrop-blur-md shadow-xl`}>
-          <span className="font-bold text-amber-400">Mason</span> — click to open · drag to move
-          <div className={tooltipPointerSide} />
-        </div>
+        <Fan className="w-5 h-5 animate-[spin_4s_linear_infinite] motion-reduce:animate-none" />
+        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-400 rounded-full animate-pulse motion-reduce:animate-none" />
       </button>
     );
   }
 
   return (
     <div
-      style={{ ...(panelFloatStyle ?? {}), ...(capturing ? { opacity: 0, pointerEvents: 'none' } : {}) }}
-      className={`fixed ${pos ? '' : anchorClass} z-[60] w-[min(400px,calc(100vw-2rem))] max-h-[75vh] glass-panel rounded-2xl flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.6),0_0_20px_rgba(245,158,11,0.05)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/85 overflow-hidden animate-in zoom-in-95 fade-in duration-200`}
+      ref={panelRef}
+      style={{ ...panelStyleBase, ...(capturing ? { opacity: 0, pointerEvents: 'none' } : {}) }}
+      className={`fixed ${panelPosClass} z-[60] w-[min(400px,calc(100vw-2rem))] max-h-[75vh] glass-panel rounded-2xl flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.6),0_0_20px_rgba(245,158,11,0.05)] border border-slate-700/50 backdrop-blur-xl bg-slate-900/85 overflow-hidden animate-in zoom-in-95 fade-in duration-200`}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-gradient-to-r from-slate-900/80 to-amber-950/20 flex-shrink-0">
-        <div className="flex items-center gap-2.5">
+      {/* Header — drag handle: grab to move anywhere, double-click to re-dock */}
+      <div
+        onPointerDown={onHeaderDragStart}
+        onDoubleClick={resetPosition}
+        className="flex items-center justify-between p-4 border-b border-slate-800 bg-gradient-to-r from-slate-900/80 to-amber-950/20 flex-shrink-0 cursor-grab active:cursor-grabbing select-none touch-none"
+        title="Drag to move · double-click to re-dock"
+      >
+        <div className="flex items-center gap-2">
+          <GripVertical className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
           <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
             <Zap className="w-4 h-4 text-amber-400" />
           </div>
@@ -2122,7 +2146,7 @@ export default function Mason({ context }: MasonProps) {
           </div>
           <span className="text-[8px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wider ml-1">Online</span>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 cursor-auto">
           <button
             onClick={() => { setShowFeedback(!showFeedback); setFeedbackSubmitted(false); }}
             className={`p-1.5 rounded-lg transition-colors ${showFeedback ? 'text-amber-400 bg-amber-500/10' : 'text-slate-500 hover:text-amber-400 hover:bg-amber-500/10'}`}
@@ -2143,8 +2167,10 @@ export default function Mason({ context }: MasonProps) {
           <button
             onClick={() => setIsOpen(false)}
             className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+            title="Minimize to bottom"
+            aria-label="Minimize Mason to the bottom of the screen"
           >
-            <X className="w-4 h-4" />
+            <ChevronDown className="w-4 h-4" />
           </button>
         </div>
       </div>

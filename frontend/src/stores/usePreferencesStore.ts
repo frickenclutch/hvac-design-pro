@@ -13,12 +13,6 @@ export type MetalFinish = 'steel' | 'aluminum' | 'brass' | 'bronze' | 'galvanize
  *  'legacy'   — production default, per-room aggregated math (`engines/manualJ.ts`).
  *  'manualJ8' — cert-grade Form J1 whole-house engine. Beta — opt-in. */
 export type EngineVersion = 'legacy' | 'manualJ8';
-/** Where Mason — the always-present AI assistant AND feedback front door —
- *  docks on screen. The user picks the corner (during initial setup, or
- *  Settings → Mason Assistant); Mason then rides in that corner across every
- *  workspace, so a help/bug-report route is always one tap away. The four
- *  corners mirror `firmStampPosition` so the placement vocabulary is uniform. */
-export type MasonPlacement = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 
 export interface ToolboxPosition {
   x: number;   // px from left edge of viewport
@@ -56,14 +50,10 @@ export interface UserPreferences {
   accent: AccentColor;
   /** Finish for the Creation Portal + portal-styled Settings surfaces. */
   metalFinish: MetalFinish;
-  /** Which screen corner Mason (AI assistant + one-tap feedback launcher)
-   *  docks in, platform-wide. See {@link MasonPlacement}. */
-  masonPlacement: MasonPlacement;
-  /** Free-floating override for Mason's dock. `null` → snapped to the
-   *  {@link MasonPlacement} corner. A set `{x,y}` → the user has grabbed and
-   *  dragged him to an explicit viewport position (persisted so he stays put).
-   *  Picking a corner (Settings / setup) clears this back to `null`. Mirrors
-   *  the CAD panels' `propertiesPos`/`layersPos` float pattern. */
+  /** Mason's free-floating position (the assistant panel's top-left). `null` →
+   *  docked at the default bottom-center spot; a set `{x,y}` → the user dragged
+   *  him there (persisted so he stays put). "Reset position" in Settings clears
+   *  it. Mirrors the CAD panels' `propertiesPos`/`layersPos` float pattern. */
   masonPos: ToolboxPosition | null;
   /** Titles of Settings sections the user has collapsed (persisted so the
    *  workbench stays how they left it). */
@@ -184,7 +174,6 @@ const defaults: UserPreferences = {
   units: 'imperial',
   accent: 'emerald',
   metalFinish: 'steel',
-  masonPlacement: 'bottom-right',
   masonPos: null,
   settingsCollapsed: [],
   settingsLastCategory: '',
