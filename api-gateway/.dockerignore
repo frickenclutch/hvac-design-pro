@@ -1,7 +1,0 @@
-vendor/
-bin/
-dist/
-.env
-.git
-.DS_Store
-*.log

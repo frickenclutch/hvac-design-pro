@@ -1,3 +1,0 @@
-package ws
-
-// Client placeholder

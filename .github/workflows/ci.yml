@@ -1,30 +1,16 @@
 name: CI — Type + Cert Gate
 
-# WHY THIS EXISTS (separate from deploy.yml):
-#   deploy.yml's `test` job runs Python pytest against calc-service —
-#   but calc-service is NOT what ships. The live, production,
-#   shadow-running engine is the TypeScript `manualJ8-ts-1.3.0`, and
-#   its vitest suite (318 cases across 20 files, incl. the
-#   Smith/Walker/Cobb cert cases within 0.5% ACCA tolerance) plus both
-#   tsc checks were gated NOWHERE. A tired session
-#   could ship accuracy drift straight onto permit-binding documents
-#   with nothing red-flagging it.
+# Sole CI gate for the Cloudflare-native stack that ships:
+#   - workers/  : tsc --noEmit (Cloudflare Worker — the API)
+#               + tenant-scoping guard (D1 has no RLS — every org-owned
+#                 query must be org_id-scoped; see
+#                 workers/scripts/check-tenant-scoping.mjs)
+#               + vitest integration tests (tenant isolation)
+#   - frontend/ : tsc -b + vitest run (app + cert-grade manualJ8 engine)
 #
-#   This workflow gates exactly the artifacts that ship:
-#     - workers/  : tsc --noEmit (Cloudflare Worker — the API)
-#                 + tenant-scoping guard (D1 has no RLS — this is the
-#                   machine check that every org-owned query is org_id-scoped;
-#                   see workers/scripts/check-tenant-scoping.mjs)
-#     - frontend/ : tsc -b + vitest run (the app + the cert engine)
-#
-#   It deliberately does NOT deploy. Frontend auto-deploys via
-#   Cloudflare Pages from main; the Worker deploys via manual
-#   `wrangler deploy` after review. Auto-deploy from CI is itself a
-#   drift risk and is intentionally out of scope. This is a GATE,
-#   not a pipeline.
-#
-#   Runs on push to main (Nathan pushes directly to trunk) and on PRs
-#   to main. Any red job fails the check.
+# Does NOT deploy. Frontend auto-deploys via Cloudflare Pages from main;
+# the Worker deploys via manual `wrangler deploy` after review.
+# Runs on push/PR to main. Any red job fails the check.
 
 on:
   push:
@@ -114,6 +100,6 @@ jobs:
       - name: Type-check frontend
         working-directory: frontend
         run: npx tsc -b
-      - name: Cert + unit vitest (43/43, ACCA 0.5% tolerance)
+      - name: Cert + unit vitest (ACCA 0.5% tolerance)
         working-directory: frontend
         run: npx vitest run
