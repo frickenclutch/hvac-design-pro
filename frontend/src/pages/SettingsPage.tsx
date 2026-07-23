@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { usePreferencesStore, preferenceDefaults, type ThemeMode, type UIDensity, type UnitSystem, type EngineVersion, type MetalFinish, type UserPreferences } from '../stores/usePreferencesStore';
-import { Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle, Pencil, HardDrive, ChevronDown, Search, X, ArrowUpDown, GripVertical, Minus, Plus, ListFilter, Tag, Webhook, Zap, Bell } from 'lucide-react';
+import { Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle, Pencil, HardDrive, ChevronDown, Search, X, ArrowUpDown, GripVertical, Minus, Plus, ListFilter, Tag, Webhook, Bell } from 'lucide-react';
 import { api, type PricingSourceRow } from '../lib/api';
 import A11yPanel from '../components/accessibility/A11yPanel';
 import TotpQr from '../components/TotpQr';
@@ -260,27 +260,6 @@ function AppearanceSection() {
       <SwitchOption label="Tooltips" description="Show helpful tooltips on hover" checked={prefs.showTooltips} onChange={(v) => prefs.update({ showTooltips: v })} />
       <div className="pt-4 border-t border-slate-800/60">
         <MetalFinishPicker />
-      </div>
-    </Section>
-  );
-}
-
-function MasonSection() {
-  return (
-    <Section icon={<Zap className="w-5 h-5 text-amber-400" />} title="Mason Assistant">
-      <p className="text-xs text-slate-500 mb-4 leading-relaxed">
-        Mason is your built-in HVAC assistant and the fastest way to send a bug report or idea. He rides along on
-        every screen so help is always one tap away — reports go{' '}
-        <span className="text-slate-300 font-semibold">straight to the C4 Technologies team of experts</span>, who
-        read and triage every one.
-      </p>
-      <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 space-y-2">
-        <p className="text-xs text-slate-400 font-semibold">Finding &amp; moving Mason</p>
-        <ul className="text-[11px] text-slate-500 leading-relaxed space-y-1 list-disc pl-4">
-          <li>He rests as a small <span className="text-slate-400 font-semibold">fan orb</span> — grab and drag it anywhere on screen.</li>
-          <li><span className="text-slate-400 font-semibold">Click</span> the orb to open him; drag the open panel by its header, or minimize it back to the orb.</li>
-          <li>Double-click the panel header to re-center him.</li>
-        </ul>
       </div>
     </Section>
   );
@@ -547,9 +526,6 @@ function buildSettingsCategories(ctx: RegistryCtx): SettingsCategoryEntry[] {
     ] },
     { id: 'appearance', title: 'Appearance', icon: <Palette className="w-4 h-4" />, sections: [
       { id: 'appearance', title: 'Appearance', icon: <Palette className="w-5 h-5 text-violet-400" />, keywords: ['theme', 'dark', 'light', 'midnight', 'density', 'metal', 'finish', 'animation', 'tooltip', 'color'], visible: true, prefKeys: ['theme', 'density', 'animationsEnabled', 'showTooltips', 'metalFinish'], node: <AppearanceSection /> },
-    ] },
-    { id: 'assistant', title: 'Mason Assistant', icon: <Zap className="w-4 h-4" />, sections: [
-      { id: 'mason', title: 'Mason Assistant', icon: <Zap className="w-5 h-5 text-amber-400" />, keywords: ['mason', 'assistant', 'ai', 'help', 'feedback', 'bug', 'report', 'support', 'placement', 'position', 'corner', 'chat'], visible: true, prefKeys: ['masonPos'], node: <MasonSection /> },
     ] },
     { id: 'notifications', title: 'Notifications', icon: <Bell className="w-4 h-4" />, sections: [
       { id: 'notification-preferences', title: 'Notification Preferences', icon: <Bell className="w-5 h-5 text-cyan-400" />, keywords: ['notification', 'notifications', 'alerts', 'bell', 'mute', 'do not disturb', 'dnd', 'calc', 'permit', 'team', 'community', 'security', 'system'], visible: !!ctx.user, node: <NotificationPreferencesSection /> },
