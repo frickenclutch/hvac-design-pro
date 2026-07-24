@@ -43,7 +43,8 @@ import type { MasonContext } from './components/Mason';
 import { useAuthStore } from './features/auth/store/useAuthStore';
 import { usePreferencesStore } from './stores/usePreferencesStore';
 import { useAccessPolicyStore } from './stores/useAccessPolicyStore';
-import { notify, useNotificationStore } from './stores/useNotificationStore';
+import { useNotificationStore } from './stores/useNotificationStore';
+import { toast } from './stores/useToastStore';
 import NotificationCenter from './components/NotificationCenter';
 import SpotlightSearch, { SpotlightTrigger } from './features/spotlight/SpotlightSearch';
 import SkipLinks from './components/accessibility/SkipLinks';
@@ -75,9 +76,10 @@ function AppLayout() {
   useEffect(() => {
     if (isAuthenticated) {
       void refreshAccessPolicy();
-      // Pull the org's notification policy so client-side delivery resolution
-      // reflects what the tenant admin has forced on/off. (The store also
-      // refetches on a user-id change; this covers the already-signed-in boot.)
+      // Pull the server-side inbox and the org's notification policy. (The
+      // store also refetches on a user-id change; this covers the
+      // already-signed-in boot.)
+      void useNotificationStore.getState().hydrate();
       void useNotificationStore.getState().refreshOrgPolicy();
     } else {
       resetAccessPolicy();
@@ -123,12 +125,16 @@ function AppLayout() {
         await refreshAccessPolicy();
         const after = snapshot();
         if (after !== before) {
-          // Durable + transient: records a security notification (bell) AND
-          // flashes the same message as a toast for immediacy.
-          notify.security('Your access level was updated — the workspace has adjusted to your current role.', {
-            severity: 'info',
-          });
+          // Transient only. The DURABLE record for a role change is now written
+          // by the Worker that made the change (org.ts → notifyUser), so raising
+          // one here too would double it — and a client-raised notification no
+          // longer survives the next hydrate anyway. The toast's job is the one
+          // the server can't do: explain why the UI just moved under you.
+          toast.info('Your access level was updated — the workspace has adjusted to your current role.');
         }
+        // Pick up anything the server raised while we were away. Rides the
+        // existing heartbeat rather than adding a second timer.
+        void useNotificationStore.getState().hydrate();
       } catch {
         /* failure-safe: stores keep last-good state; try again next tick */
       } finally {

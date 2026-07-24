@@ -1,10 +1,33 @@
 import { toast } from '../stores/useToastStore';
 import type { User, Organisation } from '../features/auth/store/useAuthStore';
-import type { NotificationPolicy } from '../stores/useNotificationStore';
+import type {
+  NotificationPolicy,
+  NotificationKind,
+  NotificationSeverity,
+} from '../stores/useNotificationStore';
 
 // API base URL — set VITE_API_BASE_URL in environment (Cloudflare Pages / .env.local)
 // When unset, API calls go to same origin (Pages functions or local dev proxy)
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+
+/**
+ * A notification as the server sends it. Deliberately close to the store's
+ * `AppNotification` — `read` is already a boolean and `createdAt` already epoch
+ * ms — so the inbox needs no translation layer, only validation at the trust
+ * boundary (see hydrateFromServer in useNotificationStore).
+ */
+export interface ServerNotification {
+  id: string;
+  kind: NotificationKind;
+  severity: NotificationSeverity;
+  title: string;
+  body?: string;
+  href?: string;
+  entityType?: string;
+  entityId?: string;
+  read: boolean;
+  createdAt: number;
+}
 
 // ── Audit log types — exported so pages and tabs can share them ──────────
 export interface AuditEvent {
@@ -879,6 +902,61 @@ class ApiClient {
       policy: NotificationPolicy;
       canEditPolicy: boolean;
     }>('/api/org/notification-policy', {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    });
+  }
+
+  // ── Notification inbox (the caller's own) ───────────────────────────────
+  // Server-backed as of migration 0021. Every endpoint is scoped to the
+  // session user server-side — there are no ids to pass and no way to read
+  // another member's inbox. Mutations are batched (one request per user
+  // gesture) so read-state churn doesn't flood the audit log.
+  async getNotifications(limit?: number) {
+    const qs = limit ? `?limit=${encodeURIComponent(limit)}` : '';
+    return this.request<{
+      notifications: ServerNotification[];
+      unread: number;
+    }>(`/api/notifications${qs}`);
+  }
+
+  /** Mark specific notifications read, or all of them. */
+  async markNotificationsRead(target: { ids: string[] } | { all: true }) {
+    return this.request<{ updated: number }>('/api/notifications/read', {
+      method: 'POST',
+      body: JSON.stringify(target),
+    });
+  }
+
+  async dismissNotification(id: string) {
+    return this.request<{ dismissed: number }>(
+      `/api/notifications/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  async clearNotifications() {
+    return this.request<{ cleared: number }>('/api/notifications', {
+      method: 'DELETE',
+    });
+  }
+
+  /** The member's own per-kind opt-ins, plus the org policy constraining them
+   *  and the resolved effective delivery for each kind. */
+  async getNotificationPreferences() {
+    return this.request<{
+      prefs: Record<NotificationKind, boolean>;
+      policy: NotificationPolicy;
+      effective: Record<NotificationKind, boolean>;
+    }>('/api/notifications/preferences');
+  }
+
+  async setNotificationPreferences(patch: Partial<Record<NotificationKind, boolean>>) {
+    return this.request<{
+      prefs: Record<NotificationKind, boolean>;
+      policy: NotificationPolicy;
+      effective: Record<NotificationKind, boolean>;
+    }>('/api/notifications/preferences', {
       method: 'PUT',
       body: JSON.stringify(patch),
     });

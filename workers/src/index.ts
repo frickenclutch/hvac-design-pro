@@ -17,8 +17,10 @@ import { auditRoutes } from './routes/audit';
 import { billingRoutes } from './routes/billing';
 import { webhookRoutes } from './routes/webhooks';
 import { aiRoutes } from './routes/ai';
+import { notificationRoutes } from './routes/notifications';
 import { authMiddleware } from './middleware/auth';
 import { auditMiddleware } from './middleware/audit';
+import { sweepNotificationRetention } from './utils/notifications';
 
 export interface Env {
   DB: D1Database;
@@ -132,6 +134,7 @@ app.route('/api/feedback', feedbackRoutes);
 app.route('/api/platform', platformRoutes);
 app.route('/api/forum', forumRoutes);
 app.route('/api/permits', permitRoutes);
+app.route('/api/notifications', notificationRoutes);
 app.route('/api/audit-log', auditRoutes);
 app.route('/api/billing', billingRoutes);
 app.route('/api/ai', aiRoutes);
@@ -226,6 +229,20 @@ export default {
           }
         } catch (e) {
           console.error('[cron] sweepExpiredPermits failed:', e);
+        }
+
+        // Notification retention. Kept off the emission path so raising a
+        // notification stays a single INSERT — the trim is housekeeping, and
+        // housekeeping belongs on the clock, not in a permit approval's
+        // critical path. Isolated in its own try so a failure here can never
+        // affect the permit sweep above.
+        try {
+          const { deleted } = await sweepNotificationRetention(env.DB);
+          if (deleted > 0) {
+            console.log(`[cron] trimmed ${deleted} notification(s)`);
+          }
+        } catch (e) {
+          console.error('[cron] sweepNotificationRetention failed:', e);
         }
       })(),
     );
