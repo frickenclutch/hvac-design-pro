@@ -63,7 +63,8 @@ function App() {
 }
 
 function AppLayout() {
-  const { isAuthenticated, organisation, logout, restoreSession } = useAuthStore();
+  const { isAuthenticated, organisation, user, logout, restoreSession } = useAuthStore();
+  const isPlatformAdmin = !!user?.isPlatformAdmin;
 
   // Validate persisted session on mount
   useEffect(() => { restoreSession(); }, [restoreSession]);
@@ -383,6 +384,14 @@ function AppLayout() {
           <Route path="/audit-log" element={isAuthenticated ? <AuditLogPage /> : <Navigate to="/" />} />
           <Route path="/cad" element={isAuthenticated ? <CadWorkspace /> : <Navigate to="/" />} />
           <Route path="/project/:id/cad" element={isAuthenticated ? <CadWorkspace /> : <Navigate to="/" />} />
+
+          {/* Read-only cross-tenant CAD viewer (L0). The backend platform read
+              endpoints are the real gate; this just avoids rendering the shell
+              for non-admins. Opened from the audit-log "Open project" flow. */}
+          <Route
+            path="/platform/project/:id/cad"
+            element={isAuthenticated && isPlatformAdmin ? <CadWorkspace platformView /> : <Navigate to="/dashboard" />}
+          />
 
           {/* Platform admin (L0). Hard-gated again inside the page. */}
           <Route path="/admin" element={isAuthenticated ? <AdminPage /> : <Navigate to="/" />} />
