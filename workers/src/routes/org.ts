@@ -15,6 +15,7 @@ import {
   sanitizeNotificationPolicyPatch,
   mergeNotificationPolicyIntoSettings,
 } from '../utils/notificationPolicy';
+import { notifyUser } from '../utils/notifications';
 
 interface Env {
   DB: D1Database;
@@ -1047,6 +1048,25 @@ orgRoutes.patch('/users/:id', async (c) => {
     afterValue: { role },
     detail: { selfDemotion: targetId === user.id },
   });
+
+  // The affected member learns their access changed, durably. The frontend has
+  // raised a `security` toast for this since the notification system shipped,
+  // but only for whoever happened to be looking at the app when their own role
+  // flipped — which is nobody, because the person who changes your role is
+  // someone else. Skipped on self-demotion: the admin just did it themselves.
+  if (targetId !== user.id) {
+    await notifyUser(c.env.DB, targetId, {
+      orgId: user.orgId,
+      kind: 'security',
+      severity: 'warning',
+      title: `Your access level is now "${role}"`,
+      body: `An administrator changed your role from "${target?.role ?? 'unknown'}" to "${role}". Your available actions have changed accordingly.`,
+      href: '/settings',
+      entityType: 'user',
+      entityId: targetId,
+      actorUserId: user.id,
+    });
+  }
 
   return c.json({ ok: true, role });
 });

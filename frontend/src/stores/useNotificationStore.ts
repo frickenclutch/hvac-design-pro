@@ -1,8 +1,7 @@
 import { create } from 'zustand';
 import { scopedKey } from '../utils/storage';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
-import { toast, type ToastType } from './useToastStore';
-import { api } from '../lib/api';
+import { api, type ServerNotification } from '../lib/api';
 
 /**
  * ── Notification scheme ───────────────────────────────────────────────────────
@@ -12,23 +11,39 @@ import { api } from '../lib/api';
  * they survive reloads, badge the header/sidebar bell, and deep-link you to the
  * thing that needs attention.
  *
- * Two levels of control decide what a member actually receives:
- *  1. Org policy (the tenant admin ultimately decides): per kind, forced_on /
- *     forced_off / user_choice. Server-backed (organisations.settings) and
- *     admin-gated — see workers/utils/notificationPolicy + Settings.
- *  2. Member preference: for every `user_choice` kind, the member's own
- *     Settings toggle. Per-user, local.
- * The two combine in `resolveDelivery` — forced modes win, otherwise the
- * member decides. A kind that resolves to "off" is never even recorded.
+ * ── Where notifications come from (changed 2026-07-23) ───────────────────────
+ * The SERVER raises them. Workers handlers call `notifyUser` / `notifyOrg`
+ * (workers/src/utils/notifications.ts) at the same points they call `setAudit`,
+ * and rows land in the `notifications` table (migration 0021).
  *
- * The `enabled` master switch (the bell quick-toggle) is a separate, lighter
- * control: pure DND. It never drops anything — muting only silences the toast
- * ping and the pending swirl; the item is still recorded and badged.
+ * They used to be raised in the browser, which quietly capped what the feature
+ * could ever be: a notification could only describe something that happened in
+ * front of the very person being notified. The events actually worth alerting
+ * on are the ones you AREN'T watching — an authority approving your permit, an
+ * admin changing your role, a teammate accepting an invite. None of those could
+ * reach you, on any transport. That is why there is deliberately NO client-side
+ * `notify.*` API any more: a call to one would look like it worked, then vanish
+ * on the next hydrate. If something should notify, emit it from the Worker.
  *
- * Design mirrors the platform's idioms: Zustand hydrated from localStorage on
- * creation, per-USER scoped persistence (scopedKey), a `notify.*` convenience
- * API mirroring `toast.*`, and an org-policy cache refreshed from the server on
- * auth (mirroring useAccessPolicyStore).
+ * ── This store's job ─────────────────────────────────────────────────────────
+ * It is a CACHE over the server's inbox, not the source of truth.
+ *  - `hydrate()` pulls the authoritative list; localStorage holds the last-good
+ *    copy so the bell still renders offline and on a cold boot before the fetch
+ *    lands.
+ *  - Mutations apply locally first, then sync. A failed sync never rolls the UI
+ *    back or clears state (offline-first PWA, CLAUDE.md §4.5) — the next
+ *    hydrate reconciles against the server.
+ *
+ * ── The two controls ─────────────────────────────────────────────────────────
+ *  1. Which kinds you RECEIVE — org policy (forced_on/forced_off/user_choice,
+ *     admin-set) combined with the member's per-kind preference. Both now live
+ *     server-side and are resolved at emission time by `resolveDelivery`, so a
+ *     suppressed kind is never written at all. `userPrefs` here is a mirror of
+ *     the server's copy, kept so Settings renders instantly.
+ *  2. Whether alerts INTERRUPT you — the `enabled` master switch (DND). This
+ *     one stays deliberately device-local: "don't ping me on this machine right
+ *     now" is a property of where you're sitting, not of your account. It never
+ *     drops anything; it only silences the bell's pending animation.
  */
 
 export type NotificationKind =
@@ -51,22 +66,12 @@ export interface AppNotification {
   severity: NotificationSeverity;
   title: string;
   body?: string;
-  /** In-app route (react-router path) to act on this notification. */
+  /** In-app route (react-router path) to act on this notification. The server
+   *  rejects anything that isn't a relative path, so this can never become an
+   *  off-site redirect. */
   href?: string;
   read: boolean;
   createdAt: number; // epoch ms
-}
-
-/** Fields a caller supplies when raising a notification. */
-export interface NotifyInput {
-  kind: NotificationKind;
-  title: string;
-  body?: string;
-  href?: string;
-  severity?: NotificationSeverity;
-  /** Also flash a transient toast for immediacy (default true). Ignored while
-   *  alerts are muted. */
-  toast?: boolean;
 }
 
 /** Ordered kind metadata — drives the Settings per-kind rows (label + blurb)
@@ -81,6 +86,8 @@ export const NOTIFICATION_KIND_META: { kind: NotificationKind; label: string; de
 ];
 
 const ALL_KINDS: NotificationKind[] = NOTIFICATION_KIND_META.map((m) => m.kind);
+const KIND_SET = new Set<string>(ALL_KINDS);
+const SEVERITIES = new Set<string>(['info', 'success', 'warning', 'critical']);
 
 const DEFAULT_POLICY: NotificationPolicy = {
   calc: 'user_choice', permit: 'user_choice', team: 'user_choice',
@@ -95,7 +102,9 @@ function defaultUserPrefs(): Record<NotificationKind, boolean> {
 /**
  * The single source of truth for "does this member receive this kind?".
  * Forced modes override the member; otherwise the member's toggle decides.
- * Pure + exported so it can be unit-tested in isolation.
+ * Pure + exported so it can be unit-tested in isolation. Mirrored verbatim in
+ * workers/src/utils/notifications.ts, where it is now actually enforced — this
+ * copy drives the Settings lock states.
  */
 export function resolveDelivery(mode: PolicyMode, userPref: boolean): boolean {
   if (mode === 'forced_off') return false;
@@ -105,25 +114,25 @@ export function resolveDelivery(mode: PolicyMode, userPref: boolean): boolean {
 
 interface NotificationState {
   notifications: AppNotification[];
-  /** Master alerts switch — the header/sidebar quick-enable (DND). true = on. */
+  /** Master alerts switch — the header/sidebar quick-enable (DND). Device-local. */
   enabled: boolean;
-  /** Member's per-kind preferences (consulted only for user_choice kinds). */
+  /** Member's per-kind preferences, mirrored from the server. */
   userPrefs: Record<NotificationKind, boolean>;
   /** Org-wide policy from the server (admin-set). Defaults to all user_choice. */
   orgPolicy: NotificationPolicy;
-  /** True once the org policy has been fetched at least once this session. */
-  orgPolicyLoaded: boolean;
+  /** True once the server inbox has been fetched at least once this session. */
+  hydrated: boolean;
 
-  push: (input: NotifyInput) => void;
+  /** Pull the authoritative inbox + preferences. Safe to call often; coalesces. */
+  hydrate: () => Promise<void>;
   markRead: (id: string) => void;
   markAllRead: () => void;
   dismiss: (id: string) => void;
   clearAll: () => void;
-  clearRead: () => void;
   setEnabled: (value: boolean) => void;
   toggleEnabled: () => void;
   setUserPref: (kind: NotificationKind, on: boolean) => void;
-  /** Fetch (or refetch) the org policy for the current session. Coalesces. */
+  /** Refresh the org policy + member prefs (one request). */
   refreshOrgPolicy: () => Promise<void>;
 }
 
@@ -131,20 +140,40 @@ const LIST_KEY = 'hvac_notifications';
 const ENABLED_KEY = 'hvac_notifications_enabled';
 const PREFS_KEY = 'hvac_notifications_prefs';
 const POLICY_CACHE_KEY = 'hvac_notifications_orgpolicy';
-const WELCOMED_KEY = 'hvac_notifications_welcomed';
 
-/** Hard cap on retained notifications — bounds localStorage footprint. */
-const MAX_NOTIFICATIONS = 50;
+/** Bounds the localStorage cache. The server enforces its own retention. */
+const MAX_CACHED = 50;
 
-const severityToToast: Record<NotificationSeverity, ToastType> = {
-  info: 'info',
-  success: 'success',
-  warning: 'warning',
-  critical: 'error',
-};
+// ── Cache (localStorage) ─────────────────────────────────────────────────────
 
-function makeId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+/** Narrow an untrusted cached/served row into an AppNotification, or null.
+ *  Applied to BOTH the localStorage cache and the API response — a cached blob
+ *  is as untrusted as a network one, and a bad row must never crash the bell.
+ *  Exported for unit test; not part of the store's public surface. */
+export function coerceNotification(raw: unknown): AppNotification | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const n = raw as Record<string, unknown>;
+  if (typeof n.id !== 'string' || typeof n.title !== 'string') return null;
+  if (typeof n.kind !== 'string' || !KIND_SET.has(n.kind)) return null;
+  if (typeof n.createdAt !== 'number' || !Number.isFinite(n.createdAt)) return null;
+  const severity = typeof n.severity === 'string' && SEVERITIES.has(n.severity)
+    ? n.severity as NotificationSeverity
+    : 'info';
+  // Relative paths only — belt-and-braces against a poisoned cache, since the
+  // server already rejects absolute hrefs on the way in.
+  const href = typeof n.href === 'string' && n.href.startsWith('/') && !n.href.startsWith('//')
+    ? n.href
+    : undefined;
+  return {
+    id: n.id,
+    kind: n.kind as NotificationKind,
+    severity,
+    title: n.title,
+    body: typeof n.body === 'string' ? n.body : undefined,
+    href,
+    read: n.read === true,
+    createdAt: n.createdAt,
+  };
 }
 
 function loadList(): AppNotification[] {
@@ -154,9 +183,9 @@ function loadList(): AppNotification[] {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed
-      .filter((n): n is AppNotification =>
-        n && typeof n.id === 'string' && typeof n.title === 'string' && typeof n.createdAt === 'number')
-      .slice(0, MAX_NOTIFICATIONS);
+      .map(coerceNotification)
+      .filter((n): n is AppNotification => n !== null)
+      .slice(0, MAX_CACHED);
   } catch {
     return [];
   }
@@ -198,7 +227,9 @@ function loadPolicyCache(): NotificationPolicy {
 }
 
 function persistList(list: AppNotification[]): void {
-  try { localStorage.setItem(scopedKey(LIST_KEY), JSON.stringify(list)); } catch { /* quota */ }
+  try {
+    localStorage.setItem(scopedKey(LIST_KEY), JSON.stringify(list.slice(0, MAX_CACHED)));
+  } catch { /* quota */ }
 }
 function persistEnabled(enabled: boolean): void {
   try { localStorage.setItem(scopedKey(ENABLED_KEY), enabled ? '1' : '0'); } catch { /* best-effort */ }
@@ -210,105 +241,91 @@ function persistPolicyCache(policy: NotificationPolicy): void {
   try { localStorage.setItem(scopedKey(POLICY_CACHE_KEY), JSON.stringify(policy)); } catch { /* best-effort */ }
 }
 
-/**
- * One-time-per-user welcome so the panel isn't a blank void on first open and
- * the pending bell state is demonstrated. A genuine system message describing
- * the feature — not fabricated activity. Seeded directly (bypasses delivery
- * resolution) since it runs at init before the org policy has loaded.
- */
-function maybeSeedWelcome(existing: AppNotification[]): AppNotification[] {
-  try {
-    if (localStorage.getItem(scopedKey(WELCOMED_KEY)) === '1') return existing;
-    if (scopedKey(WELCOMED_KEY) === WELCOMED_KEY) return existing; // guest — skip
-    localStorage.setItem(scopedKey(WELCOMED_KEY), '1');
-    const welcome: AppNotification = {
-      id: makeId(),
-      kind: 'system',
-      severity: 'info',
-      title: 'Notifications are on',
-      body: "You'll be alerted here when access changes, and as calculation, permit, and team activity lands. Choose which kinds you get in Settings → Notifications; your organization may require some.",
-      read: false,
-      createdAt: Date.now(),
-    };
-    return [welcome, ...existing].slice(0, MAX_NOTIFICATIONS);
-  } catch {
-    return existing;
-  }
+/** Signed in? Guests have no inbox and no org — skip every network call. */
+function isSignedIn(): boolean {
+  return !!useAuthStore.getState().user;
 }
 
+let hydrateInFlight: Promise<void> | null = null;
 let policyInFlight: Promise<void> | null = null;
 
 export const useNotificationStore = create<NotificationState>((set, get) => ({
-  notifications: maybeSeedWelcome(loadList()),
+  notifications: loadList(),
   enabled: loadEnabled(),
   userPrefs: loadUserPrefs(),
   orgPolicy: loadPolicyCache(),
-  orgPolicyLoaded: false,
+  hydrated: false,
 
-  push: (input) => {
-    // Delivery gate: org policy + member preference decide whether this kind is
-    // recorded at all. Forced-off or opted-out kinds are dropped silently.
-    const mode = get().orgPolicy[input.kind] ?? 'user_choice';
-    const pref = get().userPrefs[input.kind] ?? true;
-    if (!resolveDelivery(mode, pref)) return;
-
-    const notification: AppNotification = {
-      id: makeId(),
-      kind: input.kind,
-      severity: input.severity ?? 'info',
-      title: input.title,
-      body: input.body,
-      href: input.href,
-      read: false,
-      createdAt: Date.now(),
-    };
-
-    set((s) => {
-      const next = [notification, ...s.notifications].slice(0, MAX_NOTIFICATIONS);
-      persistList(next);
-      return { notifications: next };
-    });
-
-    // Muted (DND) → record silently. Otherwise flash a transient toast unless
-    // the caller opted out, so the user gets both the ping and the durable row.
-    if (get().enabled && input.toast !== false) {
-      toast[severityToToast[notification.severity]](notification.title);
-    }
+  hydrate: async () => {
+    if (hydrateInFlight) return hydrateInFlight;
+    if (!isSignedIn()) return;
+    hydrateInFlight = (async () => {
+      try {
+        const res = await api.getNotifications();
+        const list = (res.notifications ?? [])
+          .map((n: ServerNotification) => coerceNotification(n))
+          .filter((n): n is AppNotification => n !== null);
+        persistList(list);
+        set({ notifications: list, hydrated: true });
+      } catch {
+        // Offline / transient failure: keep the cached list exactly as it is.
+        // Clearing here would make the bell lie about having nothing pending.
+        set({ hydrated: true });
+      } finally {
+        hydrateInFlight = null;
+      }
+    })();
+    return hydrateInFlight;
   },
 
-  markRead: (id) =>
+  // ── Mutations: apply locally, then sync. The local write is what the user
+  //    sees, so it must not wait on the network; the server call is the durable
+  //    half and a failure is reconciled by the next hydrate.
+  markRead: (id) => {
+    const target = get().notifications.find((n) => n.id === id);
+    if (!target || target.read) return;
     set((s) => {
       const next = s.notifications.map((n) => (n.id === id ? { ...n, read: true } : n));
       persistList(next);
       return { notifications: next };
-    }),
+    });
+    if (isSignedIn()) {
+      void api.markNotificationsRead({ ids: [id] }).catch(() => { /* next hydrate reconciles */ });
+    }
+  },
 
-  markAllRead: () =>
+  markAllRead: () => {
+    if (!get().notifications.some((n) => !n.read)) return;
     set((s) => {
       const next = s.notifications.map((n) => (n.read ? n : { ...n, read: true }));
       persistList(next);
       return { notifications: next };
-    }),
+    });
+    if (isSignedIn()) {
+      void api.markNotificationsRead({ all: true }).catch(() => { /* next hydrate reconciles */ });
+    }
+  },
 
-  dismiss: (id) =>
+  dismiss: (id) => {
     set((s) => {
       const next = s.notifications.filter((n) => n.id !== id);
       persistList(next);
       return { notifications: next };
-    }),
+    });
+    if (isSignedIn()) {
+      void api.dismissNotification(id).catch(() => { /* next hydrate reconciles */ });
+    }
+  },
 
-  clearAll: () =>
+  clearAll: () => {
     set(() => {
       persistList([]);
       return { notifications: [] };
-    }),
-
-  clearRead: () =>
-    set((s) => {
-      const next = s.notifications.filter((n) => !n.read);
-      persistList(next);
-      return { notifications: next };
-    }),
+    });
+    if (isSignedIn()) {
+      void api.clearNotifications().catch(() => { /* next hydrate reconciles */ });
+    }
+  },
 
   setEnabled: (value) =>
     set(() => {
@@ -323,31 +340,41 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       return { enabled };
     }),
 
-  setUserPref: (kind, on) =>
+  setUserPref: (kind, on) => {
     set((s) => {
       const userPrefs = { ...s.userPrefs, [kind]: on };
       persistUserPrefs(userPrefs);
       return { userPrefs };
-    }),
+    });
+    // The server is the enforcement point now — a preference that only lived
+    // here would be ignored at emission time.
+    if (isSignedIn()) {
+      void api.setNotificationPreferences({ [kind]: on }).catch(() => { /* retried on next refresh */ });
+    }
+  },
 
   refreshOrgPolicy: async () => {
     if (policyInFlight) return policyInFlight;
-    // Only fetch for a real signed-in user; guests have no org.
-    if (!useAuthStore.getState().user) return;
+    if (!isSignedIn()) return;
     policyInFlight = (async () => {
       try {
-        const res = await api.getNotificationPolicy();
+        // One request returns both halves of the delivery decision.
+        const res = await api.getNotificationPreferences();
         const policy = { ...DEFAULT_POLICY };
         for (const k of ALL_KINDS) {
           const v = res.policy?.[k];
           if (v === 'user_choice' || v === 'forced_on' || v === 'forced_off') policy[k] = v;
         }
+        const prefs = defaultUserPrefs();
+        for (const k of ALL_KINDS) {
+          if (typeof res.prefs?.[k] === 'boolean') prefs[k] = res.prefs[k];
+        }
         persistPolicyCache(policy);
-        set({ orgPolicy: policy, orgPolicyLoaded: true });
+        persistUserPrefs(prefs);
+        set({ orgPolicy: policy, userPrefs: prefs });
       } catch {
         // Keep last-good cache; the server still governs — a failed fetch just
-        // means the client resolves against the previously cached policy.
-        set({ orgPolicyLoaded: true });
+        // means Settings renders against the previously cached policy.
       } finally {
         policyInFlight = null;
       }
@@ -361,53 +388,31 @@ export const selectUnreadCount = (s: NotificationState): number =>
   s.notifications.reduce((acc, n) => (n.read ? acc : acc + 1), 0);
 
 // ── Re-hydrate on user change ────────────────────────────────────────────────
-// Notifications + preferences are per-user; the org policy is per-org. When the
-// signed-in user changes without a full reload (logout→login, impersonation,
-// account transfer), swap every per-user slice to the new scope and refetch the
-// new org's policy — so nothing leaks across sessions.
+// The inbox and preferences are per-user. When the signed-in user changes
+// without a full reload (logout→login, impersonation, account transfer), swap
+// every per-user slice to the new scope and refetch — so one member's inbox is
+// never visible to the next.
 let lastUserId: string | null = useAuthStore.getState().user?.id ?? null;
 useAuthStore.subscribe((state) => {
   const uid = state.user?.id ?? null;
   if (uid === lastUserId) return;
   lastUserId = uid;
+  hydrateInFlight = null;
   policyInFlight = null;
   if (!uid) {
     useNotificationStore.setState({
       notifications: [], enabled: true, userPrefs: defaultUserPrefs(),
-      orgPolicy: { ...DEFAULT_POLICY }, orgPolicyLoaded: false,
+      orgPolicy: { ...DEFAULT_POLICY }, hydrated: false,
     });
     return;
   }
   useNotificationStore.setState({
-    notifications: maybeSeedWelcome(loadList()),
+    notifications: loadList(),
     enabled: loadEnabled(),
     userPrefs: loadUserPrefs(),
     orgPolicy: loadPolicyCache(),
-    orgPolicyLoaded: false,
+    hydrated: false,
   });
+  void useNotificationStore.getState().hydrate();
   void useNotificationStore.getState().refreshOrgPolicy();
 });
-
-// ── Standalone convenience API (callable from non-React code) ─────────────────
-type NotifyOpts = Omit<NotifyInput, 'kind' | 'title'>;
-
-function raise(kind: NotificationKind, defaultSeverity: NotificationSeverity) {
-  return (title: string, opts: NotifyOpts = {}) =>
-    useNotificationStore.getState().push({ kind, title, severity: defaultSeverity, ...opts });
-}
-
-export const notify = {
-  calc: raise('calc', 'success'),
-  permit: raise('permit', 'info'),
-  team: raise('team', 'info'),
-  community: raise('community', 'info'),
-  security: raise('security', 'warning'),
-  system: raise('system', 'info'),
-  /** Escape hatch for a fully-specified notification. */
-  push: (input: NotifyInput) => useNotificationStore.getState().push(input),
-};
-
-// Expose on window for manual testing in dev console (parallels window.__toast).
-if (typeof window !== 'undefined') {
-  (window as unknown as { __notify?: typeof notify }).__notify = notify;
-}

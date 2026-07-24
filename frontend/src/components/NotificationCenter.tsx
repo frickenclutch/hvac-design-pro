@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import {
   Thermometer, ShieldCheck, Users, Globe, ShieldAlert, Info,
-  Check, X, Trash2, BellOff,
+  Check, X, Trash2,
 } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 import {
@@ -63,6 +63,7 @@ export default function NotificationCenter({
   const dismiss = useNotificationStore((s) => s.dismiss);
   const clearAll = useNotificationStore((s) => s.clearAll);
   const toggleEnabled = useNotificationStore((s) => s.toggleEnabled);
+  const hydrate = useNotificationStore((s) => s.hydrate);
 
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -100,6 +101,12 @@ export default function NotificationCenter({
     if (top < 8) top = 8;
     setPos((p) => ({ ...p, top }));
   }, [open, dropUp, notifications.length]);
+
+  // Opening the panel is the strongest "show me what's current" signal there
+  // is — cheaper and more responsive than shortening the background poll.
+  useEffect(() => {
+    if (open) void hydrate();
+  }, [open, hydrate]);
 
   // Close on outside click
   useEffect(() => {
@@ -180,6 +187,10 @@ export default function NotificationCenter({
       {!collapsed && (
         <>
           <span className="font-medium text-sm flex-1 text-left">Notifications</span>
+          {/* The row's right slot means exactly one thing: the unread count. Mute
+              is carried solely by the bell's own slash — the one signal present in
+              every variant (compact, collapsed, expanded, panel header). A second
+              struck-through bell here said it twice. */}
           {unread > 0 && (
             <span
               className={`min-w-[18px] h-[18px] px-1.5 rounded-full text-[10px] font-bold leading-none flex items-center justify-center ${
@@ -189,7 +200,6 @@ export default function NotificationCenter({
               {badgeText}
             </span>
           )}
-          {!enabled && unread === 0 && <BellOff className="w-3.5 h-3.5 text-slate-600" />}
         </>
       )}
     </button>
@@ -250,10 +260,13 @@ export default function NotificationCenter({
 
           {/* Muted banner */}
           {!enabled && (
-            <div className="px-4 py-2 bg-slate-800/40 border-b border-slate-800/70 flex items-center gap-2 flex-shrink-0">
-              <BellOff className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+            <div className="px-4 py-2 bg-slate-800/40 border-b border-slate-800/70 flex-shrink-0">
+              {/* No bell icon here — the header bell's slash and the OFF toggle
+                  directly above already carry the state. This banner exists for
+                  the one thing they can't say: what muting actually does. */}
               <p className="text-[11px] text-slate-400">
-                Alerts are muted. New activity is collected quietly — nothing pings until you switch alerts on.
+                Alerts are muted on this device. New activity still arrives and is listed here — the bell just
+                won&apos;t animate for it. Choose which kinds you receive in Settings → Notifications.
               </p>
             </div>
           )}

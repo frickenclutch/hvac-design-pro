@@ -19,6 +19,7 @@
 import { Hono } from 'hono';
 import type { AuthUser } from '../middleware/auth';
 import { setAudit } from '../middleware/audit';
+import { notifyUser, notifyOrg, type NotificationSeverity } from '../utils/notifications';
 
 interface Env { DB: D1Database; }
 
@@ -32,7 +33,8 @@ async function isParty(
   db: D1Database, submissionId: string, user: AuthUser,
 ): Promise<{ party: 'submitter' | 'authority' | null; row: Record<string, unknown> | null }> {
   const row = await db.prepare(
-    `SELECT id, submitter_org_id, authority_org_id, project_id, status
+    `SELECT id, submitter_org_id, authority_org_id, project_id, status,
+            submitter_user_id, permit_number
      FROM permit_submissions WHERE id = ?`,
   ).bind(submissionId).first();
   if (!row) return { party: null, row: null };
@@ -72,6 +74,55 @@ async function recordTransition(
     args.reason ?? null,
     args.automated ? 1 : 0,
   ).run();
+}
+
+/**
+ * Tell the submitter their permit moved.
+ *
+ * This is the event the notification system was built for: a decision made by
+ * someone in ANOTHER tenant, at a time the submitter isn't watching. Before
+ * server-side emission existed it could not reach them on any channel — the
+ * only way to learn a permit was approved was to open the app and look.
+ *
+ * Addressed to the submitting USER, not fanned out to their whole org: they are
+ * the accountable party and a broadcast would make every decision noise for
+ * everyone. If that user has since been deactivated the notification would fall
+ * on the floor, so it falls back to the org's admins — the permit still needs an
+ * owner even when the person who filed it has left.
+ *
+ * `orgId` is always the submission row's `submitter_org_id` (server data), never
+ * anything the caller supplied — the emitter re-verifies the recipient belongs
+ * to it before writing.
+ */
+async function notifySubmitter(
+  db: D1Database,
+  row: Record<string, unknown>,
+  ev: { title: string; body?: string; severity: NotificationSeverity; actorUserId: string },
+): Promise<void> {
+  const orgId = row.submitter_org_id as string;
+  const submitterUserId = row.submitter_user_id as string | null;
+  const payload = {
+    orgId,
+    kind: 'permit' as const,
+    severity: ev.severity,
+    title: ev.title,
+    body: ev.body,
+    href: '/permits',
+    entityType: 'permit_submission',
+    entityId: row.id as string,
+    actorUserId: ev.actorUserId,
+  };
+
+  const result = submitterUserId
+    ? await notifyUser(db, submitterUserId, payload)
+    : 'no_recipient';
+
+  // Fall back ONLY when there is no one to tell. A `suppressed` result means the
+  // submitter deliberately muted permit alerts — honour that; escalating to
+  // their admins would route around the preference they just set.
+  if (result === 'no_recipient') {
+    await notifyOrg(db, payload, { roles: ['admin'] });
+  }
 }
 
 /** Status sets used by lifecycle gates. `active` = the permit is currently
@@ -398,6 +449,22 @@ permitRoutes.patch('/submissions/:id', async (c) => {
       afterValue: { status: 'withdrawn' },
     });
 
+    // The one notification that travels the other way: the authority has this
+    // sitting in their queue and should stop reviewing it. Fanned out to the
+    // authority org rather than addressed to one reviewer — a submission may
+    // not be claimed yet, so there is no individual to name.
+    await notifyOrg(c.env.DB, {
+      orgId: row.authority_org_id as string,
+      kind: 'permit',
+      severity: 'info',
+      title: 'A permit submission was withdrawn',
+      body: 'The submitter withdrew this submission. No further review is needed.',
+      href: '/permits',
+      entityType: 'permit_submission',
+      entityId: id,
+      actorUserId: user.id,
+    });
+
     return c.json({ ok: true, status: 'withdrawn' });
   }
 
@@ -520,6 +587,33 @@ permitRoutes.patch('/submissions/:id', async (c) => {
       },
     });
 
+    const decisionCopy: Record<string, { title: string; body?: string; severity: NotificationSeverity }> = {
+      claim: {
+        title: 'Your permit submission is under review',
+        body: 'An authority reviewer has claimed your submission and started their review.',
+        severity: 'info',
+      },
+      approve: {
+        title: permitNumber ? `Permit approved — ${permitNumber}` : 'Permit approved',
+        body: decisionNotes || undefined,
+        severity: 'success',
+      },
+      deny: {
+        title: 'Permit denied',
+        body: decisionNotes || undefined,
+        severity: 'critical',
+      },
+      request_changes: {
+        title: 'Changes requested on your permit submission',
+        body: decisionNotes || undefined,
+        severity: 'warning',
+      },
+    };
+    const copy = decisionCopy[action];
+    if (copy) {
+      await notifySubmitter(c.env.DB, row, { ...copy, actorUserId: user.id });
+    }
+
     return c.json({ ok: true, status: newStatus });
   }
 
@@ -599,6 +693,24 @@ permitRoutes.patch('/submissions/:id', async (c) => {
     beforeValue: { status: currentStatus },
     afterValue: { status: newStatus, reason: decisionNotes },
   });
+
+  // Suspend / revoke / reinstate all act on a permit that is already in force,
+  // so the submitter may be building against it right now. These are the most
+  // time-critical notifications in the system.
+  const lifecycleCopy: Record<string, { title: string; severity: NotificationSeverity }> = {
+    suspend:   { title: 'Your permit has been suspended', severity: 'critical' },
+    revoke:    { title: 'Your permit has been revoked',   severity: 'critical' },
+    reinstate: { title: 'Your permit has been reinstated', severity: 'success' },
+  };
+  const lc = lifecycleCopy[action];
+  if (lc) {
+    await notifySubmitter(c.env.DB, row, {
+      title: lc.title,
+      body: decisionNotes,
+      severity: lc.severity,
+      actorUserId: user.id,
+    });
+  }
 
   return c.json({ ok: true, status: newStatus });
 });

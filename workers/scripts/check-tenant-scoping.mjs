@@ -81,6 +81,14 @@ const STRICT_TABLES = [
   // pricing_sources by the same org_id). Admin-gated writes, member reads.
   'pricing_sources',
   'pricing_items',
+  // ── Notification inbox (migration 0021, routes/notifications.ts) ──────────
+  // org-owned AND user-owned: every route query carries `org_id = ? AND
+  // user_id = ?` bound to the session (c.get('user').orgId / .id), so a member
+  // can only ever touch their own inbox. The emitter (utils/notifications.ts)
+  // scopes its INSERT by the recipient's verified (org_id, user_id) pair. The
+  // two cron retention DELETEs are age/count-only sweeps across all tenants and
+  // carry inline `tenant-scope-ok:` waivers.
+  'notifications',
 ];
 
 /**

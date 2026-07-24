@@ -16,6 +16,7 @@ function clientIp(c: { req: { header(name: string): string | undefined } }): str
 }
 import { buildAuthUrl, exchangeCodeForTokens, fetchMicrosoftProfile, buildCfAccessAuthUrl, exchangeCfAccessCode, fetchCfAccessUserInfo } from '../utils/oauth';
 import { writeAuthAudit } from '../middleware/audit';
+import { notifyOrg } from '../utils/notifications';
 import { authMiddleware, type AuthUser } from '../middleware/auth';
 import {
   randomBase32Secret, buildOtpauthUri, verifyTotp,
@@ -1103,6 +1104,22 @@ authRoutes.post('/invite/:token/redeem', async (c) => {
     entityLabel: userData!.email as string,
     detail: { invitedRole: invite.invited_role, joinedOrg: userData!.org_name },
   });
+
+  // Tell the org their invitation was taken up. Addressed to admins — they own
+  // seat count and access, and they're the ones who sent it. Excludes the new
+  // member, who is standing right here. Emitted after the session is minted so
+  // a notification failure can never cost someone their redemption.
+  await notifyOrg(db, {
+    orgId: invite.org_id as string,
+    kind: 'team',
+    severity: 'success',
+    title: `${userData!.email as string} joined your organization`,
+    body: `They accepted an invitation and now have the "${invite.invited_role as string}" role.`,
+    href: '/team',
+    entityType: 'user',
+    entityId: userId,
+    actorUserId: userId,
+  }, { excludeUserId: userId, roles: ['admin'] });
 
   return c.json({
     token: sessionToken,
