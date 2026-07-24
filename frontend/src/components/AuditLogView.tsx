@@ -23,6 +23,7 @@ import {
   MessageSquare, Globe, Building2, ExternalLink, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { api, type AuditEvent, type AuditLogQuery } from '../lib/api';
+import { useAuthStore } from '../features/auth/store/useAuthStore';
 
 interface Props {
   /** Tenant view shows actions involving caller's org. Platform view (L0
@@ -296,15 +297,33 @@ function EventRow({ event: e, expanded, onToggle, scope, compact }: EventRowProp
           : <ChevronDown className="w-4 h-4 text-slate-500 mt-1 flex-shrink-0" />}
       </button>
 
-      {expanded && <EventDetail event={e} />}
+      {expanded && <EventDetail event={e} scope={scope} />}
     </div>
   );
 }
 
 // ── Detail drawer ──────────────────────────────────────────────────────────
 
-function EventDetail({ event: e }: { event: AuditEvent }) {
-  const drillUrl = entityViewUrl(e);
+function EventDetail({ event: e, scope }: { event: AuditEvent; scope: 'tenant' | 'platform' }) {
+  const callerOrgId = useAuthStore((s) => s.organisation?.id) ?? null;
+  const isPlatformAdmin = useAuthStore((s) => !!s.user?.isPlatformAdmin);
+
+  // A project referenced in the L0 (platform) feed that belongs to a DIFFERENT
+  // org can't be opened in the normal org-scoped CAD route — that just renders
+  // a blank canvas. Route those to the read-only platform viewer instead, which
+  // reads the foreign project through the audited L0 endpoints.
+  const owningOrgId = e.target.orgId ?? e.actor.orgId;
+  const crossTenant =
+    scope === 'platform' && isPlatformAdmin && !!owningOrgId && owningOrgId !== callerOrgId;
+  const toProjectView = (url: string | null): string | null =>
+    url && crossTenant && url.startsWith('/project/') && url.endsWith('/cad')
+      ? url.replace('/project/', '/platform/project/')
+      : url;
+
+  const drillUrl = toProjectView(entityViewUrl(e));
+  const openProjectUrl = toProjectView(
+    e.entity.projectId ? `/project/${e.entity.projectId}/cad` : null,
+  );
   return (
     <div className="px-3 pb-3 pt-1 ml-9 space-y-3">
       {/* Drill-through */}
@@ -318,9 +337,9 @@ function EventDetail({ event: e }: { event: AuditEvent }) {
             View {e.entity.type?.replace('_', ' ')}
           </Link>
         )}
-        {e.entity.projectId && e.entity.type !== 'project' && (
+        {openProjectUrl && e.entity.type !== 'project' && (
           <Link
-            to={`/project/${e.entity.projectId}/cad`}
+            to={openProjectUrl}
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-lg"
           >
             <PenTool className="w-3.5 h-3.5" />

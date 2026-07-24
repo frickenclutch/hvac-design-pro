@@ -93,6 +93,81 @@ platformRoutes.get('/orgs/:id', async (c) => {
   });
 });
 
+// ── GET /api/platform/projects/:projectId ───────────────────────────────────
+// L0 read-only viewer: fetch ANY tenant's project record for the cross-tenant
+// audit-log "Open project" flow. No session swap — the admin stays in their
+// own org context; this read is attributed to them and audited with the owning
+// tenant as target, so every cross-tenant view is on the record (SOC 2 CC7.2).
+platformRoutes.get('/projects/:projectId', async (c) => {
+  const projectId = c.req.param('projectId');
+
+  // JOIN the org name so the read-only viewer banner can say WHOSE project
+  // this is by name, not just an opaque org id.
+  const project = await c.env.DB.prepare(
+    `SELECT p.*, o.name AS org_name
+       FROM projects p
+       JOIN organisations o ON o.id = p.org_id
+      WHERE p.id = ?`
+  ).bind(projectId).first();
+
+  if (!project) return c.json({ error: 'Project not found' }, 404);
+
+  setAudit(c, {
+    action: 'platform.project.view',
+    entityType: 'project',
+    entityId: projectId,
+    entityLabel: project.name as string,
+    projectId,
+    targetOrgId: project.org_id as string,
+    isPlatformAction: true,
+  });
+
+  return c.json({ project, orgName: (project.org_name as string) ?? null });
+});
+
+// ── GET /api/platform/projects/:projectId/drawing ───────────────────────────
+// The primary CAD drawing (lowest floor_index) for a cross-tenant project,
+// with full canvas JSON, for the read-only platform viewer. Mirrors the
+// org-scoped loadDrawing() `drawings[0]` behavior — but is NOT org-scoped;
+// it's L0-gated + audited instead.
+platformRoutes.get('/projects/:projectId/drawing', async (c) => {
+  const projectId = c.req.param('projectId');
+
+  // Resolve the owning org first — the project must exist (this also gives us
+  // the audit target) before we expose any of its drawings.
+  const project = await c.env.DB.prepare(
+    'SELECT id, org_id, name FROM projects WHERE id = ?'
+  ).bind(projectId).first();
+  if (!project) return c.json({ error: 'Project not found' }, 404);
+
+  const drawing = await c.env.DB.prepare(
+    'SELECT id, name, canvas_json FROM cad_drawings WHERE project_id = ? ORDER BY floor_index LIMIT 1'
+  ).bind(projectId).first();
+
+  setAudit(c, {
+    action: 'platform.cad_drawing.view',
+    entityType: 'cad_drawing',
+    entityId: (drawing?.id as string) ?? projectId,
+    entityLabel: (drawing?.name as string) ?? (project.name as string),
+    projectId,
+    targetOrgId: project.org_id as string,
+    isPlatformAction: true,
+  });
+
+  if (!drawing) return c.json({ drawing: null });
+
+  // Defensive parse — a corrupt/truncated blob degrades to a blank canvas on
+  // the client (which handles canvasJson: null), never a 500.
+  let canvasJson: unknown = null;
+  if (typeof drawing.canvas_json === 'string' && drawing.canvas_json) {
+    try { canvasJson = JSON.parse(drawing.canvas_json); } catch { canvasJson = null; }
+  }
+
+  return c.json({
+    drawing: { id: drawing.id, name: drawing.name, canvasJson },
+  });
+});
+
 // ── GET /api/platform/metrics ───────────────────────────────────────────────
 // Platform-wide KPI scan. Cheap counters + last-30-days activity. Intended
 // for the admin dashboard and weekly internal reviews.

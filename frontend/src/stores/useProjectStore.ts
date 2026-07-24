@@ -3,6 +3,7 @@ import {
   createProject as createProjectSynced,
   updateProject as updateProjectSynced,
   getCachedProject,
+  fetchProjectById,
   type Project,
   type ProjectCreateInput,
   type SyncStatus,
@@ -24,6 +25,11 @@ interface ProjectState {
   // Set from route + cache lookup
   setActiveProject: (id: string) => void;
   clearActiveProject: () => void;
+
+  // Hydrate active-project metadata from the server when the local cache
+  // missed (name is null) — e.g. opening a teammate's same-org project via a
+  // deep link. No-op if already populated, offline, or the id is stale.
+  hydrateActiveProjectMeta: (id: string) => Promise<void>;
 
   // Rename the active project (optimistic local + D1 sync)
   renameProject: (newName: string) => void;
@@ -112,6 +118,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       activeProjectType: null,
       activeProjectAddress: null,
       activeProjectSyncStatus: null,
+    });
+  },
+
+  hydrateActiveProjectMeta: async (id: string) => {
+    // Only fetch when the cache miss left us without a name, and only for the
+    // still-active id (a late response must not clobber a newer switch).
+    if (get().activeProjectId !== id || get().activeProjectName) return;
+    const project = await fetchProjectById(id);
+    if (!project || get().activeProjectId !== id) return;
+    set({
+      activeProjectName: project.name,
+      activeProjectType: project.type,
+      activeProjectAddress: `${project.address}${project.city ? `, ${project.city}` : ''}`,
+      activeProjectSyncStatus: project.syncStatus,
     });
   },
 

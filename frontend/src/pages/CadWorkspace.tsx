@@ -14,6 +14,7 @@ import ThermalLegend from '../features/cad/components/ThermalLegend';
 import HelpCenter from '../features/cad/components/HelpCenter';
 import VersionHistoryModal from '../features/cad/components/VersionHistoryModal';
 import VersionPreviewBanner from '../features/cad/components/VersionPreviewBanner';
+import PlatformViewBanner from '../features/cad/components/PlatformViewBanner';
 import { api } from '../lib/api';
 import { useAutoSave, loadDrawing } from '../features/cad/hooks/useAutoSave';
 import { useCadStore, type SerializedDrawing } from '../features/cad/store/useCadStore';
@@ -23,11 +24,18 @@ import ProjectGateDialog from '../components/ProjectGateDialog';
 import { useProjectStore } from '../stores/useProjectStore';
 import { toast } from '../stores/useToastStore';
 
-export default function CadWorkspace() {
-  // Auto-save drawing to D1 / localStorage
+export default function CadWorkspace({ platformView = false }: { platformView?: boolean } = {}) {
+  // Auto-save drawing to D1 / localStorage. In platformView the store is held
+  // in previewMode (set in the platform load effect below), which hard-disables
+  // this hook — a cross-tenant view must never write back.
   useAutoSave();
   const [helpOpen, setHelpOpen] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
+  // Read-only cross-tenant (L0) view: project + owning-org name for the banner.
+  const [platformMeta, setPlatformMeta] = useState<{ projectName: string | null; orgName: string | null }>({
+    projectName: null,
+    orgName: null,
+  });
 
   // Version-preview lifecycle. previewInfo carries the version we're
   // currently peeking at; liveSnapshotRef stashes the canvas state we
@@ -106,6 +114,7 @@ export default function CadWorkspace() {
   // Hydrate the active project store from the route param
   const { id } = useParams<{ id: string }>();
   const setActiveProject = useProjectStore((s) => s.setActiveProject);
+  const hydrateActiveProjectMeta = useProjectStore((s) => s.hydrateActiveProjectMeta);
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const loadedProjectRef = useRef<string | null>(null);
 
@@ -121,23 +130,34 @@ export default function CadWorkspace() {
   // into the load effect below.
   const [draftChoiceOpen, setDraftChoiceOpen] = useState(false);
   const forceBlankDraftRef = useRef(false);
-  const showGate = !id && !activeProjectId && !gateAccepted && !draftChoiceOpen;
+  // platformView is an explicit L0 read-only route (id always present), so it
+  // never shows the gate.
+  const showGate = !platformView && !id && !activeProjectId && !gateAccepted && !draftChoiceOpen;
 
   useEffect(() => {
+    // The read-only platform viewer loads through its own effect below and must
+    // NOT touch the admin's own active-project state.
+    if (platformView) return;
     if (id) {
       setActiveProject(id);
+      // A cache miss (a teammate's same-org project, a deep link) leaves the
+      // name null — pull it from the server so ProjectContextBar isn't blank.
+      void hydrateActiveProjectMeta(id);
     }
     // Deliberately NO cleanup: leaving the CAD workspace must not clear the
     // active project. It used to, which re-opened the project gate dialog on
     // every CAD round-trip and reset the calculators to draft data — the
     // active project is workbench state and persists until the user switches.
-  }, [id, setActiveProject]);
+  }, [id, platformView, setActiveProject, hydrateActiveProjectMeta]);
 
   // ── Load saved CAD drawing data when entering a project ──────────────
   // Keyed on both the route id AND the reactive activeProjectId so a project
   // chosen from the gate dialog (which sets activeProjectId, not the route)
   // triggers its drawing to load.
   useEffect(() => {
+    // Platform view has its own loader (fetches cross-tenant via the audited
+    // L0 endpoints); the org-scoped path below would only 404 the foreign id.
+    if (platformView) return;
     // Hold off until the user has resolved the gate (and the draft choice) —
     // don't load geometry behind a dialog only to replace it once they pick.
     if (showGate || draftChoiceOpen) return;
@@ -204,7 +224,49 @@ export default function CadWorkspace() {
       store.setProjectId(null);
       store.setDrawingId(null);
     }
-  }, [id, activeProjectId, showGate, draftChoiceOpen]);
+  }, [id, platformView, activeProjectId, showGate, draftChoiceOpen]);
+
+  // ── Read-only platform (L0) load ────────────────────────────────────────
+  // Cross-tenant viewer: fetch the project + primary drawing through the
+  // audited platform endpoints (no session swap, no org-scoped path) and hold
+  // the store in previewMode so nothing can ever be written back.
+  useEffect(() => {
+    if (!platformView || !id) return;
+    let cancelled = false;
+    const store = useCadStore.getState();
+    store.setPreviewMode(true);   // hard-disables useAutoSave
+    store.loadDrawing({});        // clean slate before the foreign drawing lands
+    store.setProjectId(id);
+    store.setDrawingId(null);
+
+    void (async () => {
+      try {
+        const [{ project, orgName }, { drawing }] = await Promise.all([
+          api.platformGetProject(id),
+          api.platformGetProjectDrawing(id),
+        ]);
+        if (cancelled) return;
+        setPlatformMeta({ projectName: project.name, orgName });
+        if (drawing?.canvasJson) {
+          useCadStore.getState().loadDrawing(drawing.canvasJson);
+          useCadStore.getState().setDrawingId(drawing.id);
+        }
+      } catch {
+        if (!cancelled) toast.error('This project is no longer available.');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      // Leave no cross-tenant geometry (or previewMode) behind for the admin's
+      // own next CAD session.
+      const s = useCadStore.getState();
+      s.setPreviewMode(false);
+      s.loadDrawing({});
+      s.setProjectId(null);
+      s.setDrawingId(null);
+    };
+  }, [platformView, id]);
 
   // "Continue as Draft" from the gate. If there's a resumable draft (geometry
   // already in the store, or a saved localStorage draft), let the user decide
@@ -254,24 +316,39 @@ export default function CadWorkspace() {
         <CadCanvas />
       </ErrorBoundary>
 
-      {/* Global header overlaid on canvas (contains 3D Viewer + PDF export) */}
-      <ErrorBoundary label="Navigation">
-        <TopNavigationBar
-          onHelpOpen={() => setHelpOpen(true)}
-          onVersionsOpen={() => setVersionsOpen(true)}
+      {/* Read-only cross-tenant (L0) banner — replaces the editing header. */}
+      {platformView && (
+        <PlatformViewBanner
+          projectName={platformMeta.projectName}
+          orgName={platformMeta.orgName}
         />
-      </ErrorBoundary>
+      )}
+
+      {/* Global header overlaid on canvas (contains 3D Viewer + PDF export).
+          Hidden in the read-only platform view — its save/version/export
+          affordances don't belong in a cross-tenant peek. */}
+      {!platformView && (
+        <ErrorBoundary label="Navigation">
+          <TopNavigationBar
+            onHelpOpen={() => setHelpOpen(true)}
+            onVersionsOpen={() => setVersionsOpen(true)}
+          />
+        </ErrorBoundary>
+      )}
 
       {/* Multi-floor selector (below header) */}
       <FloorSelector />
 
-      {/* Left side floating toolbox */}
-      <Toolbox />
+      {/* Left side floating toolbox — drawing tools; hidden read-only. */}
+      {!platformView && <Toolbox />}
 
-      {/* Right side floating properties panel */}
-      <ErrorBoundary label="Property Inspector">
-        <PropertyInspector />
-      </ErrorBoundary>
+      {/* Right side floating properties panel — edits selected geometry;
+          hidden read-only. */}
+      {!platformView && (
+        <ErrorBoundary label="Property Inspector">
+          <PropertyInspector />
+        </ErrorBoundary>
+      )}
 
       {/* Layer visibility controls */}
       <ErrorBoundary label="Layer Manager">
@@ -284,18 +361,23 @@ export default function CadWorkspace() {
       {/* Thermal overlay legend (visible when thermal mode active) */}
       <ThermalLegend />
 
-      {/* Blueprint intake: PDF page picker + scale calibration */}
-      <BlueprintDialogs />
+      {/* Blueprint intake: PDF page picker + scale calibration — write path;
+          hidden read-only. */}
+      {!platformView && <BlueprintDialogs />}
 
-      {/* Help Center modal */}
-      <HelpCenter isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
+      {/* Help Center modal (opened from the header, which is itself hidden
+          read-only). */}
+      {!platformView && <HelpCenter isOpen={helpOpen} onClose={() => setHelpOpen(false)} />}
 
-      {/* Version history modal — append-only forensic snapshot trail */}
-      <VersionHistoryModal
-        isOpen={versionsOpen}
-        onClose={() => setVersionsOpen(false)}
-        onPreview={enterPreview}
-      />
+      {/* Version history modal — append-only forensic snapshot trail; restore
+          is a write, so the whole modal is hidden read-only. */}
+      {!platformView && (
+        <VersionHistoryModal
+          isOpen={versionsOpen}
+          onClose={() => setVersionsOpen(false)}
+          onPreview={enterPreview}
+        />
+      )}
 
       {/* Preview banner — only rendered while peeking at a historical
           version. The banner is the single visible cue that on-screen

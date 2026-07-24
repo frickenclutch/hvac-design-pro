@@ -389,4 +389,29 @@ export function getCachedProject(id: string): Project | null {
   return readCache().find((p) => p.id === id) ?? null;
 }
 
+/**
+ * Fetch a single project by id from D1 and upsert it into the local cache.
+ * Hydrates metadata for a project the current session CAN see but that isn't
+ * in the cached list yet — e.g. a teammate's same-org project opened via a
+ * deep link or an audit-log drill-through. Returns null when unauthenticated,
+ * offline, local-only, or the project isn't visible to this org (404) — the
+ * caller decides whether that's an honest "no access" or a silent skip.
+ */
+export async function fetchProjectById(id: string): Promise<Project | null> {
+  if (isLocalId(id) || !isAuthenticated()) return null;
+  try {
+    const { project: remote } = await api.getProject(id);
+    const mapped = fromBackend(remote as BackendProject);
+    const cache = readCache();
+    const idx = cache.findIndex((p) => p.id === id);
+    if (idx === -1) cache.unshift(mapped);
+    else cache[idx] = mapped;
+    writeCache(cache);
+    return mapped;
+  } catch (err) {
+    console.warn('[projectStorage] fetchProjectById failed', err);
+    return null;
+  }
+}
+
 export const __storageKey = STORAGE_KEY;

@@ -1050,6 +1050,23 @@ class ApiClient {
     }>('/api/platform/usage');
   }
 
+  // ── L0 read-only cross-tenant project viewer ─────────────────────────────
+  // Read ANY tenant's project + primary CAD drawing WITHOUT swapping the
+  // session. L0-gated + audited server-side (platform.project.view /
+  // platform.cad_drawing.view). Powers the audit-log "Open project" flow for
+  // a project owned by another org.
+  async platformGetProject(projectId: string) {
+    return this.request<{ project: ApiProjectRow; orgName: string | null }>(
+      `/api/platform/projects/${encodeURIComponent(projectId)}`,
+    );
+  }
+
+  async platformGetProjectDrawing(projectId: string) {
+    return this.request<{ drawing: { id: string; name: string; canvasJson: unknown } | null }>(
+      `/api/platform/projects/${encodeURIComponent(projectId)}/drawing`,
+    );
+  }
+
   // ── L0 org impersonation ────────────────────────────────────────────────
   // Mints a 30-minute, access-only, READ-ONLY session scoped to the target
   // tenant. The auth store stashes the admin's real pair and swaps this
