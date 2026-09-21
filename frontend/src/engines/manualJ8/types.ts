@@ -495,7 +495,7 @@ export interface FormJ1LineItem {
 
 export interface FormJ1Result {
   conditions: DesignConditions;
-  /** Line-by-line breakdown for permit-ready report generation. */
+  /** Line-by-line breakdown for report generation. */
   lineItems: FormJ1LineItem[];
   /** Subtotal (Line 14) — envelope + infiltration + internal. */
   line14: { heat: number; sens: number; latent: number };

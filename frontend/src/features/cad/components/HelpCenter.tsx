@@ -47,7 +47,7 @@ const sections: HelpSection[] = [
       },
       {
         title: 'Logarithmic Extraction Tool (LET)',
-        desc: 'The hexagon button sends every sheet on the floor to the extractor as one plan set (up to 6) and proposes a merged room schedule WITH each room\'s outline traced on the sheet. Everything lands in a review panel — dashed green previews show where rooms will land on the blueprint itself, measurement for measurement. Confirming draws the walls at their true positions on the active floor and auto-calibrates the sheet scale from the printed dimensions; the rooms also go to Manual J. Nothing is applied without your review; you are the engineer of record. Note: LET reads walls and dimensions, NOT glazing — imported rooms arrive with no windows, so enter window area, SHGC, and orientation per room in Manual J before the load calc or AED are permit-valid.',
+        desc: 'The hexagon button sends every sheet on the floor to the extractor as one plan set (up to 6) and proposes a merged room schedule WITH each room\'s outline traced on the sheet. Everything lands in a review panel — dashed green previews show where rooms will land on the blueprint itself, measurement for measurement. Confirming draws the walls at their true positions on the active floor and auto-calibrates the sheet scale from the printed dimensions; the rooms also go to Manual J. Nothing is applied without your review; you are the engineer of record. Note: LET reads walls and dimensions, NOT glazing — imported rooms arrive with no windows, so enter window area, SHGC, and orientation per room in Manual J before the load calc or AED is accurate.',
       },
       {
         title: 'Glimmer hints',

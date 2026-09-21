@@ -994,7 +994,7 @@ function CertificationCard({ cert }: { cert: {
 }}) {
   const allPass = cert.aggregate.passed === cert.aggregate.total;
   const submissionStatusMap: Record<string, { label: string; tone: string }> = {
-    awaiting_review: { label: 'Awaiting ACCA review', tone: 'text-amber-400 border-amber-500/30 bg-amber-500/10' },
+    awaiting_review: { label: 'Filed', tone: 'text-slate-400 border-slate-600/30 bg-slate-700/10' },
     approved: { label: 'Approved', tone: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' },
     rejected: { label: 'Rejected', tone: 'text-red-400 border-red-500/30 bg-red-500/10' },
     not_filed: { label: 'Not filed', tone: 'text-slate-400 border-slate-600/30 bg-slate-700/10' },
@@ -1007,14 +1007,14 @@ function CertificationCard({ cert }: { cert: {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <CheckCircle2 className={`w-4 h-4 ${allPass ? 'text-emerald-400' : 'text-amber-400'}`} />
-            <h3 className="font-bold text-white text-sm">Engine certification</h3>
+            <h3 className="font-bold text-white text-sm">Engine validation</h3>
           </div>
           <p className="text-[11px] text-slate-500 font-mono">
             {cert.standard} · {cert.engineVersion} · ±{(cert.suiteTolerance * 100).toFixed(1)}% tolerance
           </p>
         </div>
         <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${sub.tone}`}>
-          {sub.label} · filed {cert.submission.filedAt}
+          {sub.label} {cert.submission.filedAt}
         </span>
       </div>
 
@@ -1031,11 +1031,11 @@ function CertificationCard({ cert }: { cert: {
           </div>
         ))}
         <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/30 p-2.5">
-          <div className="text-[10px] uppercase tracking-wider text-emerald-500 font-bold">ACCA aggregate</div>
+          <div className="text-[10px] uppercase tracking-wider text-emerald-500 font-bold">Reference cases</div>
           <div className="font-bold text-emerald-300 tabular-nums text-base mt-0.5">
             {cert.aggregate.passed}/{cert.aggregate.total}
           </div>
-          <div className="text-[10px] text-emerald-500/70 mt-0.5 font-mono">cert checks</div>
+          <div className="text-[10px] text-emerald-500/70 mt-0.5 font-mono">line items</div>
         </div>
         <div className="rounded-lg bg-slate-950/50 border border-slate-800/50 p-2.5">
           <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Unit tests</div>
@@ -1047,7 +1047,8 @@ function CertificationCard({ cert }: { cert: {
       </div>
 
       <p className="text-[11px] text-slate-500">
-        Submitted to <span className="text-slate-400 font-mono">{cert.submission.contact}</span>; ACCA review SLA ≈ {cert.submission.slaMonths} months.
+        Engine validated against ACCA Manual J 8th Edition reference test cases (Smith / Walker / Cobb).
+        Registry filing on record with <span className="text-slate-400 font-mono">{cert.submission.contact}</span>.
       </p>
     </div>
   );

@@ -866,7 +866,7 @@ AED is a mandatory check under ACCA Manual J 8th Edition (2016 revision, Section
 - Ratio ≤ 130% → **PASS** (single-zone OK)
 - Ratio > 130% → **FAIL** (excursion penalty applied, zoning recommended)
 
-**Why it matters for ACCA certification:** This is one of the non-negotiable validation rules. Every residential cooling calc must include an AED evaluation.
+**Why it matters for Manual J conformance:** This is one of the non-negotiable validation rules in the 2016 revision. Every residential cooling calc must include an AED evaluation to conform to the standard.
 
 Tap the AED tool in the sidebar to run it — it auto-imports your Manual J window data.`,
   },
@@ -1054,16 +1054,16 @@ The AED tool generates a standalone PDF with:
 **For permit applications:** The main Manual J PDF automatically includes an AED status section on page 1 with the pass/fail verdict, ratio, and excursion. You don't need to submit the separate AED report unless specifically requested by the plans examiner.`,
   },
   {
-    keywords: ['aed acca', 'aed certification', 'aed required', 'is aed mandatory', 'aed manual j 2016'],
+    keywords: ['aed acca', 'aed certification', 'aed required', 'is aed mandatory', 'aed manual j 2016', 'aed methodology'],
     contexts: ['aed', 'manualj'],
-    answer: `**AED & ACCA Certification**
+    answer: `**AED & Manual J Methodology**
 
-Yes, AED is **mandatory** for ACCA Manual J compliance on residential cooling systems.
+Yes, AED is **mandatory** for ACCA Manual J conformance on residential cooling systems.
 
 **Why:**
 - Added to Manual J in the 2016 revision (Section N)
-- Part of the ACCA-approved software certification criteria
-- Required for permit submission in jurisdictions that mandate Manual J reports
+- Part of the Manual J 8th Edition compliance criteria
+- Requested by jurisdictions that mandate Manual J reports for permits
 - HERS raters check for it during energy code verification
 
 **Our implementation:**
@@ -1225,7 +1225,7 @@ Click the glowing **hexagon** in the CAD toolbox after importing a blueprint. LE
 
 **Nothing is applied automatically.** You get a review list where every room can be edited, unchecked, or corrected — each row carries a confidence badge (high = read from printed dimensions, low = inferred from proportions). LET traces each room's outline on the sheet, and dashed green previews show exactly where the rooms will land — **on the blueprint itself, measurement for measurement**, not an invented layout. Confirming **draws the walls at their true positions on the active floor**, auto-calibrates the sheet scale from the printed dimensions (optional checkbox), and adds the rooms to **Manual J**. Rooms whose outline couldn't be traced go to Manual J only; if none come back, a schematic **"LET Extraction"** floor is the fallback.
 
-**One thing LET does NOT read: glazing.** Window area, SHGC, and orientation aren't on most plans, so every imported room arrives with **no windows** — enter them per room in Manual J before the load calc or **AED** are permit-valid. This is deliberate: defaulting glass would quietly poison the solar load and the Section-N AED check. So if AED reads "off" right after an extraction, that's why — fill in the glazing and it comes right.
+**One thing LET does NOT read: glazing.** Window area, SHGC, and orientation aren't on most plans, so every imported room arrives with **no windows** — enter them per room in Manual J before the load calc or **AED** is complete. This is deliberate: defaulting glass would quietly poison the solar load and the Section-N AED check. So if AED reads "off" right after an extraction, that's why — fill in the glazing and it comes right.
 
 You remain the engineer of record: verify dimensions against the plan before calculating. LET is a first pass, not a stamp.
 
@@ -1265,11 +1265,11 @@ Every step's next tool glimmers when you complete the previous one. The whole fl
     contexts: ['cad', 'manualj'],
     answer: `**Commercial buildings — know the limits**
 
-Manual J is a **residential** load standard. For commercial / assembly occupancies (warehouses, gyms, churches, offices), a Manual J result is a **budget estimate only** — it is *not* permit-valid, and it won't capture ventilation-dominated loads (ASHRAE 62.1 outdoor air per occupant) that drive assembly spaces.
+Manual J is a **residential** load standard. For commercial / assembly occupancies (warehouses, gyms, churches, offices), a Manual J result is a **budget estimate only** — it's the wrong standard for the building, and it won't capture ventilation-dominated loads (ASHRAE 62.1 outdoor air per occupant) that drive assembly spaces.
 
 Logarithmic Extraction flags commercial plans automatically. Use the result to ballpark equipment and quote materials — and set client expectations accordingly.
 
-**ACCA Manual N** (commercial load calculation) is on the DesignPro roadmap; until it ships, permit-grade commercial calcs need a commercial tool or a licensed mechanical engineer's methods.`,
+**ACCA Manual N** (commercial load calculation) is on the DesignPro roadmap; until it ships, commercial calcs need a commercial tool or a licensed mechanical engineer's methods.`,
   },
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1356,7 +1356,7 @@ function findAnswer(query: string, context: MasonContext): string {
   const contextHelp = context === 'manualj'
     ? `I can help you fill out the Manual J calculator. Try asking about:\n\n- **How to measure** rooms and windows\n- **Design temperatures** for your city\n- **R-values** — what's in your walls\n- **Window types** — U-factor and SHGC\n- **Construction quality** and air leakage\n- **Duct location** impact\n- **Understanding results** — BTU and tonnage\n- **Daily range** and humidity grains`
     : context === 'aed'
-    ? `I'll walk you through Adequate Exposure Diversity. Ask me about:\n\n- **What is AED** and why it matters\n- **Pass/fail criteria** — the 130% threshold\n- **Excursion penalty** — how it affects cooling load\n- **What to do when AED fails** — zoning, VAV, shading\n- **How to fill out** the AED inputs (SHGC, IAC, orientation)\n- **Import from Manual J** — auto-populate fenestration\n- **When AED peaks** — east vs west vs south\n- **Latitude effects** on solar irradiance\n- **ACCA certification** requirements`
+    ? `I'll walk you through Adequate Exposure Diversity. Ask me about:\n\n- **What is AED** and why it matters\n- **Pass/fail criteria** — the 130% threshold\n- **Excursion penalty** — how it affects cooling load\n- **What to do when AED fails** — zoning, VAV, shading\n- **How to fill out** the AED inputs (SHGC, IAC, orientation)\n- **Import from Manual J** — auto-populate fenestration\n- **When AED peaks** — east vs west vs south\n- **Latitude effects** on solar irradiance\n- **Manual J methodology** requirements`
     : context === 'manual-d'
     ? `I can help you size ducts per Manual D. Try asking about:\n\n- **Duct sizing basics** — the friction rate method\n- **Equal friction** design approach\n- **Fitting equivalent lengths** — elbows, wyes, boots\n- **Supply vs return** sizing rules\n- **Trunk & branch** layout\n- **Velocity limits** — 900 fpm residential max\n- **Static pressure budget** — how to calculate ASP\n- **Import from Manual J** to auto-load room CFMs`
     : context === 'manual-s'
@@ -1740,7 +1740,7 @@ const QUICK_TOPICS: Record<MasonContext, string[]> = {
     'Import from Manual J',
     'When does AED peak?',
     'Latitude effect on AED',
-    'AED & ACCA certification',
+    'AED & Manual J methodology',
     'AED workflow & interop',
   ],
   'manual-s': [

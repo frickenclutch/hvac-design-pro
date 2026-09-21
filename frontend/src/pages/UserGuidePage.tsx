@@ -117,7 +117,7 @@ const sections: GuideSection[] = [
           'Drop the blueprint files onto the CAD canvas, click the drop zone to browse (multi-select works), or paste a copied image with Ctrl+V / right-click. Multiple sheets tile side-by-side; multi-page PDFs ask which page is the floor plan',
           'Click the Logarithmic Extraction Tool — LET, the glowing hexagon — and all sheets are read together as one plan set and come back as a single merged room schedule',
           'Review every proposed room: edit names and dimensions, watch the dashed green previews on the canvas, then confirm — walls are drawn at their TRUE positions on the blueprint (auto-calibrating the sheet scale from printed dimensions) AND the rooms are sent to Manual J',
-          'Enter glazing per room in Manual J — LET reads walls and dimensions, not windows, so imported rooms arrive with no glass (required before the load calc or AED are permit-valid)',
+          'Enter glazing per room in Manual J — LET reads walls and dimensions, not windows, so imported rooms arrive with no glass (required before the load calc or AED is accurate)',
           'Finalize the drawing in CAD (walls, openings, equipment), stamp, and export — or go straight to Manual J',
           'Prefer manual takeoff? Calibrate Scale against a printed dimension, trace walls, then Detect Rooms',
           'Calculate loads, then Find Retailer & Estimate for a regionally priced system quote',
@@ -670,26 +670,26 @@ const sections: GuideSection[] = [
   },
   {
     id: 'manual-j-shadow',
-    title: 'Cert-Grade Manual J Engine (Beta)',
+    title: 'Validated Manual J Engine (Beta)',
     icon: <BadgeCheck className="w-5 h-5 text-amber-400" />,
     easyContent: (
       <div className="space-y-3">
-        <p>HVAC DesignPro is in the middle of upgrading its Manual J calculation engine to a <strong>cert-grade ACCA Manual J 8th Edition v2.50</strong> implementation. Submitted to ACCA on May 1, 2026 — currently awaiting review (~3-4 month SLA).</p>
+        <p>HVAC DesignPro is in the middle of upgrading its Manual J calculation engine to a <strong>whole-house ACCA Manual J 8th Edition v2.50</strong> implementation, validated against the published ACCA reference test cases.</p>
         <p>Today, every Manual J calculation runs <strong>both engines</strong> in parallel:</p>
         <ul className="text-sm text-slate-300 space-y-1 ml-4 list-disc">
           <li><strong className="text-emerald-400">Legacy engine</strong> — the per-room aggregator that's been in production. Its results are what you see displayed.</li>
-          <li><strong className="text-amber-400">Cert-grade engine v1.3.0</strong> — the new whole-house Form J1 implementation. Runs silently alongside legacy and logs drift to the browser console.</li>
+          <li><strong className="text-amber-400">Validated engine v1.3.0</strong> — the new whole-house Form J1 implementation. Runs silently alongside legacy and logs drift to the browser console.</li>
         </ul>
-        <p>Once we collect a few weeks of real-user drift telemetry from production projects, we flip the display to the cert-grade results. ACCA approval makes those outputs <strong>legally valid for permit applications</strong>.</p>
+        <p>Once we collect a few weeks of real-user drift telemetry from production projects, we flip the display to the validated results. PE-stamped outputs from the validated engine meet the calculation requirements municipal plans examiners look for in most jurisdictions today.</p>
         <Tip>Nothing changes for you today. Same calculator, same display. Drift telemetry happens in the background.</Tip>
       </div>
     ),
     advancedContent: (
       <div className="space-y-3">
-        <p>Engine: <code className="text-emerald-400/70">frontend/src/engines/manualJ8/</code>, version stamp <code>manualJ8-ts-1.3.0</code> (1.1.0 + ceiling CLTD family rows and climate-dependent Construction 19 floor PTD tables, all transcribed from the physical ACCA book, Table 4A pp. 362-377). Validated against ACCA reference test cases (Smith / Walker / Cobb) at 184/184 line items within 0.5% tolerance, enforced in CI by the vitest cert suite.</p>
+        <p>Engine: <code className="text-emerald-400/70">frontend/src/engines/manualJ8/</code>, version stamp <code>manualJ8-ts-1.3.0</code> (1.1.0 + ceiling CLTD family rows and climate-dependent Construction 19 floor PTD tables, all transcribed from the physical ACCA book, Table 4A pp. 362-377). Validated against ACCA reference test cases (Smith / Walker / Cobb) at 184/184 line items within 0.5% tolerance, enforced in CI by the vitest validation suite.</p>
         <p>Adapter shim: <code className="text-emerald-400/70">manualJ8/adapters/legacy.ts → roomInputsToFormJ1Input()</code> aggregates per-room legacy <code>RoomInput[]</code> data into the whole-house <code>FormJ1Input</code>.</p>
-        <p>Pipeline: <code className="text-emerald-400/70">runCalculation()</code> in <code>pages/ManualJCalculator.tsx</code> calls legacy first (display), then if <code>shadowRunManualJ8 === true</code> also calls the cert engine and console-logs <code>[engine drift]</code> with heat / sens / latent percentages.</p>
-        <p>Phase 2 trigger criteria documented in <code>docs/option-e-ui-migration-plan.md</code>: ≥10 production projects driven through the calculator + drift on those projects ≤ 5% on every total. (ACCA approval is <em>no longer</em> a gate for the flip — the filing stays on record and, once granted, adds the permit-registry credential.)</p>
+        <p>Pipeline: <code className="text-emerald-400/70">runCalculation()</code> in <code>pages/ManualJCalculator.tsx</code> calls legacy first (display), then if <code>shadowRunManualJ8 === true</code> also calls the validated engine and console-logs <code>[engine drift]</code> with heat / sens / latent percentages.</p>
+        <p>Phase 2 trigger criteria documented in <code>docs/option-e-ui-migration-plan.md</code>: ≥10 production projects driven through the calculator + drift on those projects ≤ 5% on every total.</p>
       </div>
     ),
   },
@@ -751,7 +751,7 @@ const sections: GuideSection[] = [
           <p className="font-semibold text-white">Sections:</p>
           <ul className="text-sm text-slate-300 space-y-1 ml-4 list-disc">
             <li><strong>Platform metrics</strong> — totals + last-30-day activity (orgs, users, projects, calcs, signups)</li>
-            <li><strong>Q/A benchmarks</strong> — engine version distribution, calc volume + status mix, p50/p95/p99 duration vs SLO, audit activity, ACCA cert tile (184/184)</li>
+            <li><strong>Q/A benchmarks</strong> — engine version distribution, calc volume + status mix, p50/p95/p99 duration vs SLO, audit activity, engine validation tile (184/184 reference-case line items)</li>
             <li><strong>Organisations</strong> — full table; click a row for member roster + project counts</li>
             <li><strong>Audit feed</strong> — last 50 cross-org events</li>
             <li><strong>Action lab</strong> — placeholders for future destructive actions (impersonate, plan override, billing flips) — Phase 2+ work</li>
@@ -764,7 +764,7 @@ const sections: GuideSection[] = [
       <div className="space-y-3">
         <p>Hard-gated route — <code className="text-emerald-400/70">isPlatformAdmin</code> flag on the user record (separate from <code>role</code>) controls visibility. Server enforces 403 on every <code>/api/platform/*</code> call via <code>requirePlatformAdmin</code> middleware in <code>workers/src/middleware/auth.ts</code>.</p>
         <p>Q/A benchmarks endpoint at <code>/api/platform/qa-benchmarks</code> joins live D1 telemetry (engine version distribution, calc volume + status mix, p50/p95/p99 via window-function CTE, audit activity) with static cert facts about the active engine version.</p>
-        <p>Future: impersonation tokens, plan/seat overrides, <code>billing_status</code> flips — all queued behind ACCA cert completion. Audit logging (SOC 2 CC7.2) is shipped — auto-logging middleware records every mutation, surfaced via <code>/audit-log</code> and the L0 cross-org audit feed.</p>
+        <p>Future: impersonation tokens, plan/seat overrides, <code>billing_status</code> flips — all queued behind billing readiness. Audit logging (SOC 2 CC7.2) is shipped — auto-logging middleware records every mutation, surfaced via <code>/audit-log</code> and the L0 cross-org audit feed.</p>
       </div>
     ),
   },

@@ -149,7 +149,7 @@ export interface UserPreferences {
   firmStampPosition: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
   notaryStampDataUrl: string;
 
-  // Professional Engineer (PE) attestation — drives the permit-ready
+  // Professional Engineer (PE) attestation — drives the PE-stamp
   // attestation/signature page on combined reports. The attestation page
   // renders ONLY when peName + peSignatureDataUrl are both populated.
   peName: string;                 // e.g. "John A. Smith, PE"

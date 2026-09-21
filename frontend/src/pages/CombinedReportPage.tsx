@@ -212,7 +212,7 @@ export default function CombinedReportPage() {
             </h2>
           </div>
           <p className="text-slate-400 ml-14">
-            Assemble one permit-ready PDF — Manual J loads, AED, Manual S equipment, and Manual D ducts —
+            Assemble one submission-ready PDF — Manual J loads, AED, Manual S equipment, and Manual D ducts —
             from this project&apos;s saved calculations. Only tools with data are included.
           </p>
         </header>

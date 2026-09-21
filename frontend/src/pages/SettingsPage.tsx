@@ -390,7 +390,7 @@ function PeStampSection() {
   return (
     <Section icon={<BadgeCheck className="w-5 h-5 text-amber-400" />} title="PE Stamp & Attestation">
       <p className="text-xs text-slate-500 mb-4">
-        Configure your Professional Engineer credentials and signature for the permit-ready attestation page on
+        Configure your Professional Engineer credentials and signature for the PE-stamp attestation page on
         combined reports. The attestation page appears <span className="font-semibold text-slate-400">only</span> when
         both your name and a signature image are set — otherwise combined reports export exactly as before. These outputs
         remain a calculation aid requiring your independent professional review; you sign as the responsible engineer of record.
@@ -427,7 +427,7 @@ function EngineSection() {
   return (
     <Section icon={<BadgeCheck className="w-5 h-5 text-amber-400" />} title="Calculation Engine (Beta)">
       <p className="text-xs text-slate-500 mb-4">
-        Cert-grade Manual J 8th Ed v2.50 engine — currently shadow-running alongside the legacy engine in production. Gated to platform admins until ACCA cert review approves. See <a href="/guide" className="text-amber-400 hover:underline">User Guide → Cert-Grade Manual J Engine</a> for the full rollout plan.
+        Whole-house Manual J 8th Ed v2.50 engine — currently shadow-running alongside the legacy engine in production. Gated to platform admins while we collect drift telemetry from real projects. See <a href="/guide" className="text-amber-400 hover:underline">User Guide → Validated Manual J Engine</a> for the full rollout plan.
       </p>
       <OptionGroup label="Active Engine">
         <ToggleRow
@@ -1339,7 +1339,7 @@ function SynologyBackupSection({ orgId }: { orgId?: string }) {
           <SwitchOption label="Calculations" description="Manual J / D / S results (append-only snapshots)" checked={config.events.calculations} onChange={v => patchEvent('calculations', v)} />
           <SwitchOption label="CAD drawings" description="Saved drawings and version history" checked={config.events.cadDrawings} onChange={v => patchEvent('cadDrawings', v)} />
           <SwitchOption label="Permit submissions" description="Submittal packets and lifecycle records" checked={config.events.permits} onChange={v => patchEvent('permits', v)} />
-          <SwitchOption label="PDF exports" description="Generated permit-ready plots and reports" checked={config.events.exports} onChange={v => patchEvent('exports', v)} />
+          <SwitchOption label="PDF exports" description="Generated plots and reports" checked={config.events.exports} onChange={v => patchEvent('exports', v)} />
         </div>
 
         <div className="flex gap-2.5 items-start mt-5 p-3 rounded-xl border border-slate-700/40 bg-slate-800/30 text-[11px] text-slate-400">

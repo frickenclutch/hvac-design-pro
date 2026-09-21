@@ -554,7 +554,7 @@ export default function ManualJCalculator() {
     win.print();
   };
 
-  // ── Export PDF (permit-ready, preference-driven) ────────────────────────
+  // ── Export PDF (preference-driven) ────────────────────────
   const handleExportPdf = async () => {
     if (!wholeHouse) return;
     const wh = wholeHouse;

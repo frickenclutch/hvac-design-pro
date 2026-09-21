@@ -470,7 +470,7 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                    </span>
                    <span className="flex flex-col">
                      <span className="text-sm font-bold metal-ink">Export PDF</span>
-                     <span className="text-xs font-semibold metal-ink-soft">Permit-ready plot of this drawing</span>
+                     <span className="text-xs font-semibold metal-ink-soft">Print-ready plot of this drawing</span>
                    </span>
                  </button>
 

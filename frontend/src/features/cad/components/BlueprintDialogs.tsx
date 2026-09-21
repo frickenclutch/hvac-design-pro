@@ -868,7 +868,7 @@ function AiExtract() {
             <span>
               Windows aren't read from the plan — each imported room arrives with
               <strong> no glazing</strong>. Enter window area, SHGC, and orientation
-              per room in Manual J before the load calc or <strong>AED</strong> are permit-valid.
+              per room in Manual J before the load calc or <strong>AED</strong> is accurate.
             </span>
           </div>
           {extraction.warnings.length > 0 && (
