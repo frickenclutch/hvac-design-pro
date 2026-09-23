@@ -135,7 +135,7 @@ export default function CadCanvas() {
       const el = document.activeElement as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
       const s = useCadStore.getState();
-      if (s.pdfPageRequest || s.calibrationRequest || s.aiExtractRequest) return;
+      if (s.pdfPageRequest || s.calibrationRequest || s.aiExtractRequest || s.scanImportRequest) return;
 
       const files: File[] = [];
       if (e.clipboardData) {

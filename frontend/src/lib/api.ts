@@ -679,6 +679,53 @@ class ApiClient {
     return `${API_BASE}/api/uploads/${id}${token ? `?token=${token}` : ''}`;
   }
 
+  // ── LiDAR scan captures ────────────────────────────────────────────────────
+  // Payload to R2 + a scan_captures review-lifecycle row. The client parses
+  // BEFORE uploading (engines/roomScan.ts) and sends the summary along, so the
+  // record is born 'parsed' in one round trip. Offline-first: callers treat a
+  // failure here as "no server record", never as "no import".
+  async uploadScan(
+    file: File,
+    projectId: string,
+    meta: { source: string; parsedSummary?: string; engineVersion?: string; headingDeg?: number; capturedAt?: string },
+  ) {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('projectId', projectId);
+    formData.append('source', meta.source);
+    if (meta.parsedSummary) formData.append('parsedSummary', meta.parsedSummary);
+    if (meta.engineVersion) formData.append('engineVersion', meta.engineVersion);
+    if (meta.headingDeg !== undefined) formData.append('headingDeg', String(meta.headingDeg));
+    if (meta.capturedAt) formData.append('capturedAt', meta.capturedAt);
+    return this.request<{ id: string; projectId: string; source: string; status: string; filename: string; sizeBytes: number }>('/api/scans', {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  async setScanStatus(id: string, status: 'confirmed' | 'discarded') {
+    return this.request<{ id: string; status: string }>(`/api/scans/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  async listScans(projectId: string) {
+    return this.request<{ scans: Array<{
+      id: string;
+      source: string;
+      status: string;
+      filename: string | null;
+      size_bytes: number;
+      parsed_summary: string | null;
+      engine_version: string | null;
+      heading_deg: number | null;
+      captured_at: string | null;
+      created_by: string | null;
+      created_at: string;
+    }> }>(`/api/scans/project/${projectId}`);
+  }
+
   // Avatar (own account) — sets/removes users.avatar_key + the R2 object. The
   // public read counterpart is GET /avatars/:id (see utils/avatar.ts).
   async uploadAvatar(file: File) {

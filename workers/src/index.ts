@@ -5,6 +5,7 @@ import { projectRoutes } from './routes/projects';
 import { catalogRoutes } from './routes/catalog';
 import { calcRoutes } from './routes/calculations';
 import { uploadRoutes } from './routes/uploads';
+import { scanRoutes } from './routes/scans';
 import { cadRoutes } from './routes/cad';
 import { orgRoutes } from './routes/org';
 import { userRoutes, avatarPublicRoutes } from './routes/users';
@@ -138,6 +139,9 @@ app.route('/api/projects', projectRoutes);
 app.route('/api/catalog', catalogRoutes);
 app.route('/api/calculations', calcRoutes);
 app.route('/api/uploads', uploadRoutes);
+// LiDAR scan captures (migration 0022) — payloads to R2, review lifecycle in
+// D1. Opaque blobs server-side; parsing is client-side pure TS. Org-scoped.
+app.route('/api/scans', scanRoutes);
 app.route('/api/cad', cadRoutes);
 app.route('/api/feedback', feedbackRoutes);
 app.route('/api/platform', platformRoutes);

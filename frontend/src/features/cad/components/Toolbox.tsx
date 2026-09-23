@@ -1,9 +1,10 @@
 import React, { useRef, useState, useCallback, useEffect, useLayoutEffect } from 'react';
-import { MousePointer2, Hand, SquarePen, LayoutGrid, DoorOpen, Wind, Ruler, Type, ScanLine, ImagePlus, Crosshair, Package, Thermometer, ChevronLeft, ChevronRight, Cylinder, GitBranch, Diamond, Minus, Plus, GripVertical, ArrowUpDown, Check, RotateCcw } from 'lucide-react';
+import { MousePointer2, Hand, SquarePen, LayoutGrid, DoorOpen, Wind, Ruler, Type, ScanLine, ImagePlus, Crosshair, Package, Thermometer, ChevronLeft, ChevronRight, Cylinder, GitBranch, Diamond, Minus, Plus, GripVertical, ArrowUpDown, Check, RotateCcw, Radar } from 'lucide-react';
 import aiExtractIcon from '../../../assets/brand/ai-extract-icon.webp';
 import { useCadStore } from '../store/useCadStore';
 import type { ToolType } from '../store/useCadStore';
 import { importUnderlayFiles } from '../utils/underlayImport';
+import { importScanFile } from '../utils/scanImport';
 import { usePreferencesStore } from '../../../stores/usePreferencesStore';
 import { useGuidanceStore, glimmerClass } from '../../../stores/useGuidanceStore';
 import { toast } from '../../../stores/useToastStore';
@@ -19,6 +20,7 @@ export default function Toolbox() {
   const savedPos = usePreferencesStore(s => s.panelSizes.toolboxPos ?? { x: 24, y: -1 });
   const updatePrefs = usePreferencesStore(s => s.update);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const scanInputRef = useRef<HTMLInputElement>(null);
   const [showAssetLibrary, setShowAssetLibrary] = useState(false);
   const [showBuildingScience, setShowBuildingScience] = useState(false);
 
@@ -235,6 +237,20 @@ export default function Toolbox() {
     e.target.value = '';
   };
 
+  // ── LiDAR scan import ───────────────────────────────────────────────────
+  // Measured geometry from a RoomPlan JSON export (iPhone LiDAR via Polycam,
+  // magicplan, or any RoomPlan-based app). Parse → record → review dialog.
+  const handleImportScan = () => {
+    useGuidanceStore.getState().clearHint('cad_');
+    scanInputRef.current?.click();
+  };
+
+  const handleScanFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) void importScanFile(f);
+    e.target.value = '';
+  };
+
   // ── Tool rail registry — single source of the rail's contents ────────────
   // Registry order IS the default order; groupEnd marks where a section
   // divider renders. Dividers only show while the default order is active —
@@ -345,6 +361,23 @@ export default function Toolbox() {
           </button>
           <div className="absolute left-full top-1/2 -translate-y-1/2 ml-4 px-3 py-1.5 bg-slate-800/90 border border-slate-700 text-slate-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 backdrop-blur-md shadow-xl">
             Logarithmic Extraction Tool
+            <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-2 bg-slate-800/90 border-l border-b border-slate-700 rotate-45" />
+          </div>
+        </div>
+      )
+    },
+    {
+      id: 'import_scan', node: (
+        <div className="relative group">
+          <button
+            onClick={handleImportScan}
+            className="p-3 mx-2 rounded-xl transition-all duration-300 relative hover:bg-slate-800/80 border border-transparent min-h-[44px] min-w-[44px]"
+            aria-label="Import LiDAR Scan (RoomPlan JSON, review before import)"
+          >
+            <Radar className="w-5 h-5 text-slate-300 group-hover:text-sky-300 transition-colors" />
+          </button>
+          <div className="absolute left-full top-1/2 -translate-y-1/2 ml-4 px-3 py-1.5 bg-slate-800/90 border border-slate-700 text-slate-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 backdrop-blur-md shadow-xl">
+            Import LiDAR Scan — measured geometry from a RoomPlan export
             <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-2 bg-slate-800/90 border-l border-b border-slate-700 rotate-45" />
           </div>
         </div>
@@ -564,6 +597,14 @@ export default function Toolbox() {
           accept="image/*,.pdf"
           multiple
           onChange={handleFileChange}
+          className="hidden"
+        />
+
+        <input
+          ref={scanInputRef}
+          type="file"
+          accept=".json,application/json"
+          onChange={handleScanFileChange}
           className="hidden"
         />
 
