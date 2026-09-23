@@ -26,6 +26,9 @@ export interface LineItem {
   /** True when this line's price came from the org's configured pricing source
    *  (routes/pricing.ts), not the industry-average fallback table. */
   sourced?: boolean;
+  /** Supplier item / model number behind a sourced price (e.g. the DDI Inform
+   *  item #), so the quote line names the exact SKU. Absent on fallback lines. */
+  sourcedModel?: string;
 }
 
 /** A real per-item price from the org's active pricing source. Shape mirrors
@@ -33,6 +36,8 @@ export interface LineItem {
 export interface EstimatorPrice {
   match_key: string | null;
   unit_price: number;
+  /** Optional supplier item / model number carried onto the quote line. */
+  model?: string | null;
 }
 
 export interface CostEstimate {
@@ -160,19 +165,31 @@ export function generateCostEstimate(
   const taxRate = (stateKey && STATE_SALES_TAX[stateKey] != null) ? STATE_SALES_TAX[stateKey] : 0.07;
   const localized = !!(stateKey && (STATE_LABOR_INDEX[stateKey] != null || STATE_SALES_TAX[stateKey] != null));
 
-  // Real-price lookup: match_key → unit_price (first row wins per key).
-  const priceMap = new Map<string, number>();
+  // Real-price lookup: match_key → unit_price (first VALID row wins per key).
+  // A real price is a finite, strictly POSITIVE number. Ingest already rejects
+  // 0 / negatives (routes/pricing.ts), but this engine is the last line before
+  // a customer-facing estimate: no path into pricing_items may get a $0 line
+  // badged "real", and a bad row must not shadow a later valid row for the
+  // same key.
+  const priceMap = new Map<string, { price: number; model?: string }>();
   if (pricingItems) {
     for (const p of pricingItems) {
-      if (p.match_key && Number.isFinite(p.unit_price) && !priceMap.has(p.match_key)) {
-        priceMap.set(p.match_key, p.unit_price);
+      if (p.match_key && Number.isFinite(p.unit_price) && p.unit_price > 0 && !priceMap.has(p.match_key)) {
+        const model = typeof p.model === 'string' ? p.model.trim() : '';
+        priceMap.set(p.match_key, { price: p.unit_price, ...(model ? { model } : {}) });
       }
     }
   }
   let anySourced = false;
-  const resolve = (matchKey: string, fallback: number): { cost: number; sourced: boolean } => {
+  // Sourced unit prices keep cents (a per-ft duct price is $3.25, not $3);
+  // fallback table values are already whole dollars. Line totals round AFTER
+  // multiplying by quantity, so the precision reaches the totals.
+  const resolve = (matchKey: string, fallback: number): { cost: number; sourced: boolean; model?: string } => {
     const real = priceMap.get(matchKey);
-    if (real != null && Number.isFinite(real)) { anySourced = true; return { cost: Math.round(real), sourced: true }; }
+    if (real && real.price > 0) {
+      anySourced = true;
+      return { cost: Math.round(real.price * 100) / 100, sourced: true, ...(real.model ? { model: real.model } : {}) };
+    }
     return { cost: fallback, sourced: false };
   };
 
@@ -188,8 +205,9 @@ export function generateCostEstimate(
     description: `${formatSystemType(systemType)} — ${tonnage} Ton (${result.totalCoolingBtu.toLocaleString()} BTU/hr)`,
     quantity: 1,
     unitCost: equip.cost,
-    totalCost: equip.cost,
+    totalCost: Math.round(equip.cost),
     sourced: equip.sourced,
+    ...(equip.model ? { sourcedModel: equip.model } : {}),
   });
 
   // 2. Air Handler / Indoor Unit (for split systems)
@@ -200,8 +218,9 @@ export function generateCostEstimate(
       description: 'Air Handler / Indoor Unit',
       quantity: 1,
       unitCost: ah.cost,
-      totalCost: ah.cost,
+      totalCost: Math.round(ah.cost),
       sourced: ah.sourced,
+      ...(ah.model ? { sourcedModel: ah.model } : {}),
     });
   }
 
@@ -214,8 +233,9 @@ export function generateCostEstimate(
       description: `Supply & Return Ductwork (${conditions.ductLocation} — R-${conditions.ductInsulationR})`,
       quantity: ductLength,
       unitCost: duct.cost,
-      totalCost: ductLength * duct.cost,
+      totalCost: Math.round(ductLength * duct.cost),
       sourced: duct.sourced,
+      ...(duct.model ? { sourcedModel: duct.model } : {}),
     });
 
     // Duct fittings, boots, registers — estimated at 40% of duct material
@@ -236,8 +256,9 @@ export function generateCostEstimate(
     description: 'Refrigerant Line Set (insulated)',
     quantity: 1,
     unitCost: lineSet.cost,
-    totalCost: lineSet.cost,
+    totalCost: Math.round(lineSet.cost),
     sourced: lineSet.sourced,
+    ...(lineSet.model ? { sourcedModel: lineSet.model } : {}),
   });
 
   // 5. Thermostat / Controls
@@ -247,8 +268,9 @@ export function generateCostEstimate(
     description: 'Programmable Thermostat (WiFi)',
     quantity: 1,
     unitCost: stat.cost,
-    totalCost: stat.cost,
+    totalCost: Math.round(stat.cost),
     sourced: stat.sourced,
+    ...(stat.model ? { sourcedModel: stat.model } : {}),
   });
 
   // 6. Condensate Drain Kit
@@ -258,8 +280,9 @@ export function generateCostEstimate(
     description: 'Condensate Drain & Safety Switch',
     quantity: 1,
     unitCost: cond.cost,
-    totalCost: cond.cost,
+    totalCost: Math.round(cond.cost),
     sourced: cond.sourced,
+    ...(cond.model ? { sourcedModel: cond.model } : {}),
   });
 
   // 7. Filter Media
@@ -269,8 +292,9 @@ export function generateCostEstimate(
     description: 'MERV-13 Filter (initial set)',
     quantity: 2,
     unitCost: filter.cost,
-    totalCost: filter.cost * 2,
+    totalCost: Math.round(filter.cost * 2),
     sourced: filter.sourced,
+    ...(filter.model ? { sourcedModel: filter.model } : {}),
   });
 
   // 8. Labor — scaled by the regional labor-cost index (the largest source

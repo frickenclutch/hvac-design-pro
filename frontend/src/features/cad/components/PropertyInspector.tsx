@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useRef } from 'react';
 import { useCadStore } from '../store/useCadStore';
 import type { WallMaterial, Opening, HvacUnit, PipeSegment, PipeMaterial, DetectedRoom, UnderlayImage, Annotation, DuctSegment, DuctFitting, DuctShape, DuctMaterial, DuctSide, DuctRole, FittingType } from '../store/useCadStore';
 import { fmtLength, fmtArea, fmtTemp, smallLengthUnit } from '../../../utils/units';
-import { Settings2, Layers, Ruler, Triangle, Wind, DoorOpen, LayoutGrid, ScanLine, ImageIcon, Lock, Unlock, Trash2, Type, RotateCcw, Bold, Italic, AlignLeft, AlignCenter, AlignRight, ChevronLeft, ChevronRight, GitBranch, Diamond, Minus, Plus, GripVertical, Pin } from 'lucide-react';
+import { Settings2, Layers, Ruler, Triangle, Wind, DoorOpen, LayoutGrid, ScanLine, ImageIcon, Lock, Unlock, Trash2, Type, RotateCcw, Bold, Italic, AlignLeft, AlignCenter, AlignRight, ChevronLeft, ChevronRight, GitBranch, Diamond, Minus, Plus, GripVertical, Pin, Radar } from 'lucide-react';
 import { usePreferencesStore } from '../../../stores/usePreferencesStore';
 import PanelResizeHandle from './PanelResizeHandle';
 import { useDraggablePanel } from '../hooks/useDraggablePanel';
@@ -303,6 +303,25 @@ export default function PropertyInspector() {
   );
 }
 
+// ── Measurement provenance badge ─────────────────────────────────────────────
+// The visible spine of the trust story: how this entity's dimensions were
+// established. Only 'scan' warrants a badge today — hand-drawn is the
+// unmarked default, and traced/ai geometry already announces itself through
+// its import flow. Reports will print the same pedigree later (spec §8).
+function ProvenanceBadge({ provenance, confidence }: { provenance?: string; confidence?: string }) {
+  if (provenance !== 'scan') return null;
+  const confLabel = confidence === 'low' ? 'low confidence' : confidence === 'medium' ? 'medium confidence' : 'measured';
+  const confClass = confidence === 'low'
+    ? 'text-amber-300 border-amber-500/40 bg-amber-500/10'
+    : 'text-sky-300 border-sky-500/40 bg-sky-500/10';
+  return (
+    <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-semibold uppercase tracking-wider ${confClass}`}>
+      <Radar className="w-3 h-3" />
+      LiDAR {confLabel}
+    </div>
+  );
+}
+
 // ── Wall-specific panel ──────────────────────────────────────────────────────
 interface WallPanelProps {
   wall: NonNullable<ReturnType<typeof useCadStore.getState>['walls'][0]>;
@@ -321,6 +340,7 @@ function WallPanel({ wall, onUpdate }: WallPanelProps) {
 
   return (
     <div className="space-y-6 animate-in slide-in-from-right-4 duration-300 fade-in">
+      <ProvenanceBadge provenance={wall.provenance} confidence={wall.measureConfidence} />
 
       {/* Geometry */}
       <div>
@@ -448,6 +468,7 @@ function OpeningPanel({ opening, onUpdate }: { opening: Opening; onUpdate: (patc
 
   return (
     <div className="space-y-6 animate-in slide-in-from-right-4 duration-300 fade-in">
+      <ProvenanceBadge provenance={opening.provenance} confidence={opening.measureConfidence} />
       <div>
         <h4 className="text-xs font-semibold text-sky-400 uppercase tracking-wider mb-4 flex items-center gap-2">
           {isWindow ? <LayoutGrid className="w-3 h-3" /> : <DoorOpen className="w-3 h-3" />}
