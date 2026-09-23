@@ -1599,8 +1599,44 @@ function UserProfileSection({ token, user }: { token: string | null; user: { id:
 // inspector/reviewer via the Team page.
 // ── Pricing Engine (admin) ─────────────────────────────────────────────────
 // Plug real supplier pricing into the platform so Find-a-Retailer estimates
-// show the org's actual numbers instead of industry averages. CSV upload is
-// live; webhook/REST endpoints register now and execute in a later phase.
+// show the org's actual numbers instead of industry averages. Two channels are
+// LIVE: a CSV price-list upload, and an INBOUND feed — we issue an ingest URL
+// + bearer token and the supplier's system (DDI Inform via a scheduled job or
+// middleware) POSTs a JSON price book to it (routes/pricing.ts
+// `pricingIngestPublic`). A REST "pull" source (we call the supplier)
+// registers now and executes in a later phase.
+
+/** Three canonical items pushed as a DRY RUN by the "Test (dry run)" action —
+ *  proves endpoint + normalizer end to end without writing a row. */
+const SAMPLE_FEED_ITEMS = [
+  { category: 'equipment', system_type: 'heat_pump', tonnage: 3, model: 'SAMPLE-HP36', description: '3-ton heat pump condenser', unit_price: 4850 },
+  { category: 'controls', match_key: 'controls:thermostat', model: 'SAMPLE-STAT', description: 'Thermostat', price: '$245.00' },
+  { category: 'misc', match_key: 'misc:filter', model: 'SAMPLE-MERV13', description: 'MERV-13 filter', unit_price: 65 },
+];
+
+/** D1 stamps datetime('now') as "YYYY-MM-DD HH:MM:SS" (UTC, no zone marker). */
+function fmtFeedAge(iso: string | null | undefined): string {
+  if (!iso) return 'never';
+  const t = Date.parse(iso.includes('T') ? iso : `${iso.replace(' ', 'T')}Z`);
+  if (!Number.isFinite(t)) return iso;
+  const mins = Math.max(0, Math.round((Date.now() - t) / 60000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `${hours} h ago`;
+  return `${Math.round(hours / 24)} d ago`;
+}
+
+function parseFeedSummary(raw: string | null | undefined): { loaded: number; skipped: number } | null {
+  if (!raw) return null;
+  try {
+    const o = JSON.parse(raw) as { loaded?: number; skipped?: number };
+    return typeof o.loaded === 'number' ? { loaded: o.loaded, skipped: o.skipped ?? 0 } : null;
+  } catch {
+    return null;
+  }
+}
+
 function PricingEngineSection() {
   const [sources, setSources] = useState<PricingSourceRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1609,6 +1645,9 @@ function PricingEngineSection() {
   const [epKind, setEpKind] = useState<'webhook' | 'api'>('webhook');
   const [epName, setEpName] = useState('');
   const [epUrl, setEpUrl] = useState('');
+  // A freshly issued ingest token is shown ONCE — the server keeps only its hash.
+  const [issued, setIssued] = useState<{ sourceId: string; token: string } | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
 
   const load = () => {
     api.pricingListSources()
@@ -1617,6 +1656,16 @@ function PricingEngineSection() {
       .finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, []);
+
+  const copy = async (key: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(key);
+      setTimeout(() => setCopied((k) => (k === key ? null : k)), 1500);
+    } catch {
+      toast.error('Copy failed — select the text and copy it manually.');
+    }
+  };
 
   const uploadCsv = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1636,15 +1685,41 @@ function PricingEngineSection() {
       .finally(() => setBusy(false));
   };
 
-  const registerEndpoint = async () => {
+  const registerSource = async () => {
     if (!epName.trim()) { toast.error('Give the source a name.'); return; }
-    if (!/^https:\/\/.+/i.test(epUrl.trim())) { toast.error('Enter a valid https:// endpoint URL.'); return; }
+    if (epKind === 'api' && !/^https:\/\/.+/i.test(epUrl.trim())) { toast.error('Enter the supplier’s https:// API endpoint.'); return; }
     setBusy(true);
     try {
-      await api.pricingAddSource(epKind, epName.trim(), epUrl.trim());
-      toast.success('Endpoint registered. Live activation ships in a later release.');
+      const created = await api.pricingAddSource(epKind, epName.trim(), epKind === 'api' ? epUrl.trim() : undefined);
+      if (epKind === 'webhook') {
+        // Issue the first token in the same gesture so the feed is usable at once.
+        const t = await api.pricingRotateIngestToken(created.id);
+        setIssued({ sourceId: created.id, token: t.token });
+        toast.success('Inbound feed created — copy the ingest URL and token below.');
+      } else {
+        toast.success('Endpoint registered. Live pull activation ships in a later release.');
+      }
       setEpName(''); setEpUrl('');
       load();
+    } catch { /* toast surfaced */ } finally { setBusy(false); }
+  };
+
+  const rotateToken = async (s: PricingSourceRow) => {
+    if (s.has_ingest_token && !confirm(`Rotate the ingest token for "${s.name}"? The current token stops working immediately.`)) return;
+    setBusy(true);
+    try {
+      const t = await api.pricingRotateIngestToken(s.id);
+      setIssued({ sourceId: s.id, token: t.token });
+      toast.success(s.has_ingest_token ? 'Token rotated — update the supplier’s integration.' : 'Token issued — store it in the supplier’s integration.');
+      load();
+    } catch { /* toast surfaced */ } finally { setBusy(false); }
+  };
+
+  const testFeed = async (s: PricingSourceRow) => {
+    setBusy(true);
+    try {
+      const r = await api.pricingIngestJson(s.id, SAMPLE_FEED_ITEMS, true);
+      toast.success(`Dry run OK — ${r.loaded} of ${SAMPLE_FEED_ITEMS.length} sample items would load (${r.matchKeys.length} quote lines). Nothing was written.`);
     } catch { /* toast surfaced */ } finally { setBusy(false); }
   };
 
@@ -1671,8 +1746,9 @@ function PricingEngineSection() {
     <Section icon={<Tag className="w-5 h-5 text-amber-400" />} title="Pricing Engine">
       <p className="text-xs text-slate-500 mb-4">
         Plug real supplier pricing into the platform so the Find-a-Retailer estimate shows your organisation’s
-        actual numbers instead of industry averages. Until a source is active, estimates stay a disclaimed
-        ballpark and users are told to have their retailer configure integrations.
+        actual numbers instead of industry averages — upload a price list, or give your supplier an inbound
+        feed to push prices to on a schedule. Until a source is active, estimates stay a disclaimed ballpark
+        and users are told to have their retailer configure integrations.
       </p>
 
       <div className={`flex items-start gap-2 px-3 py-2 mb-5 rounded-lg border text-xs ${
@@ -1682,7 +1758,7 @@ function PricingEngineSection() {
       }`}>
         {activeItems > 0
           ? <><Check className="w-4 h-4 flex-shrink-0 mt-0.5" /><span><b>{activeItems.toLocaleString()}</b> price{activeItems === 1 ? '' : 's'} feeding live estimates.</span></>
-          : <><AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" /><span>No active pricing yet — estimates use industry averages. Upload a price list to go live.</span></>}
+          : <><AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" /><span>No active pricing yet — estimates use industry averages. Upload a price list or connect a feed to go live.</span></>}
       </div>
 
       {/* CSV upload — LIVE */}
@@ -1704,29 +1780,35 @@ function PricingEngineSection() {
         </button>
       </div>
 
-      {/* Webhook / API — registered now, activation later */}
+      {/* Live source — inbound feed (LIVE) or REST pull (activation later) */}
       <div className="rounded-xl border border-slate-700/50 bg-slate-900/40 p-4 mb-4">
         <div className="flex items-center gap-2 mb-1.5">
           <Webhook className="w-4 h-4 text-sky-400" />
-          <h4 className="text-sm font-bold text-white">Connect a live source (webhook / API)</h4>
-          <span className="text-[9px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded-full">Activation coming</span>
+          <h4 className="text-sm font-bold text-white">Connect a live source</h4>
+          {epKind === 'webhook'
+            ? <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-1.5 py-0.5 rounded-full">Live</span>
+            : <span className="text-[9px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded-full">Activation coming</span>}
         </div>
         <p className="text-xs text-slate-500 mb-3">
-          Register a supplier’s inventory-pricing endpoint now; live polling + secure credentials arrive in a later release.
+          {epKind === 'webhook'
+            ? 'We issue an ingest URL and a bearer token. The supplier’s system — DDI Inform via a scheduled job or middleware — POSTs a JSON price book to it; every push replaces the previous rows and feeds estimates immediately.'
+            : 'Register the supplier’s REST endpoint now; live polling and encrypted credentials arrive in a later release.'}
         </p>
         <div className="flex flex-col sm:flex-row gap-2">
           <select value={epKind} onChange={(e) => setEpKind(e.target.value as 'webhook' | 'api')}
             className="bg-slate-900/70 border border-slate-700/50 rounded-xl py-2 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500/40">
-            <option value="webhook">Webhook</option>
-            <option value="api">REST API</option>
+            <option value="webhook">Inbound feed — supplier pushes to us</option>
+            <option value="api">REST API pull — we call the supplier</option>
           </select>
-          <input value={epName} onChange={(e) => setEpName(e.target.value)} placeholder="Source name"
+          <input value={epName} onChange={(e) => setEpName(e.target.value)} placeholder="Source name (e.g. DDI Inform)"
             className="flex-1 min-w-0 bg-slate-900/70 border border-slate-700/50 rounded-xl py-2 px-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500/40" />
-          <input value={epUrl} onChange={(e) => setEpUrl(e.target.value)} placeholder="https://supplier.example/pricing"
-            className="flex-[2] min-w-0 bg-slate-900/70 border border-slate-700/50 rounded-xl py-2 px-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500/40" />
-          <button disabled={busy} onClick={registerEndpoint}
+          {epKind === 'api' && (
+            <input value={epUrl} onChange={(e) => setEpUrl(e.target.value)} placeholder="https://supplier.example/pricing"
+              className="flex-[2] min-w-0 bg-slate-900/70 border border-slate-700/50 rounded-xl py-2 px-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500/40" />
+          )}
+          <button disabled={busy} onClick={registerSource}
             className="flex items-center justify-center gap-1.5 text-xs font-bold text-sky-400 hover:text-sky-300 bg-sky-500/10 border border-sky-500/30 px-3 py-2 rounded-xl transition-colors disabled:opacity-50">
-            <Plus className="w-3.5 h-3.5" /> Register
+            <Plus className="w-3.5 h-3.5" /> {epKind === 'webhook' ? 'Create feed' : 'Register'}
           </button>
         </div>
       </div>
@@ -1734,26 +1816,80 @@ function PricingEngineSection() {
       {sources.length > 0 && (
         <div className="space-y-2">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">Configured sources</p>
-          {sources.map((s) => (
-            <div key={s.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-slate-900/40 border border-slate-800/50 flex-wrap">
-              {s.kind === 'csv'
-                ? <Upload className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-                : <Webhook className="w-3.5 h-3.5 text-sky-400 flex-shrink-0" />}
-              <span className="font-bold text-slate-200 text-sm flex-1 min-w-0 truncate">{s.name}</span>
-              <span className="text-[10px] text-slate-500 font-mono uppercase">{s.kind}</span>
-              {s.kind === 'csv' && <span className="text-[10px] text-slate-500 font-mono">{s.item_count} item{s.item_count === 1 ? '' : 's'}</span>}
-              <PricingStatusPill status={s.status} />
-              {s.kind === 'csv' && (
-                <button disabled={busy} onClick={() => toggleSource(s)}
-                  className="text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-white px-2 py-1 rounded-lg hover:bg-slate-800/60 disabled:opacity-50">
-                  {s.status === 'active' ? 'Disable' : 'Enable'}
-                </button>
-              )}
-              <button disabled={busy} onClick={() => removeSource(s)} title="Remove" className="text-slate-400 hover:text-red-400 disabled:opacity-50">
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ))}
+          {sources.map((s) => {
+            const summary = parseFeedSummary(s.last_ingest_summary);
+            const items = s.item_count ?? 0;
+            const kindLabel = s.kind === 'csv' ? 'csv' : s.kind === 'webhook' ? 'inbound feed' : 'api pull';
+            const canToggle = s.kind === 'csv' || (s.kind === 'webhook' && (items > 0 || s.status === 'active'));
+            const ingestUrl = api.pricingIngestUrl(s.id);
+            return (
+              <div key={s.id} className="px-3 py-2.5 rounded-lg bg-slate-900/40 border border-slate-800/50">
+                <div className="flex items-center gap-3 flex-wrap">
+                  {s.kind === 'csv'
+                    ? <Upload className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                    : <Webhook className="w-3.5 h-3.5 text-sky-400 flex-shrink-0" />}
+                  <span className="font-bold text-slate-200 text-sm flex-1 min-w-0 truncate">{s.name}</span>
+                  <span className="text-[10px] text-slate-500 font-mono uppercase">{kindLabel}</span>
+                  {(s.kind === 'csv' || items > 0) && <span className="text-[10px] text-slate-500 font-mono">{items} item{items === 1 ? '' : 's'}</span>}
+                  <PricingStatusPill status={s.status} />
+                  {s.kind === 'webhook' && (
+                    <>
+                      <button disabled={busy} onClick={() => rotateToken(s)}
+                        className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-sky-400 hover:text-sky-300 px-2 py-1 rounded-lg hover:bg-sky-500/10 disabled:opacity-50">
+                        <KeyRound className="w-3 h-3" /> {s.has_ingest_token ? 'Rotate token' : 'Issue token'}
+                      </button>
+                      <button disabled={busy} onClick={() => testFeed(s)}
+                        title="Push 3 sample items through this feed as a dry run — proves the pipeline, writes nothing"
+                        className="text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-white px-2 py-1 rounded-lg hover:bg-slate-800/60 disabled:opacity-50">
+                        Test (dry run)
+                      </button>
+                    </>
+                  )}
+                  {canToggle && (
+                    <button disabled={busy} onClick={() => toggleSource(s)}
+                      className="text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-white px-2 py-1 rounded-lg hover:bg-slate-800/60 disabled:opacity-50">
+                      {s.status === 'active' ? 'Disable' : 'Enable'}
+                    </button>
+                  )}
+                  <button disabled={busy} onClick={() => removeSource(s)} title="Remove" className="text-slate-400 hover:text-red-400 disabled:opacity-50">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {s.kind === 'webhook' && (
+                  <div className="mt-2 pl-6 space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap text-[11px] text-slate-500">
+                      <span>Ingest URL</span>
+                      <code className="font-mono text-slate-300 bg-slate-950/60 border border-slate-800/60 rounded px-1.5 py-0.5 truncate max-w-[70vw] sm:max-w-md">{ingestUrl}</code>
+                      <button onClick={() => copy(`url-${s.id}`, ingestUrl)} title="Copy ingest URL" className="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800/60">
+                        {copied === `url-${s.id}` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                      <span>· Last feed {fmtFeedAge(s.last_ingest_at)}{summary ? ` — ${summary.loaded} loaded, ${summary.skipped} skipped` : ''}</span>
+                    </div>
+                    {issued?.sourceId === s.id ? (
+                      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+                        <p className="text-[11px] font-bold text-amber-300 mb-1">Ingest token — shown once. Store it in the supplier’s integration now.</p>
+                        <div className="flex items-center gap-2">
+                          <code className="font-mono text-xs text-white break-all flex-1 min-w-0">{issued.token}</code>
+                          <button onClick={() => copy(`tok-${s.id}`, issued.token)} title="Copy token" className="text-slate-300 hover:text-white p-1 rounded hover:bg-slate-800/60 shrink-0">
+                            {copied === `tok-${s.id}` ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-1.5">
+                          Send <span className="font-mono text-slate-400">Authorization: Bearer &lt;token&gt;</span> with a JSON body{' '}
+                          <span className="font-mono text-slate-400">{'{ "items": [ … ] }'}</span> — add{' '}
+                          <span className="font-mono text-slate-400">"dryRun": true</span> to validate without loading.
+                          Item schema + match keys: docs/INFORMPRICINGINGEST.md §8.
+                        </p>
+                      </div>
+                    ) : !s.has_ingest_token ? (
+                      <p className="text-[11px] text-amber-300/90">No token issued yet — issue one and store it in the supplier’s integration.</p>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </Section>

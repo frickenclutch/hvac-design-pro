@@ -8,7 +8,7 @@ import { uploadRoutes } from './routes/uploads';
 import { cadRoutes } from './routes/cad';
 import { orgRoutes } from './routes/org';
 import { userRoutes, avatarPublicRoutes } from './routes/users';
-import { pricingRoutes } from './routes/pricing';
+import { pricingRoutes, pricingIngestPublic } from './routes/pricing';
 import { feedbackRoutes } from './routes/feedback';
 import { platformRoutes } from './routes/platform';
 import { forumRoutes } from './routes/forum';
@@ -87,6 +87,15 @@ app.route('/api/auth', authRoutes);
 // (signature verification lives in each provider's handleWebhook). Mounted here,
 // ahead of authMiddleware, so the chain doesn't 401 them.
 app.route('/api/webhooks', webhookRoutes);
+
+// Supplier pricing INBOUND feed — PUBLIC by design (server-to-server). The
+// caller is DDI Inform / a middleware job, not a logged-in user, so there is no
+// session: each request is authenticated by a per-source bearer token (stored
+// hashed, issued once from Settings → Pricing Engine) and the tenant is
+// DERIVED from the matching pricing_sources row, never from the request.
+// Mounted ahead of authMiddleware so the chain doesn't 401 it. See
+// routes/pricing.ts `pricingIngestPublic`.
+app.route('/api/pricing/ingest', pricingIngestPublic);
 
 // Public avatar bytes — PUBLIC by design, and mounted OUTSIDE /api/* so the
 // authMiddleware below never sees it. An <img src> (how avatars render in the
