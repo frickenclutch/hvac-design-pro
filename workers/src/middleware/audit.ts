@@ -152,36 +152,80 @@ async function writeAuditRow(
     }
   };
 
-  await db.prepare(
+  // Handlers pass request-body values straight into setAudit (entityLabel:
+  // body.fileName, projectId: body.projectId, …). Those are typed `string`
+  // but are whatever JSON the client sent. A number has no .slice and an
+  // array/object can't be bound by D1 — either used to throw here, the caller
+  // swallowed it, and the mutation went through with NO audit row. Coerce
+  // every scalar so a hostile body can never suppress its own trail.
+  const scalar = (v: unknown, max: number): string | null => {
+    if (v == null) return null;
+    const s = typeof v === 'string' ? v : stringify(v);
+    return s == null ? null : s.slice(0, max);
+  };
+
+  const sql =
     `INSERT INTO audit_log
        (id, org_id, user_id, project_id, action, entity_type, entity_id,
         entity_label, target_org_id, detail, before_value, after_value,
         method, path, status_code, duration_ms, ip_address, user_agent,
         actor_role, is_platform_action, request_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
-    id,
-    user?.orgId ?? null,
-    user?.id ?? null,
-    audit.projectId ?? null,
-    action,
-    audit.entityType ?? null,
-    audit.entityId ?? null,
-    audit.entityLabel?.slice(0, 200) ?? null,
-    audit.targetOrgId ?? null,
-    stringify(audit.detail),
-    stringify(audit.beforeValue),
-    stringify(audit.afterValue),
-    http.method,
-    http.path.slice(0, 500),
-    http.status,
-    http.durationMs,
-    ip,
-    ua,
-    user?.role ?? null,
-    audit.isPlatformAction ? 1 : 0,
-    requestId,
-  ).run();
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+  try {
+    await db.prepare(sql).bind(
+      id,
+      user?.orgId ?? null,
+      user?.id ?? null,
+      scalar(audit.projectId, 200),
+      scalar(action, 200),
+      scalar(audit.entityType, 200),
+      scalar(audit.entityId, 200),
+      scalar(audit.entityLabel, 200),
+      scalar(audit.targetOrgId, 200),
+      stringify(audit.detail),
+      stringify(audit.beforeValue),
+      stringify(audit.afterValue),
+      http.method,
+      http.path.slice(0, 500),
+      http.status,
+      http.durationMs,
+      ip,
+      ua,
+      user?.role ?? null,
+      audit.isPlatformAction ? 1 : 0,
+      requestId,
+    ).run();
+  } catch (e) {
+    // Last resort: the enriched row was rejected. Write the HTTP envelope
+    // alone (no handler-supplied fields) so the mutation is still on record,
+    // flagged so an operator can see enrichment was lost. If THIS fails the
+    // caller logs it — there is nothing safer left to write.
+    console.error('[audit] enriched write failed, writing envelope-only row:', e);
+    await db.prepare(sql).bind(
+      id,
+      user?.orgId ?? null,
+      user?.id ?? null,
+      null,
+      `api.${http.method.toLowerCase()}`,
+      null,
+      null,
+      null,
+      null,
+      JSON.stringify({ auditDegraded: true, intendedAction: scalar(action, 200) }),
+      null,
+      null,
+      http.method,
+      http.path.slice(0, 500),
+      http.status,
+      http.durationMs,
+      ip,
+      ua,
+      user?.role ?? null,
+      audit.isPlatformAction ? 1 : 0,
+      requestId,
+    ).run();
+  }
 }
 
 /**

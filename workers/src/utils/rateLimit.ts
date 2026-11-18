@@ -116,6 +116,13 @@ export async function cleanupRateLimitEvents(
   db: D1Database,
   olderThanMinutes = 60,
 ): Promise<void> {
-  const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000).toISOString();
-  await db.prepare('DELETE FROM rate_limit_events WHERE created_at < ?').bind(cutoff).run();
+  // The cutoff MUST be computed by SQLite, in the same "YYYY-MM-DD HH:MM:SS"
+  // form created_at is stored in (see checkRateLimit above). A JS ISO string
+  // ("…T…Z") sorts AFTER every same-day SQL timestamp (' ' < 'T'), so binding
+  // one here deleted every row written that UTC day — i.e. all live throttle
+  // state, on every successful registration.
+  await db
+    .prepare(`DELETE FROM rate_limit_events WHERE created_at < datetime('now', ?)`)
+    .bind(`-${olderThanMinutes} minutes`)
+    .run();
 }

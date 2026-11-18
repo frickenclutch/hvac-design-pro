@@ -42,6 +42,28 @@ export interface EmailSendResult {
   id?: string;
 }
 
+/**
+ * Escape a value for interpolation into email HTML (text nodes AND quoted
+ * attribute values). EVERY dynamic value in the templates below goes through
+ * this — names, org names, addresses, feedback text and filenames all
+ * originate from request bodies, some of them unauthenticated (register).
+ * Without it a caller could send attacker-authored HTML from our own sender.
+ */
+export function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** Subjects are plain text, not HTML: drop control characters (CR/LF header
+ *  splitting) and cap the length rather than entity-escape. */
+function subjectText(value: unknown, max = 120): string {
+  return String(value ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, max);
+}
+
 export async function sendEmail(apiKey: string | undefined, payload: EmailPayload): Promise<EmailSendResult> {
   const toLabel = Array.isArray(payload.to) ? payload.to.join(', ') : payload.to;
 
@@ -139,7 +161,26 @@ interface FeedbackEmailData {
   timestamp: string;
 }
 
-export function buildFeedbackEmail(data: FeedbackEmailData): EmailPayload & { subject: string; html: string } {
+export function buildFeedbackEmail(raw: FeedbackEmailData): EmailPayload & { subject: string; html: string } {
+  // `data` is the HTML-safe view used by the template; `raw` is kept only for
+  // the plain-text subject and the real attachment filenames.
+  const data: FeedbackEmailData = {
+    ...raw,
+    type: escapeHtml(raw.type),
+    text: escapeHtml(raw.text),
+    context: escapeHtml(raw.context),
+    userName: escapeHtml(raw.userName),
+    userEmail: escapeHtml(raw.userEmail),
+    userRole: escapeHtml(raw.userRole),
+    orgName: escapeHtml(raw.orgName),
+    userAgent: escapeHtml(raw.userAgent),
+    feedbackId: escapeHtml(raw.feedbackId),
+    attachments: raw.attachments.map(a => ({
+      ...a,
+      filename: escapeHtml(a.filename),
+      contentId: a.contentId ? escapeHtml(a.contentId) : a.contentId,
+    })),
+  };
   const typeColors: Record<string, string> = {
     BUG: '#ef4444',
     IDEA: '#3b82f6',
@@ -172,7 +213,7 @@ export function buildFeedbackEmail(data: FeedbackEmailData): EmailPayload & { su
 
   // Only files small enough to embed become email attachments; the rest stay
   // in R2. Images carry their contentId so Resend renders them inline.
-  const emailAttachments: EmailAttachment[] = data.attachments
+  const emailAttachments: EmailAttachment[] = raw.attachments
     .filter(a => !!a.content)
     .map(a => ({
       filename: a.filename,
@@ -184,7 +225,7 @@ export function buildFeedbackEmail(data: FeedbackEmailData): EmailPayload & { su
   return {
     to: '',
     attachments: emailAttachments,
-    subject: `[HVAC DesignPro] ${data.type} from ${data.userName} (${data.orgName})`,
+    subject: `[HVAC DesignPro] ${subjectText(raw.type, 20)} from ${subjectText(raw.userName)} (${subjectText(raw.orgName)})`,
     html: `
 <!DOCTYPE html>
 <html>
@@ -278,7 +319,9 @@ export function buildFeedbackEmail(data: FeedbackEmailData): EmailPayload & { su
 
 // ── Verification Code Email ──────────────────────────────────────────────────
 
-export function buildVerificationEmail(firstName: string, code: string): EmailPayload & { subject: string; html: string } {
+export function buildVerificationEmail(rawFirstName: string, rawCode: string): EmailPayload & { subject: string; html: string } {
+  const firstName = escapeHtml(rawFirstName);
+  const code = escapeHtml(rawCode);
   return {
     to: '',
     subject: `Your HVAC DesignPro verification code: ${code}`,
@@ -331,7 +374,9 @@ export function buildVerificationEmail(firstName: string, code: string): EmailPa
 
 // ── Password Reset Email ────────────────────────────────────────────────────
 
-export function buildPasswordResetEmail(firstName: string, code: string): EmailPayload & { subject: string; html: string } {
+export function buildPasswordResetEmail(rawFirstName: string, rawCode: string): EmailPayload & { subject: string; html: string } {
+  const firstName = escapeHtml(rawFirstName);
+  const code = escapeHtml(rawCode);
   return {
     to: '',
     subject: `Reset your HVAC DesignPro password`,
@@ -389,7 +434,9 @@ export function buildPasswordResetEmail(firstName: string, code: string): EmailP
 // validated inside POST /api/auth/mfa/challenge with method:'email'. Short
 // 5-minute TTL — it's a live login step, not an onboarding loop.
 
-export function buildMfaEmailCode(firstName: string, code: string): EmailPayload & { subject: string; html: string } {
+export function buildMfaEmailCode(rawFirstName: string, rawCode: string): EmailPayload & { subject: string; html: string } {
+  const firstName = escapeHtml(rawFirstName);
+  const code = escapeHtml(rawCode);
   return {
     to: '',
     subject: `Your HVAC DesignPro sign-in code: ${code}`,
@@ -440,6 +487,68 @@ export function buildMfaEmailCode(firstName: string, code: string): EmailPayload
   };
 }
 
+// ── Microsoft sign-in: confirm-your-email code ───────────────────────────────
+//
+// Sent from POST /api/auth/sso/microsoft/callback when the Microsoft account's
+// email could not be vouched for by its directory. The recipient may be an
+// existing user who did NOT start this — so the copy says plainly what the
+// code does and to ignore it otherwise. No name is interpolated (the only
+// name available at this point comes from the unproven Microsoft profile) and
+// the code is kept out of the subject, which is logged.
+
+export function buildSsoLinkEmail(rawCode: string): EmailPayload & { subject: string; html: string } {
+  const code = escapeHtml(rawCode);
+  return {
+    to: '',
+    subject: `Confirm your email to sign in with Microsoft`,
+    html: `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0;padding:0;background-color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0f172a;padding:40px 20px;">
+    <tr>
+      <td align="center">
+        <table width="560" cellpadding="0" cellspacing="0" style="background-color:#1e293b;border-radius:16px;border:1px solid #334155;overflow:hidden;">
+          <tr>
+            <td style="padding:32px 40px 24px;border-bottom:1px solid #334155;">
+              <span style="font-size:24px;font-weight:800;color:#34d399;letter-spacing:-0.5px;">HVAC DesignPro</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px 40px;">
+              <h1 style="margin:0 0 16px;font-size:24px;font-weight:800;color:#f1f5f9;line-height:1.2;">
+                Confirm this email address
+              </h1>
+              <p style="margin:0 0 28px;font-size:16px;color:#94a3b8;line-height:1.6;">
+                Someone is signing in to HVAC DesignPro with a Microsoft account that lists this email address. Enter this code to confirm the address is yours and connect that Microsoft account to it:
+              </p>
+              <div style="text-align:center;padding:24px;background-color:#0f172a;border:2px solid #334155;border-radius:16px;margin-bottom:28px;">
+                <span style="font-size:40px;font-weight:800;font-family:'Courier New',monospace;color:#34d399;letter-spacing:12px;">${code}</span>
+              </div>
+              <p style="margin:0;font-size:14px;color:#64748b;line-height:1.6;">
+                This code expires in <strong style="color:#94a3b8;">10 minutes</strong>.
+                <strong style="color:#94a3b8;">If you did not just try to sign in with Microsoft, do not share this code with anyone</strong> &mdash; ignore this email and nothing will change.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 40px;border-top:1px solid #334155;background-color:#0f172a;">
+              <p style="margin:0;font-size:11px;color:#475569;line-height:1.6;">
+                C4 Technologies — HVAC DesignPro<br>
+                This email was sent because a Microsoft sign-in named this address.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`,
+  };
+}
+
 // ── Invite Email ──────────────────────────────────────────────────────────────
 //
 // Sent when a tenant admin invites a new member via `POST /api/org/invite`.
@@ -455,7 +564,16 @@ interface InviteEmailData {
   expiresAt: string;          // ISO date — formatted humanely in the email
 }
 
-export function buildInviteEmail(data: InviteEmailData): EmailPayload & { subject: string; html: string } {
+export function buildInviteEmail(raw: InviteEmailData): EmailPayload & { subject: string; html: string } {
+  // HTML-safe view for the template; `raw` is used only for the text subject.
+  const data: InviteEmailData = {
+    ...raw,
+    orgName: escapeHtml(raw.orgName),
+    inviterName: escapeHtml(raw.inviterName),
+    inviterEmail: escapeHtml(raw.inviterEmail),
+    invitedRole: escapeHtml(raw.invitedRole),
+    redeemUrl: escapeHtml(raw.redeemUrl),
+  };
   const expiresPretty = new Date(data.expiresAt).toLocaleDateString('en-US', {
     weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
   });
@@ -464,7 +582,7 @@ export function buildInviteEmail(data: InviteEmailData): EmailPayload & { subjec
 
   return {
     to: '',
-    subject: `${data.inviterName} invited you to join ${data.orgName} on HVAC DesignPro`,
+    subject: `${subjectText(raw.inviterName)} invited you to join ${subjectText(raw.orgName)} on HVAC DesignPro`,
     html: `
 <!DOCTYPE html>
 <html>
@@ -543,7 +661,16 @@ interface ReparentEmailData {
   expiresAt: string;
 }
 
-export function buildReparentEmail(data: ReparentEmailData): EmailPayload & { subject: string; html: string } {
+export function buildReparentEmail(raw: ReparentEmailData): EmailPayload & { subject: string; html: string } {
+  // HTML-safe view for the template; `raw` is used only for the text subject.
+  const data: ReparentEmailData = {
+    ...raw,
+    orgName: escapeHtml(raw.orgName),
+    inviterName: escapeHtml(raw.inviterName),
+    inviterEmail: escapeHtml(raw.inviterEmail),
+    invitedRole: escapeHtml(raw.invitedRole),
+    appUrl: escapeHtml(raw.appUrl),
+  };
   const expiresPretty = new Date(data.expiresAt).toLocaleDateString('en-US', {
     weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
   });
@@ -551,7 +678,7 @@ export function buildReparentEmail(data: ReparentEmailData): EmailPayload & { su
 
   return {
     to: '',
-    subject: `${data.orgName} wants to bring your HVAC DesignPro account into their team`,
+    subject: `${subjectText(raw.orgName)} wants to bring your HVAC DesignPro account into their team`,
     html: `
 <!DOCTYPE html>
 <html>
@@ -617,10 +744,11 @@ export function buildReparentEmail(data: ReparentEmailData): EmailPayload & { su
 
 // ── Welcome Email ─────────────────────────────────────────────────────────────
 
-export function buildWelcomeEmail(firstName: string): EmailPayload & { subject: string; html: string } {
+export function buildWelcomeEmail(rawFirstName: string): EmailPayload & { subject: string; html: string } {
+  const firstName = escapeHtml(rawFirstName);
   return {
     to: '', // caller fills this in
-    subject: `Welcome to HVAC DesignPro, ${firstName}!`,
+    subject: `Welcome to HVAC DesignPro, ${subjectText(rawFirstName, 80)}!`,
     html: `
 <!DOCTYPE html>
 <html>

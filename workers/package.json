@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.111.0",
-    "hono": "^4.7.0",
+    "hono": "^4.13.19",
     "itty-router": "^5.0.0"
   },
   "devDependencies": {
