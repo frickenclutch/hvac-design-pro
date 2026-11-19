@@ -1,10 +1,10 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { generateId, uniqueOrgSlug } from '../utils/id';
-import { hashPassword, verifyPassword, isLegacyHash, hashToken } from '../utils/crypto';
+import { hashPassword, verifyPassword, isLegacyHash, hashToken, timingSafeEqual } from '../utils/crypto';
 import { mintTokenPair } from '../utils/session';
 import { nowIso } from '../utils/time';
-import { sendEmail, buildWelcomeEmail, buildVerificationEmail, buildPasswordResetEmail, buildMfaEmailCode } from '../utils/email';
-import { createVerificationCode, validateVerificationCode } from '../utils/verificationCodes';
+import { sendEmail, buildWelcomeEmail, buildVerificationEmail, buildPasswordResetEmail, buildMfaEmailCode, buildSsoLinkEmail } from '../utils/email';
+import { createVerificationCode, validateVerificationCode, generateCode } from '../utils/verificationCodes';
 import { checkRateLimit, recordRateLimitEvent, cleanupRateLimitEvents, checkAuthRateLimit, recordAuthFailure } from '../utils/rateLimit';
 
 /** Best-effort source IP for rate limiting. Cloudflare sets cf-connecting-ip
@@ -14,7 +14,14 @@ function clientIp(c: { req: { header(name: string): string | undefined } }): str
     ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim()
     ?? null;
 }
-import { buildAuthUrl, exchangeCodeForTokens, fetchMicrosoftProfile, buildCfAccessAuthUrl, exchangeCfAccessCode, fetchCfAccessUserInfo } from '../utils/oauth';
+/** A person-name field as accepted at account creation: a non-empty string,
+ *  at most 80 chars, with no markup or control characters. Names are rendered
+ *  into transactional email and audit rows, so they are constrained at write
+ *  time as well as escaped at render time. */
+function isValidPersonName(v: unknown): v is string {
+  return typeof v === 'string' && v.trim().length > 0 && v.length <= 80 && !/[<>\r\n\u0000-\u001f]/.test(v);
+}
+import { buildAuthUrl, exchangeCodeForTokens, fetchMicrosoftProfile, resolveMicrosoftIdentity, buildCfAccessAuthUrl, exchangeCfAccessCode, fetchCfAccessUserInfo } from '../utils/oauth';
 import { writeAuthAudit } from '../middleware/audit';
 import { notifyOrg } from '../utils/notifications';
 import { authMiddleware, type AuthUser } from '../middleware/auth';
@@ -144,6 +151,16 @@ authRoutes.post('/register', async (c) => {
     return c.json({ error: 'Missing required fields' }, 400);
   }
 
+  // Everything below is interpolated into SQL binds, emails, and audit rows —
+  // require real strings of sane length before any of it is used.
+  if (typeof email !== 'string' || typeof password !== 'string' ||
+      !isValidPersonName(firstName) || !isValidPersonName(lastName)) {
+    return c.json({ error: 'Invalid name, email, or password' }, 400);
+  }
+  if (orgName != null && (typeof orgName !== 'string' || orgName.length > 120 || /[<>\r\n]/.test(orgName))) {
+    return c.json({ error: 'Invalid organisation name' }, 400);
+  }
+
   if (password.length < 8) {
     return c.json({ error: 'Password must be at least 8 characters' }, 400);
   }
@@ -189,6 +206,12 @@ authRoutes.post('/register', async (c) => {
   ];
 
   await db.batch(batch);
+
+  // Count SUCCESSFUL registrations against the source IP too. Previously only
+  // the duplicate-email branch recorded an event, so sign-ups with fresh
+  // addresses (each one sends an email to an arbitrary recipient) were
+  // unlimited.
+  if (ip) await recordRateLimitEvent(db, `ip:${ip}`, 'register_ip');
 
   // Generate verification code and send email
   const code = await createVerificationCode(db, userId, normalizedEmail, 'email_verification');
@@ -595,22 +618,200 @@ authRoutes.post('/sso/microsoft/callback', async (c) => {
     return c.json({ error: 'Failed to fetch Microsoft profile.' }, 400);
   }
 
-  // Microsoft Graph: mail may be null for personal accounts, fall back to userPrincipalName
-  const email = (profile.mail || profile.userPrincipalName || '').toLowerCase().trim();
-  if (!email || !email.includes('@')) {
-    return c.json({ error: 'Could not determine email from Microsoft account.' }, 400);
+  // Resolve WHO this is. Identity is the immutable directory subject
+  // (tenant id + object id) from the id_token — never the email. The app
+  // registration accepts any Microsoft tenant, and a tenant admin can set the
+  // Graph `mail` attribute to any address, so matching accounts on `mail`
+  // let anyone with their own tenant sign in as an existing user.
+  const identity = resolveMicrosoftIdentity(clientId, tokens.id_token, profile);
+  if (!identity.ok) {
+    console.error('[sso] Microsoft identity rejected:', identity.reason);
+    return c.json({ error: 'Could not verify your Microsoft account. Please try again.' }, 400);
+  }
+  const ssoSubject = identity.subject;
+  const firstName = (profile.givenName || profile.displayName?.split(' ')[0] || 'User').slice(0, 80);
+  const surname = (profile.surname || profile.displayName?.split(' ').slice(1).join(' ') || '').slice(0, 80);
+
+  // A subject we have already bound, or an email the directory itself vouches
+  // for (the sign-in name, whose domain the tenant had to verify), can
+  // complete right now.
+  const alreadyBound = await db.prepare(
+    `SELECT id FROM users WHERE sso_provider = 'microsoft' AND sso_subject = ?`
+  ).bind(ssoSubject).first();
+  if (alreadyBound || identity.emailVerifiedByDirectory) {
+    return completeMicrosoftSignIn(c, { ssoSubject, email: identity.email, firstName, surname, proof: 'directory' });
   }
 
-  const firstName = profile.givenName || profile.displayName?.split(' ')[0] || 'User';
-  const surname = profile.surname || profile.displayName?.split(' ').slice(1).join(' ') || '';
+  // Otherwise the only evidence for this email is a free-form `mail`
+  // attribute, which proves nothing. Make the caller prove they control the
+  // mailbox: email a one-time code there and hold the sign-in until it comes
+  // back. The response is identical whether or not an account exists for the
+  // address, so this is not an account-existence oracle.
+  const email = identity.email;
+  const ip = clientIp(c);
+  const limit = await checkAuthRateLimit(db, 'sso_link', email, ip, { emailMax: 3, ipMax: 10, windowMinutes: 15 });
+  if (!limit.allowed) {
+    return c.json({ error: `Too many sign-in attempts. Try again in ${Math.ceil(limit.retryAfterSeconds! / 60)} minutes.` }, 429);
+  }
+  // Every send counts — each one emails an address the caller chose.
+  await recordAuthFailure(db, 'sso_link', email, ip);
 
-  // Check if user already exists
-  const existingUser = await db.prepare(
-    `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.is_platform_admin, u.is_permit_authority, u.org_id, u.status,
-            o.name as org_name, o.org_type, o.slug, o.region_code
+  const linkToken = newChallengeToken();
+  const linkCode = generateCode();
+  await db.batch([
+    // Opportunistic housekeeping; both sides are ISO strings.
+    db.prepare(`DELETE FROM sso_link_challenges WHERE expires_at < ?`).bind(nowIso()),
+    db.prepare(
+      `INSERT INTO sso_link_challenges
+         (id, provider, token_hash, subject, email, first_name, last_name, code_hash, expires_at)
+       VALUES (?, 'microsoft', ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      generateId(), await hashToken(linkToken), ssoSubject, email, firstName, surname,
+      await ssoLinkCodeHash(linkToken, linkCode),
+      new Date(Date.now() + SSO_LINK_TTL_MS).toISOString(),
+    ),
+  ]);
+
+  const linkEmail = buildSsoLinkEmail(linkCode);
+  linkEmail.to = email;
+  c.executionCtx.waitUntil(sendEmail(c.env.RESEND_API_KEY, linkEmail));
+
+  await writeAuthAudit(c, {
+    action: 'auth.sso.link_code_sent', status: 202,
+    entityLabel: email, detail: { method: 'sso_microsoft' },
+  });
+
+  return c.json({ ssoLinkRequired: true, ssoLinkToken: linkToken, email }, 202);
+});
+
+// ── SSO: Microsoft — confirm mailbox ownership, then finish sign-in ─────────
+// Second leg of the flow above. The caller presents the opaque link token the
+// callback returned plus the 6-digit code we emailed. Only then is the
+// Microsoft subject bound to (or an account created for) that address.
+authRoutes.post('/sso/microsoft/link', async (c) => {
+  const body = await c.req.json().catch(() => ({})) as { linkToken?: unknown; code?: unknown };
+  const linkToken = typeof body.linkToken === 'string' ? body.linkToken : '';
+  const code = typeof body.code === 'string' ? body.code.trim() : '';
+  if (!linkToken || !SIX_DIGITS.test(code)) {
+    return c.json({ error: 'Enter the 6-digit code from your email.' }, 400);
+  }
+
+  const db = c.env.DB;
+  const row = await db.prepare(
+    `SELECT id, subject, email, first_name, last_name, code_hash
+     FROM sso_link_challenges
+     WHERE token_hash = ? AND provider = 'microsoft'
+       AND consumed_at IS NULL AND expires_at > ?`
+  ).bind(await hashToken(linkToken), nowIso()).first<{
+    id: string; subject: string; email: string; first_name: string; last_name: string; code_hash: string;
+  }>();
+  if (!row) {
+    return c.json({ error: 'This sign-in has expired. Please sign in with Microsoft again.', ssoLinkExpired: true }, 401);
+  }
+
+  // Claim the attempt BEFORE comparing, in one statement, so parallel guesses
+  // cannot all read the same counter and each get a try.
+  const claimed = await db.prepare(
+    `UPDATE sso_link_challenges SET attempts = attempts + 1
+     WHERE id = ? AND attempts < ? AND consumed_at IS NULL`
+  ).bind(row.id, SSO_LINK_MAX_ATTEMPTS).run();
+  if (!claimed.meta.changes) {
+    return c.json({ error: 'Too many incorrect codes. Please sign in with Microsoft again.', ssoLinkExpired: true }, 429);
+  }
+
+  if (!timingSafeEqual(await ssoLinkCodeHash(linkToken, code), row.code_hash)) {
+    await writeAuthAudit(c, {
+      action: 'auth.sso.link_code_failed', status: 401,
+      entityLabel: row.email, detail: { method: 'sso_microsoft' },
+    });
+    return c.json({ error: 'That code is not correct. Please try again.' }, 401);
+  }
+
+  // Single use: only the request that flips consumed_at proceeds.
+  const consumed = await db.prepare(
+    `UPDATE sso_link_challenges SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL`
+  ).bind(nowIso(), row.id).run();
+  if (!consumed.meta.changes) {
+    return c.json({ error: 'This sign-in has expired. Please sign in with Microsoft again.', ssoLinkExpired: true }, 401);
+  }
+
+  return completeMicrosoftSignIn(c, {
+    ssoSubject: row.subject, email: row.email,
+    firstName: row.first_name, surname: row.last_name, proof: 'email_code',
+  });
+});
+
+const SSO_LINK_TTL_MS = 10 * 60 * 1000;
+const SSO_LINK_MAX_ATTEMPTS = 5;
+const SIX_DIGITS = new RegExp('^[0-9]{6}$');
+
+/** The emailed code is stored only as a hash keyed by the raw link token —
+ *  which is never stored — so a database read alone cannot recover or
+ *  brute-force the six digits. */
+function ssoLinkCodeHash(rawLinkToken: string, code: string): Promise<string> {
+  return hashToken(`${rawLinkToken}:${code}`);
+}
+
+/**
+ * Finish a Microsoft sign-in for an identity whose email is PROVEN — either
+ * the directory vouches for it (`proof: 'directory'`) or the caller returned
+ * the code we mailed there (`proof: 'email_code'`). Callers must not reach
+ * this with an unproven email unless the subject is already bound.
+ *
+ * Order of resolution:
+ *   1. an account already bound to this subject  → sign in (email irrelevant)
+ *   2. an unbound account with this email        → bind the subject, sign in
+ *   3. neither                                   → create org + user
+ * then the same MFA gate and session mint as every other login path.
+ */
+async function completeMicrosoftSignIn(
+  c: Context<{ Bindings: Env }>,
+  args: { ssoSubject: string; email: string; firstName: string; surname: string; proof: 'directory' | 'email_code' },
+): Promise<Response> {
+  const db = c.env.DB;
+  const { ssoSubject, firstName, surname, proof } = args;
+  let email = args.email;
+
+  const USER_COLUMNS =
+    `u.id, u.email, u.first_name, u.last_name, u.role, u.is_verified, u.is_platform_admin, u.is_permit_authority, u.org_id, u.status,
+     u.sso_subject, o.name as org_name, o.org_type, o.slug, o.region_code`;
+
+  let existingUser = await db.prepare(
+    `SELECT ${USER_COLUMNS}
      FROM users u JOIN organisations o ON o.id = u.org_id
-     WHERE u.email = ?`
-  ).bind(email).first();
+     WHERE u.sso_provider = 'microsoft' AND u.sso_subject = ?`
+  ).bind(ssoSubject).first();
+
+  let linkExisting = false;
+  if (existingUser) {
+    email = existingUser.email as string;
+  } else {
+    const byEmail = await db.prepare(
+      `SELECT ${USER_COLUMNS}
+       FROM users u JOIN organisations o ON o.id = u.org_id
+       WHERE u.email = ?`
+    ).bind(email).first();
+
+    if (byEmail && byEmail.sso_subject) {
+      // The address belongs to an account bound to a DIFFERENT Microsoft
+      // identity. Proving the mailbox does not entitle a second identity to
+      // take it over.
+      await writeAuthAudit(c, {
+        action: 'auth.sso.link_refused', status: 409,
+        userId: byEmail.id as string, orgId: byEmail.org_id as string,
+        entityId: byEmail.id as string, entityLabel: email,
+        detail: { method: 'sso_microsoft', reason: 'email_bound_to_other_subject', proof },
+      });
+      return c.json({
+        error: 'This email is already linked to a different Microsoft account. Sign in with your password or contact support.',
+        ssoLinkRefused: true,
+      }, 409);
+    }
+    if (byEmail) {
+      existingUser = byEmail;
+      linkExisting = true;
+    }
+  }
 
   // SSO must not resurrect a deactivated account.
   if (existingUser && (existingUser.status as string) !== 'active') {
@@ -640,7 +841,6 @@ authRoutes.post('/sso/microsoft/callback', async (c) => {
   let isPermitAuthority = false;
 
   if (existingUser) {
-    // Existing user — link SSO (mark verified if not already)
     userId = existingUser.id as string;
     orgId = existingUser.org_id as string;
     userRole = existingUser.role as string;
@@ -653,8 +853,33 @@ authRoutes.post('/sso/microsoft/callback', async (c) => {
     isPlatformAdmin = Number(existingUser.is_platform_admin ?? 0) === 1;
     isPermitAuthority = Number(existingUser.is_permit_authority ?? 0) === 1;
 
-    if (!existingUser.is_verified) {
-      await db.prepare('UPDATE users SET is_verified = 1 WHERE id = ?').bind(userId).run();
+    if (linkExisting) {
+      // Bind the subject, guarded so a concurrent link can't overwrite one.
+      const bound = await db.prepare(
+        `UPDATE users SET sso_provider = 'microsoft', sso_subject = ?
+         WHERE id = ? AND sso_subject IS NULL`
+      ).bind(ssoSubject, userId).run();
+      if (!bound.meta.changes) {
+        return c.json({ error: 'Could not link your Microsoft account. Please try again.' }, 409);
+      }
+
+      if (!existingUser.is_verified) {
+        // The row was created by a password signup that never proved the
+        // mailbox — possibly by someone else squatting this address. The
+        // real owner has now been established, so discard whatever
+        // credentials the unverified registrant set before marking verified.
+        await db.batch([
+          db.prepare('UPDATE users SET is_verified = 1, password_hash = NULL WHERE id = ?').bind(userId),
+          db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId),
+          db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').bind(userId),
+          db.prepare('DELETE FROM mfa_challenges WHERE user_id = ?').bind(userId),
+        ]);
+      }
+      await writeAuthAudit(c, {
+        action: 'auth.sso.linked', status: 200,
+        userId, orgId, actorRole: userRole, entityId: userId, entityLabel: email,
+        detail: { method: 'sso_microsoft', proof, wasVerified: !!existingUser.is_verified },
+      });
     }
   } else {
     // New user via SSO — create org + user (no password, pre-verified)
@@ -669,9 +894,9 @@ authRoutes.post('/sso/microsoft/callback', async (c) => {
       ).bind(orgId, slug, `${firstName}'s Workspace`),
 
       db.prepare(
-        `INSERT INTO users (id, org_id, email, role, first_name, last_name, is_verified)
-         VALUES (?, ?, ?, 'admin', ?, ?, 1)`
-      ).bind(userId, orgId, email, firstName, surname),
+        `INSERT INTO users (id, org_id, email, role, first_name, last_name, is_verified, sso_provider, sso_subject)
+         VALUES (?, ?, ?, 'admin', ?, ?, 1, 'microsoft', ?)`
+      ).bind(userId, orgId, email, firstName, surname, ssoSubject),
     ]);
 
     userRole = 'admin';
@@ -726,7 +951,7 @@ authRoutes.post('/sso/microsoft/callback', async (c) => {
     action: 'auth.login', status: 200,
     userId, orgId, actorRole: userRole, entityId: userId,
     entityLabel: email,
-    detail: { method: 'sso_microsoft' },
+    detail: { method: 'sso_microsoft', proof },
   });
 
   return c.json({
@@ -742,7 +967,7 @@ authRoutes.post('/sso/microsoft/callback', async (c) => {
       slug: orgSlug, regionCode
     }
   });
-});
+}
 
 // ── SSO: Cloudflare Access — Get Auth URL ───────────────────────────────────
 authRoutes.get('/sso/cloudflare/url', async (c) => {
@@ -1019,6 +1244,9 @@ authRoutes.post('/invite/:token/redeem', async (c) => {
 
   if (!firstName || !lastName) {
     return c.json({ error: 'First and last name are required' }, 400);
+  }
+  if (!isValidPersonName(firstName) || !isValidPersonName(lastName)) {
+    return c.json({ error: 'Names must be 1-80 characters with no markup.' }, 400);
   }
   if (password.length < 8) {
     return c.json({ error: 'Password must be at least 8 characters' }, 400);

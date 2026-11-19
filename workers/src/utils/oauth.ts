@@ -88,6 +88,86 @@ export async function fetchMicrosoftProfile(accessToken: string): Promise<Micros
   return res.json();
 }
 
+// ── Microsoft identity resolution ───────────────────────────────────────────
+
+export type MicrosoftIdentity =
+  | {
+      ok: true;
+      /** `${tid}:${oid}` — immutable, unique per directory user. The ONLY
+       *  value accounts are matched on for returning SSO users. */
+      subject: string;
+      /** Best email for this user, lower-cased. Display/contact only unless
+       *  `emailVerifiedByDirectory` is true. */
+      email: string;
+      /** True only when `email` is the user's sign-in name (UPN). Entra
+       *  requires a UPN's domain to be a verified domain of the tenant, so the
+       *  directory vouches for it. The Graph `mail` attribute carries no such
+       *  guarantee — a tenant admin can set it to any string — so a `mail`
+       *  that differs from the UPN is never trusted for account linking. */
+      emailVerifiedByDirectory: boolean;
+    }
+  | { ok: false; reason: string };
+
+const EMAIL_SHAPE = /^[^\s@#]+@[^\s@#]+\.[^\s@#]+$/;
+
+/** Decode (NOT verify) a JWT payload. Safe ONLY for an id_token this Worker
+ *  just received directly from the provider's token endpoint over TLS in
+ *  exchange for our client secret — OIDC Core §3.1.3.7 permits relying on
+ *  TLS server validation instead of the signature in that case. Never use
+ *  this on a token that arrived from the browser. */
+function decodeJwtPayload(jwt: string): Record<string, unknown> | null {
+  try {
+    const part = jwt.split('.')[1];
+    if (!part) return null;
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(part.length / 4) * 4, '=');
+    const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Turn a Microsoft token response + Graph profile into an identity the auth
+ * route can act on. Pure — no I/O.
+ */
+export function resolveMicrosoftIdentity(
+  clientId: string,
+  idToken: string | undefined,
+  profile: Pick<MicrosoftProfile, 'mail' | 'userPrincipalName'>,
+): MicrosoftIdentity {
+  if (!idToken) return { ok: false, reason: 'missing_id_token' };
+  const claims = decodeJwtPayload(idToken);
+  if (!claims) return { ok: false, reason: 'unreadable_id_token' };
+
+  // The token must have been issued to THIS application.
+  if (claims.aud !== clientId) return { ok: false, reason: 'audience_mismatch' };
+
+  const tid = typeof claims.tid === 'string' ? claims.tid : '';
+  const oid = typeof claims.oid === 'string' ? claims.oid : '';
+  if (!tid || !oid) return { ok: false, reason: 'missing_subject_claims' };
+
+  const upnRaw = (profile.userPrincipalName || '').toLowerCase().trim();
+  // Guest accounts carry a synthetic UPN (user_domain#EXT#@tenant…): not an
+  // address the user owns, so it never counts as a verified email.
+  const upn = EMAIL_SHAPE.test(upnRaw) ? upnRaw : '';
+  const mailRaw = (profile.mail || '').toLowerCase().trim();
+  const mail = EMAIL_SHAPE.test(mailRaw) ? mailRaw : '';
+
+  const email = mail || upn;
+  if (!email) return { ok: false, reason: 'no_usable_email' };
+
+  return {
+    ok: true,
+    subject: `${tid}:${oid}`,
+    email,
+    emailVerifiedByDirectory: upn !== '' && email === upn,
+  };
+}
+
 // ── Cloudflare Access OIDC ──────────────────────────────────────────────────
 
 export interface CfAccessUserInfo {

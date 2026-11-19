@@ -25,6 +25,7 @@ import { getCachedProject } from '../features/projects/projectStorage';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { usePreferencesStore } from '../stores/usePreferencesStore';
 import { scopedKey } from '../utils/storage';
+import { escapeHtml } from '../utils/html';
 import { buildFormJ1, MANUAL_J8_ENGINE_VERSION } from '../engines/manualJ8';
 import { ENGINE_VERSIONS } from '../engines/versions';
 import { stampBudgetEstimateAllPages, budgetEstimatePrintOverlayHtml } from '../features/reports/budgetEstimateWatermark';
@@ -497,7 +498,7 @@ export default function ManualJCalculator() {
     </head><body>
       ${buildingType === 'commercial' ? budgetEstimatePrintOverlayHtml() : ''}
       <div class="header">
-        <h1>${displayName} — Manual J Load Report</h1>
+        <h1>${escapeHtml(displayName)} — Manual J Load Report</h1>
         <p>ACCA Manual J 8th Edition — Residential Heating & Cooling Load Calculation</p>
       </div>
       <div class="timestamp">Generated: ${new Date().toLocaleString()}</div>
@@ -526,24 +527,24 @@ export default function ManualJCalculator() {
       <div class="detail-grid">
         <div class="detail-item"><span class="detail-label">Duct Loss (Heating):</span> <span class="detail-value">${fmt(wh.ductLossHeating)} BTU/hr</span></div>
         <div class="detail-item"><span class="detail-label">Duct Loss (Cooling):</span> <span class="detail-value">${fmt(wh.ductLossCooling)} BTU/hr</span></div>
-        <div class="detail-item"><span class="detail-label">Duct Location:</span> <span class="detail-value">${conditions.ductLocation}</span></div>
-        <div class="detail-item"><span class="detail-label">Construction:</span> <span class="detail-value">${conditions.constructionQuality}</span></div>
-        <div class="detail-item"><span class="detail-label">Outdoor Grains:</span> <span class="detail-value">${conditions.outdoorGrains} gr/lb</span></div>
-        <div class="detail-item"><span class="detail-label">Indoor Grains:</span> <span class="detail-value">${conditions.indoorGrains} gr/lb</span></div>
+        <div class="detail-item"><span class="detail-label">Duct Location:</span> <span class="detail-value">${escapeHtml(conditions.ductLocation)}</span></div>
+        <div class="detail-item"><span class="detail-label">Construction:</span> <span class="detail-value">${escapeHtml(conditions.constructionQuality)}</span></div>
+        <div class="detail-item"><span class="detail-label">Outdoor Grains:</span> <span class="detail-value">${escapeHtml(conditions.outdoorGrains)} gr/lb</span></div>
+        <div class="detail-item"><span class="detail-label">Indoor Grains:</span> <span class="detail-value">${escapeHtml(conditions.indoorGrains)} gr/lb</span></div>
       </div>
       <h3>Design Conditions</h3>
       <table>
-        <tr><td>Outdoor Heating</td><td>${conditions.outdoorHeatingTemp}°F</td><td>Indoor Heating</td><td>${conditions.indoorHeatingTemp}°F</td></tr>
-        <tr><td>Outdoor Cooling</td><td>${conditions.outdoorCoolingTemp}°F</td><td>Indoor Cooling</td><td>${conditions.indoorCoolingTemp}°F</td></tr>
-        <tr><td>Building Type</td><td>${buildingType}</td><td>Latitude</td><td>${conditions.latitude}°</td></tr>
-        <tr><td>Elevation</td><td>${conditions.elevation} ft</td><td>Daily Range</td><td>${conditions.coolingDailyRange}</td></tr>
+        <tr><td>Outdoor Heating</td><td>${escapeHtml(conditions.outdoorHeatingTemp)}°F</td><td>Indoor Heating</td><td>${escapeHtml(conditions.indoorHeatingTemp)}°F</td></tr>
+        <tr><td>Outdoor Cooling</td><td>${escapeHtml(conditions.outdoorCoolingTemp)}°F</td><td>Indoor Cooling</td><td>${escapeHtml(conditions.indoorCoolingTemp)}°F</td></tr>
+        <tr><td>Building Type</td><td>${escapeHtml(buildingType)}</td><td>Latitude</td><td>${escapeHtml(conditions.latitude)}°</td></tr>
+        <tr><td>Elevation</td><td>${escapeHtml(conditions.elevation)} ft</td><td>Daily Range</td><td>${escapeHtml(conditions.coolingDailyRange)}</td></tr>
       </table>
       <br/>
       <h3>Room-by-Room Results</h3>
       <table>
         <thead><tr><th style="text-align:left">Room</th><th>Heating</th><th>Sensible</th><th>Latent</th><th>Cooling Total</th></tr></thead>
         <tbody>
-          ${wh.rooms.map(r => `<tr><td style="font-weight:600">${r.roomName}</td><td>${fmt(r.heatingBtu)}</td><td>${fmt(r.coolingBtuSensible)}</td><td>${fmt(r.coolingBtuLatent)}</td><td style="font-weight:700">${fmt(r.coolingBtuTotal)}</td></tr>`).join('')}
+          ${wh.rooms.map(r => `<tr><td style="font-weight:600">${escapeHtml(r.roomName)}</td><td>${fmt(r.heatingBtu)}</td><td>${fmt(r.coolingBtuSensible)}</td><td>${fmt(r.coolingBtuLatent)}</td><td style="font-weight:700">${fmt(r.coolingBtuTotal)}</td></tr>`).join('')}
           <tr><td>TOTAL</td><td>${totalHeating.toLocaleString()}</td><td>${fmt(wh.totalCoolingSensible)}</td><td>${fmt(wh.totalCoolingLatent)}</td><td>${totalCooling.toLocaleString()}</td></tr>
         </tbody>
       </table>

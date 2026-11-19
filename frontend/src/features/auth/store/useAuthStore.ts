@@ -136,6 +136,71 @@ async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<{ data
   }
 }
 
+/** Every shape the SSO callback and the confirm-email step can answer with. */
+interface SsoResponse {
+  token?: string;
+  refreshToken?: string;
+  user?: User;
+  organisation?: Organisation;
+  email?: string;
+  mfaRequired?: boolean;
+  mfaChallengeToken?: string;
+  methods?: string[];
+  enrollmentRequired?: boolean;
+  mfaEnrollToken?: string;
+  ssoLinkRequired?: boolean;
+  ssoLinkToken?: string;
+  ssoLinkExpired?: boolean;
+  ssoLinkRefused?: boolean;
+  deactivated?: boolean;
+}
+
+/** Turn an SSO-endpoint response into the next store state. A Microsoft
+ *  sign-in can end in a session, or hand off to one of three follow-up steps
+ *  (confirm email, MFA challenge, forced MFA enrollment) — none of which
+ *  carry a session token, so each must be recognised BEFORE the
+ *  "no token means failure" fallthrough. Persists the session on success. */
+function ssoOutcome(
+  result: { data?: SsoResponse; error?: string; status: number },
+  fallbackError: string,
+): Partial<AuthState> {
+  const { data, error, status } = result;
+  const cleared = {
+    authLoading: false,
+    mfaRequired: false, mfaChallengeToken: null, mfaMethods: [] as string[],
+    enrollmentRequired: false, mfaEnrollToken: null,
+    ssoLinkRequired: false, ssoLinkToken: null,
+  };
+
+  if (status === 202 && data?.ssoLinkRequired && data.ssoLinkToken) {
+    return { ...cleared, authError: null, ssoLinkRequired: true, ssoLinkToken: data.ssoLinkToken, pendingEmail: data.email ?? null };
+  }
+  if (status === 202 && data?.mfaRequired && data.mfaChallengeToken) {
+    return {
+      ...cleared, authError: null, mfaRequired: true, mfaChallengeToken: data.mfaChallengeToken,
+      mfaMethods: data.methods ?? ['totp'], pendingEmail: data.email ?? null,
+    };
+  }
+  if (status === 403 && data?.enrollmentRequired && data.mfaEnrollToken) {
+    return { ...cleared, authError: null, enrollmentRequired: true, mfaEnrollToken: data.mfaEnrollToken, pendingEmail: data.email ?? null };
+  }
+  if (error || !data?.token || !data.user || !data.organisation) {
+    return { ...cleared, authError: error || fallbackError };
+  }
+
+  persistSession(data.token, data.user, data.organisation, data.refreshToken);
+  return {
+    ...cleared,
+    user: data.user,
+    organisation: data.organisation,
+    token: data.token,
+    isAuthenticated: true,
+    authError: null,
+    pendingVerification: false,
+    pendingEmail: null,
+  };
+}
+
 // ── Store ──────────────────────────────────────────────────────────────────────
 interface AuthState {
   user: User | null;
@@ -160,6 +225,14 @@ interface AuthState {
   mfaMethods: string[];
   enrollmentRequired: boolean;
   mfaEnrollToken: string | null;
+
+  // ── Microsoft sign-in: confirm-your-email step ───────────────────────────
+  // Set when the SSO callback returns 202 { ssoLinkRequired }: the Microsoft
+  // account's email could not be vouched for, so the server mailed a code to
+  // it and is holding the sign-in. `pendingEmail` carries the address. The
+  // token is opaque, single-use, server-hashed — NOT a session credential.
+  ssoLinkRequired: boolean;
+  ssoLinkToken: string | null;
 
   // Actions
   login: (email: string, password: string) => Promise<void>;
@@ -190,6 +263,8 @@ interface AuthState {
   ssoMicrosoft: () => Promise<void>;
   ssoCloudflare: () => Promise<void>;
   ssoCallback: (code: string, provider?: 'microsoft' | 'cloudflare') => Promise<void>;
+  /** Submit the emailed 6-digit code to finish a held Microsoft sign-in. */
+  submitSsoLink: (code: string) => Promise<void>;
 
   // Invite redemption — accepts a pending org_invites token, creates the
   // user inside the inviter's tenant, and immediately authenticates them.
@@ -236,6 +311,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   mfaMethods: [],
   enrollmentRequired: false,
   mfaEnrollToken: null,
+  ssoLinkRequired: false,
+  ssoLinkToken: null,
   // A surviving stash means the persisted session IS an impersonation.
   impersonating: !!readStash(),
 
@@ -573,27 +650,36 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       ? '/api/auth/sso/cloudflare/callback'
       : '/api/auth/sso/microsoft/callback';
 
-    const { data, error } = await apiFetch<{ token: string; refreshToken?: string; user: User; organisation: Organisation }>(callbackUrl, {
+    const result = await apiFetch<SsoResponse>(callbackUrl, {
       method: 'POST',
       body: JSON.stringify({ code }),
     });
+    set(ssoOutcome(result, 'Microsoft sign-in failed. Please try again.'));
+  },
 
-    if (error || !data) {
-      set({ authLoading: false, authError: error || 'Microsoft sign-in failed. Please try again.' });
+  submitSsoLink: async (code) => {
+    const linkToken = get().ssoLinkToken;
+    if (!linkToken) {
+      set({ authError: 'This sign-in has expired. Please sign in with Microsoft again.', ssoLinkRequired: false });
       return;
     }
-
-    persistSession(data.token, data.user, data.organisation, data.refreshToken);
-    set({
-      user: data.user,
-      organisation: data.organisation,
-      token: data.token,
-      isAuthenticated: true,
-      authLoading: false,
-      authError: null,
-      pendingVerification: false,
-      pendingEmail: null,
+    set({ authLoading: true, authError: null });
+    const result = await apiFetch<SsoResponse>('/api/auth/sso/microsoft/link', {
+      method: 'POST',
+      body: JSON.stringify({ linkToken, code }),
     });
+    // A wrong code, a malformed one, or a network blip leaves the challenge
+    // open for another try. Anything else — success, an MFA handoff, or an
+    // expired / exhausted / refused challenge — ends this step.
+    const canRetry =
+      result.status === 0 ||
+      result.status === 400 ||
+      (result.status === 401 && !result.data?.ssoLinkExpired);
+    if (canRetry) {
+      set({ authLoading: false, authError: result.error ?? 'That code is not correct. Please try again.' });
+      return;
+    }
+    set(ssoOutcome(result, 'Could not confirm your email. Please sign in with Microsoft again.'));
   },
 
   redeemInvite: async (token, data) => {
@@ -631,7 +717,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // Deliberate full logout also abandons any impersonation stash — the
     // user asked to sign out, not to fall back to the stashed session.
     localStorage.removeItem(IMPERSONATION_STASH_KEY);
-    set({ user: null, organisation: null, token: null, isAuthenticated: false, isOnboarding: false, authError: null, pendingVerification: false, pendingEmail: null, mfaRequired: false, mfaChallengeToken: null, mfaMethods: [], enrollmentRequired: false, mfaEnrollToken: null, impersonating: false });
+    set({ user: null, organisation: null, token: null, isAuthenticated: false, isOnboarding: false, authError: null, pendingVerification: false, pendingEmail: null, mfaRequired: false, mfaChallengeToken: null, mfaMethods: [], enrollmentRequired: false, mfaEnrollToken: null, ssoLinkRequired: false, ssoLinkToken: null, impersonating: false });
   },
 
   enterImpersonation: async (orgId) => {

@@ -4,6 +4,7 @@ import { sendEmail, buildInviteEmail, buildReparentEmail } from '../utils/email'
 import { computeRoleChangePlan } from '../utils/roleChange';
 import { uniqueOrgSlug } from '../utils/id';
 import { nowIso } from '../utils/time';
+import { checkRateLimit, recordRateLimitEvent } from '../utils/rateLimit';
 import {
   resolveAccessPolicy,
   sanitizeAccessPolicyPatch,
@@ -349,6 +350,10 @@ orgRoutes.put('/', async (c) => {
   const body = await c.req.json();
   const { name, orgType, regionCode, addressLine1, city, state, zip, country, phone, settings, defaultStandard } = body;
 
+  if (name !== undefined && !isCleanDisplayName(name, 120)) {
+    return c.json({ error: 'Organisation name must be 1-120 characters with no markup.' }, 400);
+  }
+
   // Build dynamic SET clause for partial updates
   const updates: string[] = [];
   const values: unknown[] = [];
@@ -436,12 +441,13 @@ orgRoutes.get('/team', async (c) => {
      ORDER BY created_at ASC`
   ).bind(user.orgId).all();
 
-  // token is included so the TeamPage "Copy redemption link" button can
-  // build a WORKING /onboarding?invite=<token> URL — it used to fall back
-  // to the row id, which the redeem lookup (WHERE token = ?) 404s. Same
-  // trust level as the POST /invite response, which already returns it to
-  // the same admin audience.
-  const { results: invites } = await db.prepare(
+  // token lets the TeamPage "Copy redemption link" button build a working
+  // /onboarding?invite=<token> URL. It is a BEARER CREDENTIAL: redeeming it
+  // creates an account with the invite's role. This route is open to every
+  // member, so the token is returned to admins ONLY (the same audience as
+  // the POST /invite response) and stripped for everyone else — otherwise a
+  // viewer could redeem a pending admin invite.
+  const { results: inviteRows } = await db.prepare(
     `SELECT id, invited_email, invited_role, status, kind,
             invited_by, expires_at, created_at, token
      FROM org_invites
@@ -449,6 +455,13 @@ orgRoutes.get('/team', async (c) => {
        AND expires_at > ?
      ORDER BY created_at DESC`
   ).bind(user.orgId, nowIso()).all();
+
+  const canSeeInviteTokens = user.role === 'admin';
+  const invites = (inviteRows ?? []).map((row) => {
+    if (canSeeInviteTokens) return row;
+    const { token: _token, ...rest } = row as Record<string, unknown>;
+    return rest;
+  });
 
   const org = await db.prepare(
     `SELECT claimed_domain, domain_verified_at
@@ -525,6 +538,15 @@ orgRoutes.put('/domain', async (c) => {
 // Admin-only. Creates a pending invite record. Email delivery is Phase 2;
 // for now the response includes the redemption token so the admin can copy
 // the link out-of-band.
+/** Invite + account-transfer emails an org may send per rolling hour. */
+const INVITE_SENDS_PER_HOUR = 50;
+
+/** Display-name fields (org name, person names) are rendered into email and
+ *  audit rows. Constrain them at write time; email.ts also escapes at render. */
+function isCleanDisplayName(v: unknown, max: number): v is string {
+  return typeof v === 'string' && v.trim().length > 0 && v.length <= max && !/[<>\r\n\u0000-\u001f]/.test(v);
+}
+
 orgRoutes.post('/invite', async (c) => {
   const user = c.get('user');
   if (user.role !== 'admin') {
@@ -545,6 +567,15 @@ orgRoutes.post('/invite', async (c) => {
   if (!['admin', 'engineer', 'tech', 'viewer'].includes(role)) {
     return c.json({ error: 'Invalid role' }, 400);
   }
+
+  // Each call sends an email to an arbitrary address from the platform's own
+  // sender. Cap it per org so a self-registered tenant can't use invites as a
+  // mail relay or burn the shared Resend quota.
+  const sendLimit = await checkRateLimit(c.env.DB, `org:${user.orgId}`, 'invite_send', INVITE_SENDS_PER_HOUR, 60);
+  if (!sendLimit.allowed) {
+    return c.json({ error: 'Too many invitations sent. Try again later.' }, 429);
+  }
+  await recordRateLimitEvent(c.env.DB, `org:${user.orgId}`, 'invite_send');
 
   let targetOrgId = user.orgId;
   if (subdivisionId) {
@@ -873,6 +904,15 @@ orgRoutes.post('/reparent', async (c) => {
     return c.json({ error: 'Invalid role' }, 400);
   }
 
+  // Each call sends an email to an arbitrary address from the platform's own
+  // sender. Cap it per org so a self-registered tenant can't use invites as a
+  // mail relay or burn the shared Resend quota.
+  const sendLimit = await checkRateLimit(c.env.DB, `org:${user.orgId}`, 'invite_send', INVITE_SENDS_PER_HOUR, 60);
+  if (!sendLimit.allowed) {
+    return c.json({ error: 'Too many invitations sent. Try again later.' }, 429);
+  }
+  await recordRateLimitEvent(c.env.DB, `org:${user.orgId}`, 'invite_send');
+
   const target = await c.env.DB.prepare(
     `SELECT id, org_id, status FROM users WHERE email = ?`
   ).bind(email).first();
@@ -1196,6 +1236,11 @@ orgRoutes.put('/profile', async (c) => {
 
   const body = await c.req.json();
   const { firstName, lastName, phone, preferences } = body;
+
+  if ((firstName !== undefined && !isCleanDisplayName(firstName, 80)) ||
+      (lastName !== undefined && !isCleanDisplayName(lastName, 80))) {
+    return c.json({ error: 'Names must be 1-80 characters with no markup.' }, 400);
+  }
 
   const updates: string[] = [];
   const values: unknown[] = [];
