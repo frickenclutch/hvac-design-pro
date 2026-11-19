@@ -10,7 +10,7 @@ import {
   type CoolingStatus, type HeatingStatus,
 } from '../engines/manualS';
 import {
-  manualJToManualS, suggestCoolingEquipment, suggestHeatingEquipment,
+  manualJToManualS,
 } from '../engines/manualJToManualS';
 import type { WholeHouseResult, DesignConditions } from '../engines/manualJ';
 import { useProjectStore } from '../stores/useProjectStore';
@@ -19,6 +19,10 @@ import ProjectGateDialog from '../components/ProjectGateDialog';
 import CatalogPickerModal from '../components/CatalogPickerModal';
 import type { ApiCatalogProductRow } from '../lib/api';
 import { scopedKey } from '../utils/storage';
+import { useProjectAutosave } from '../utils/useProjectAutosave';
+import NumericInput from '../components/NumericInput';
+import { toast } from '../stores/useToastStore';
+import { isManualSPlaceholder } from '../features/calculations/legacyPlaceholders';
 import { syncCalcToD1 } from '../features/calculations/calcStorage';
 import { useRetailerStore } from '../features/retailer/store/useRetailerStore';
 import RetailerFinderPanel from '../features/retailer/components/RetailerFinderPanel';
@@ -71,12 +75,15 @@ type SavedState = {
   afue: number;
 };
 
+// The form opens EMPTY. It used to open on a made-up 36,000 BTU/h house and a
+// made-up 38,000 BTU/h unit that passed the check, and anything that read the
+// stored inputs (/reports) treated them as the project's selection.
 function defaultState(): SavedState {
   return {
     loadsSource: 'manual',
-    totalCoolingBtu: 36000,
-    sensibleCoolingBtu: 27000,
-    heatingBtu: 45000,
+    totalCoolingBtu: 0,
+    sensibleCoolingBtu: 0,
+    heatingBtu: 0,
     outdoorCoolingTempF: 95,
     outdoorHeatingTempF: 5,
     indoorCoolingTempF: 75,
@@ -84,12 +91,12 @@ function defaultState(): SavedState {
     coolingType: 'ac',
     coolingModel: '',
     ahriRef: '',
-    coolTotalCap: 38000,
-    coolSensCap: 28000,
+    coolTotalCap: 0,
+    coolSensCap: 0,
     applyAltitude: false,
     heatingType: 'furnace_gas',
     heatingModel: '',
-    heatCap: 50000,
+    heatCap: 0,
     cap47: 0,
     cap17: 0,
     afue: 0,
@@ -97,8 +104,42 @@ function defaultState(): SavedState {
 }
 
 function loadSaved(projectId: string | null): SavedState | null {
-  try { const r = localStorage.getItem(getStorageKey(projectId)); return r ? { ...defaultState(), ...JSON.parse(r) } : null; } catch { return null; }
+  try {
+    const r = localStorage.getItem(getStorageKey(projectId));
+    if (!r) return null;
+    const state: SavedState = { ...defaultState(), ...JSON.parse(r) };
+    return isManualSPlaceholder(state) ? null : state;
+  } catch { return null; }
 }
+
+/** SavedState with its keys in one fixed order, so two snapshots of the same
+ *  values always serialise identically. */
+function packState(s: SavedState): SavedState {
+  return {
+    loadsSource: s.loadsSource,
+    totalCoolingBtu: s.totalCoolingBtu,
+    sensibleCoolingBtu: s.sensibleCoolingBtu,
+    heatingBtu: s.heatingBtu,
+    outdoorCoolingTempF: s.outdoorCoolingTempF,
+    outdoorHeatingTempF: s.outdoorHeatingTempF,
+    indoorCoolingTempF: s.indoorCoolingTempF,
+    elevationFt: s.elevationFt,
+    coolingType: s.coolingType,
+    coolingModel: s.coolingModel,
+    ahriRef: s.ahriRef,
+    coolTotalCap: s.coolTotalCap,
+    coolSensCap: s.coolSensCap,
+    applyAltitude: s.applyAltitude,
+    heatingType: s.heatingType,
+    heatingModel: s.heatingModel,
+    heatCap: s.heatCap,
+    cap47: s.cap47,
+    cap17: s.cap17,
+    afue: s.afue,
+  };
+}
+
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 function saveState(projectId: string | null, s: SavedState) {
   try { localStorage.setItem(getStorageKey(projectId), JSON.stringify(s)); } catch { /* storage full */ }
 }
@@ -136,6 +177,8 @@ export default function ManualSCalculator() {
   const showGate = !activeProjectId && !gateAccepted;
 
   const saved = useRef(loadSaved(activeProjectId) ?? defaultState()).current;
+  // Which project the state in memory was loaded for (see useProjectAutosave).
+  const [loadedProjectId, setLoadedProjectId] = useState(activeProjectId);
 
   // Design loads
   const [loadsSource, setLoadsSource] = useState<LoadsSource>(saved.loadsSource);
@@ -216,9 +259,7 @@ export default function ManualSCalculator() {
     store.generateEstimate(retailerInputs.wholeHouse, retailerInputs.conditions);
   }, [activeProjectId, retailerInputs]);
 
-  // Reload data when the active project changes
-  useEffect(() => {
-    const data = loadSaved(activeProjectId) ?? defaultState();
+  const applyState = (data: SavedState) => {
     setLoadsSource(data.loadsSource);
     setTotalCoolingBtu(data.totalCoolingBtu);
     setSensibleCoolingBtu(data.sensibleCoolingBtu);
@@ -239,40 +280,55 @@ export default function ManualSCalculator() {
     setCap47(data.cap47);
     setCap17(data.cap17);
     setAfue(data.afue);
-    setResult(null);
-    setGateAccepted(!!activeProjectId);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProjectId]);
+  };
 
-  // Auto-save (project-scoped) with skip-first-render guard
-  const isFirst = useRef(true);
-  useEffect(() => {
-    if (isFirst.current) { isFirst.current = false; return; }
-    saveState(activeProjectId, {
+  // Auto-save (project-scoped) — only for edits the user made, never while the
+  // state in memory belongs to another project. Any edit also retires the
+  // verdict on screen: a PASS must not outlive the numbers it was checked on.
+  const rebaseline = useProjectAutosave<SavedState>(
+    activeProjectId,
+    loadedProjectId,
+    packState({
       loadsSource, totalCoolingBtu, sensibleCoolingBtu, heatingBtu,
       outdoorCoolingTempF, outdoorHeatingTempF, indoorCoolingTempF, elevationFt,
       coolingType, coolingModel, ahriRef, coolTotalCap, coolSensCap, applyAltitude,
       heatingType, heatingModel, heatCap, cap47, cap17, afue,
-    });
-    setSaveStatus('saved');
+    }),
+    (state) => {
+      saveState(activeProjectId, state);
+      setResult(null);
+      setSaveStatus('saved');
+    },
+  );
+  useEffect(() => {
+    if (saveStatus !== 'saved') return;
     const t = setTimeout(() => setSaveStatus('idle'), 1500);
     return () => clearTimeout(t);
-  }, [loadsSource, totalCoolingBtu, sensibleCoolingBtu, heatingBtu,
-      outdoorCoolingTempF, outdoorHeatingTempF, indoorCoolingTempF, elevationFt,
-      coolingType, coolingModel, ahriRef, coolTotalCap, coolSensCap, applyAltitude,
-      heatingType, heatingModel, heatCap, cap47, cap17, afue, activeProjectId]);
+  }, [saveStatus]);
+
+  // Reload data when the active project changes
+  useEffect(() => {
+    if (loadedProjectId === activeProjectId) return;
+    const data = packState(loadSaved(activeProjectId) ?? defaultState());
+    applyState(data);
+    rebaseline(data);
+    setLoadedProjectId(activeProjectId);
+    setResult(null);
+    setGateAccepted(!!activeProjectId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProjectId]);
 
   const importFromManualJ = useCallback(() => {
     try {
       const currentProjectId = useProjectStore.getState().activeProjectId;
       const resultsRaw = localStorage.getItem(getMjResultsKey(currentProjectId));
       if (!resultsRaw) {
-        alert('No Manual J results found. Run a Manual J calculation first.');
+        toast.error('No current Manual J results for this project. Run (or re-run) the Manual J calculation first.');
         return;
       }
       const mj = JSON.parse(resultsRaw) as WholeHouseResult;
       if (typeof mj.totalCoolingBtu !== 'number') {
-        alert('Invalid Manual J results. Please re-run the Manual J calculation.');
+        toast.error('The stored Manual J results are unreadable. Re-run the Manual J calculation.');
         return;
       }
 
@@ -291,19 +347,52 @@ export default function ManualSCalculator() {
       setIndoorCoolingTempF(loads.indoorCoolingTempF);
       setElevationFt(loads.elevationFt);
 
-      // Seed neutral starting equipment so the first calc is meaningful.
-      const csug = suggestCoolingEquipment(loads, coolingType);
-      setCoolTotalCap(csug.totalCoolingCapacityBtu);
-      setCoolSensCap(csug.sensibleCoolingCapacityBtu);
-      const hsug = suggestHeatingEquipment(loads, heatingType);
-      setHeatCap(hsug.heatingCapacityBtu);
-
+      // Loads only. Equipment capacities are NOT filled in: seeding them at
+      // 105% / 110% of the load guaranteed a "Within Manual S Limits" verdict
+      // for a unit that does not exist. The user enters (or picks from the
+      // catalog) the real equipment's capacities.
       setLoadsSource('manual-j');
       setResult(null);
-    } catch { alert('Failed to parse Manual J data.'); }
-  }, [coolingType, heatingType]);
+      toast.success('Design loads imported from Manual J. Enter the equipment capacities from the manufacturer data.');
+    } catch { toast.error('Could not read the Manual J data. Re-run the Manual J calculation.'); }
+  }, []);
+
+  const validate = (): string | null => {
+    const fields: [string, number][] = [
+      ['Total cooling load', totalCoolingBtu], ['Sensible cooling load', sensibleCoolingBtu],
+      ['Heating load', heatingBtu], ['Outdoor cooling temperature', outdoorCoolingTempF],
+      ['Outdoor heating temperature', outdoorHeatingTempF], ['Indoor cooling temperature', indoorCoolingTempF],
+      ['Elevation', elevationFt], ['Total cooling capacity', coolTotalCap],
+      ['Sensible cooling capacity', coolSensCap], ['Heating capacity', heatCap],
+    ];
+    for (const [name, value] of fields) {
+      if (!isNum(value)) return `${name} is empty — enter a value (0 if it does not apply).`;
+      if (name !== 'Elevation' && !name.includes('temperature') && value < 0) return `${name} cannot be negative.`;
+    }
+    if (!(totalCoolingBtu > 0) && !(heatingBtu > 0)) {
+      return 'Enter the design loads, or use "Import from Manual J", before checking equipment.';
+    }
+    if (sensibleCoolingBtu > totalCoolingBtu) return 'Sensible cooling load cannot exceed the total cooling load.';
+    if (totalCoolingBtu > 0 && !(coolTotalCap > 0 && coolSensCap > 0)) {
+      return 'Enter the cooling equipment\'s total and sensible capacity at design conditions (manufacturer expanded-performance data).';
+    }
+    if (coolSensCap > coolTotalCap) return 'Sensible cooling capacity cannot exceed total cooling capacity.';
+    if (heatingBtu > 0 && heatingType !== 'none' && !(heatCap > 0)) {
+      return 'Enter the heating equipment\'s output capacity, or set the heating type to None.';
+    }
+    return null;
+  };
+
+  // Is the equipment under test an identifiable product? A verdict on bare
+  // numbers is a sizing exercise, not an equipment selection.
+  const coolingIdentified = !(totalCoolingBtu > 0) || !!coolingModel.trim() || !!ahriRef.trim();
+  const heatingIdentified = !(heatingBtu > 0) || heatingType === 'none' || !!heatingModel.trim()
+    || (heatingType === 'heat_pump' && coolingType === 'heat_pump' && (!!coolingModel.trim() || !!ahriRef.trim()));
+  const equipmentIdentified = coolingIdentified && heatingIdentified;
 
   const runCalculation = useCallback(() => {
+    const invalid = validate();
+    if (invalid) { toast.error(invalid); return; }
     const t0 = performance.now();
     const input: ManualSInput = {
       systemName: activeProjectName || 'Manual S Selection',
@@ -412,34 +501,20 @@ export default function ManualSCalculator() {
     setResult(null);
   }, []);
 
-  const resetAll = useCallback(() => {
-    const d = defaultState();
-    setLoadsSource(d.loadsSource);
-    setTotalCoolingBtu(d.totalCoolingBtu);
-    setSensibleCoolingBtu(d.sensibleCoolingBtu);
-    setHeatingBtu(d.heatingBtu);
-    setOutdoorCoolingTempF(d.outdoorCoolingTempF);
-    setOutdoorHeatingTempF(d.outdoorHeatingTempF);
-    setIndoorCoolingTempF(d.indoorCoolingTempF);
-    setElevationFt(d.elevationFt);
-    setCoolingType(d.coolingType);
-    setCoolingModel(d.coolingModel);
-    setAhriRef(d.ahriRef);
-    setCoolTotalCap(d.coolTotalCap);
-    setCoolSensCap(d.coolSensCap);
-    setApplyAltitude(d.applyAltitude);
-    setHeatingType(d.heatingType);
-    setHeatingModel(d.heatingModel);
-    setHeatCap(d.heatCap);
-    setCap47(d.cap47);
-    setCap17(d.cap17);
-    setAfue(d.afue);
+  const resetAll = () => {
+    const d = packState(defaultState());
+    applyState(d);
+    rebaseline(d); // the blank form is the new starting point, not an edit to save
     setResult(null);
     localStorage.removeItem(getStorageKey(activeProjectId));
-  }, [activeProjectId]);
+  };
 
   const exportPdf = useCallback(async () => {
-    if (!result) { alert('Run a calculation first.'); return; }
+    if (!result) { toast.error('Run the equipment check first.'); return; }
+    if (!equipmentIdentified) {
+      toast.error('Enter the equipment model or AHRI reference before exporting — the report has to name the unit it validates.');
+      return;
+    }
     const { default: JsPDF } = await import('jspdf');
     const doc = new JsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
     const pw = doc.internal.pageSize.getWidth();
@@ -478,7 +553,7 @@ export default function ManualSCalculator() {
       y += 8;
     };
 
-    pairBlock('Design Loads (Manual J)', [
+    pairBlock(loadsSource === 'manual-j' ? 'Design Loads (imported from Manual J)' : 'Design Loads (entered manually)', [
       ['Total cooling', `${totalCoolingBtu.toLocaleString()} BTU/h`],
       ['Sensible cooling', `${sensibleCoolingBtu.toLocaleString()} BTU/h`],
       ['Latent cooling', `${derivedLatent.toLocaleString()} BTU/h`],
@@ -529,7 +604,7 @@ export default function ManualSCalculator() {
     doc.save(`ManualS_EquipmentSelection_${safeName}_${new Date().toISOString().slice(0, 10)}.pdf`);
   }, [result, activeProjectName, coolingType, coolingModel, ahriRef, heatingModel,
       totalCoolingBtu, sensibleCoolingBtu, derivedLatent, heatingBtu,
-      outdoorCoolingTempF, outdoorHeatingTempF, elevationFt]);
+      outdoorCoolingTempF, outdoorHeatingTempF, elevationFt, equipmentIdentified, loadsSource]);
 
   const isHeatPumpHeating = heatingType === 'heat_pump';
   const isFurnace = heatingType === 'furnace_gas' || heatingType === 'furnace_electric';
@@ -594,7 +669,7 @@ export default function ManualSCalculator() {
             <div>
               <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Latent Cooling (derived)</label>
               <div className="w-full bg-slate-900/40 border border-slate-800/50 rounded-xl py-3.5 px-4 text-slate-300 font-mono text-sm min-h-[44px] flex items-center">
-                {derivedLatent.toLocaleString()} <span className="text-slate-500 ml-1">BTU/h</span>
+                {isNum(derivedLatent) ? derivedLatent.toLocaleString() : '—'} <span className="text-slate-500 ml-1">BTU/h</span>
               </div>
             </div>
             <NumField label="Heating (BTU/h)" value={heatingBtu} onChange={(v) => { setHeatingBtu(v); setLoadsSource('manual'); }} step={100} />
@@ -725,6 +800,15 @@ export default function ManualSCalculator() {
         {/* ═══ Results ═══ */}
         {result && (
           <section ref={resultsRef} className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {!equipmentIdentified && (
+              <div role="status" className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 flex items-start gap-3 text-sm text-amber-200">
+                <Info className="w-4 h-4 mt-0.5 shrink-0 text-amber-400" />
+                <span>
+                  No model or AHRI reference is entered, so this is a check of capacities only — not a selection of a
+                  real unit. Add the model or AHRI reference to export the report.
+                </span>
+              </div>
+            )}
             {/* Overall verdict banner */}
             <div className={`glass-panel rounded-2xl border p-5 flex items-center gap-4 ${result.overallPass ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
               {result.overallPass
@@ -850,8 +934,7 @@ function NumField({ label, value, onChange, step }: { label: string; value: numb
   return (
     <div>
       <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{label}</label>
-      <input type="number" value={value} step={step}
-        onChange={e => onChange(Number(e.target.value))}
+      <NumericInput value={value} step={step} onChange={onChange} aria-label={label}
         className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl py-3.5 px-4 text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all min-h-[44px]" />
     </div>
   );
