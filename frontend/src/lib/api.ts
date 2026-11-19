@@ -278,6 +278,11 @@ export interface PricingSourceRow {
   item_count: number;
   created_at?: string;
   updated_at?: string;
+  /** Inbound feed (kind='webhook') bookkeeping — set by routes/pricing.ts. */
+  last_ingest_at?: string | null;
+  last_ingest_summary?: string | null;
+  /** 0/1 — whether an ingest token has been issued. The hash itself never leaves the server. */
+  has_ingest_token?: number;
 }
 export interface PricingItemRow {
   category: string;
@@ -294,6 +299,17 @@ export interface PricingStatus {
   activeCount: number;
   itemCount: number;
   sources: PricingSourceRow[];
+}
+/** Result of pushing a JSON price book (public inbound feed or admin push). */
+export interface PricingIngestResult {
+  ok: boolean;
+  sourceId: string;
+  dryRun: boolean;
+  loaded: number;
+  skipped: number;
+  errors: string[];
+  matchKeys: string[];
+  status: string;
 }
 
 class ApiClient {
@@ -663,6 +679,53 @@ class ApiClient {
     return `${API_BASE}/api/uploads/${id}${token ? `?token=${token}` : ''}`;
   }
 
+  // ── LiDAR scan captures ────────────────────────────────────────────────────
+  // Payload to R2 + a scan_captures review-lifecycle row. The client parses
+  // BEFORE uploading (engines/roomScan.ts) and sends the summary along, so the
+  // record is born 'parsed' in one round trip. Offline-first: callers treat a
+  // failure here as "no server record", never as "no import".
+  async uploadScan(
+    file: File,
+    projectId: string,
+    meta: { source: string; parsedSummary?: string; engineVersion?: string; headingDeg?: number; capturedAt?: string },
+  ) {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('projectId', projectId);
+    formData.append('source', meta.source);
+    if (meta.parsedSummary) formData.append('parsedSummary', meta.parsedSummary);
+    if (meta.engineVersion) formData.append('engineVersion', meta.engineVersion);
+    if (meta.headingDeg !== undefined) formData.append('headingDeg', String(meta.headingDeg));
+    if (meta.capturedAt) formData.append('capturedAt', meta.capturedAt);
+    return this.request<{ id: string; projectId: string; source: string; status: string; filename: string; sizeBytes: number }>('/api/scans', {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  async setScanStatus(id: string, status: 'confirmed' | 'discarded') {
+    return this.request<{ id: string; status: string }>(`/api/scans/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  async listScans(projectId: string) {
+    return this.request<{ scans: Array<{
+      id: string;
+      source: string;
+      status: string;
+      filename: string | null;
+      size_bytes: number;
+      parsed_summary: string | null;
+      engine_version: string | null;
+      heading_deg: number | null;
+      captured_at: string | null;
+      created_by: string | null;
+      created_at: string;
+    }> }>(`/api/scans/project/${projectId}`);
+  }
+
   // Avatar (own account) — sets/removes users.avatar_key + the R2 object. The
   // public read counterpart is GET /avatars/:id (see utils/avatar.ts).
   async uploadAvatar(file: File) {
@@ -688,13 +751,37 @@ class ApiClient {
   async pricingListSources() {
     return this.request<{ sources: PricingSourceRow[] }>('/api/pricing/sources');
   }
-  async pricingAddSource(kind: 'webhook' | 'api', name: string, url: string) {
+  // kind 'webhook' = INBOUND feed: we issue the endpoint + token and the
+  // supplier pushes to us (no url). kind 'api' = the supplier's endpoint we
+  // would poll (registered only; live pull is a later phase).
+  async pricingAddSource(kind: 'webhook' | 'api', name: string, url?: string, categoryMap?: Record<string, string>) {
     return this.request<PricingSourceRow>('/api/pricing/sources', {
       method: 'POST',
-      body: JSON.stringify({ kind, name, url }),
+      body: JSON.stringify({ kind, name, ...(url ? { url } : {}), ...(categoryMap ? { categoryMap } : {}) }),
     });
   }
-  async pricingUpdateSource(id: string, patch: { name?: string; status?: 'active' | 'pending' | 'disabled' }) {
+  /** Issue (or rotate) the bearer token a supplier presents on the inbound
+   *  feed. The plaintext comes back ONCE — the server stores only its hash. */
+  async pricingRotateIngestToken(id: string) {
+    return this.request<{ token: string; sourceId: string; ingestPath: string }>(`/api/pricing/sources/${id}/token`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  }
+  /** Push a JSON price book through the same normalizer the public inbound
+   *  endpoint uses (admin, session-authed). dryRun validates without writing. */
+  async pricingIngestJson(id: string, items: unknown[], dryRun = false) {
+    return this.request<PricingIngestResult>(`/api/pricing/sources/${id}/ingest`, {
+      method: 'POST',
+      body: JSON.stringify({ items, dryRun }),
+    });
+  }
+  /** Absolute URL a supplier's job POSTs to for an inbound feed source. */
+  pricingIngestUrl(id: string): string {
+    const base = API_BASE || (typeof window !== 'undefined' ? window.location.origin : '');
+    return `${base}/api/pricing/ingest/${id}`;
+  }
+  async pricingUpdateSource(id: string, patch: { name?: string; status?: 'active' | 'pending' | 'disabled'; categoryMap?: Record<string, string> | null }) {
     return this.request<{ id: string; name: string; status: string }>(`/api/pricing/sources/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),

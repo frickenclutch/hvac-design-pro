@@ -89,6 +89,12 @@ const STRICT_TABLES = [
   // two cron retention DELETEs are age/count-only sweeps across all tenants and
   // carry inline `tenant-scope-ok:` waivers.
   'notifications',
+  // ── LiDAR scan captures (migration 0022, routes/scans.ts) ─────────────────
+  // Org-owned (org_id NOT NULL + indexed). Every scans.ts query carries
+  // `AND org_id = ?` bound to c.get('user').orgId; the insert first verifies
+  // the target project against the same session org. tech+ create,
+  // engineer+ confirm, per the §5 role matrix.
+  'scan_captures',
 ];
 
 /**

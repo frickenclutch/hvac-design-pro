@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import * as fabric from 'fabric';
-import { FileText, Crosshair, Sparkles, Loader2, AlertTriangle, Ruler } from 'lucide-react';
+import { FileText, Crosshair, Sparkles, Loader2, AlertTriangle, Ruler, Radar, RotateCcw, RotateCw } from 'lucide-react';
 import { useCadStore } from '../store/useCadStore';
 import type { AiExtractRequest } from '../store/useCadStore';
 import { parseFeetInches } from '../utils/underlayImport';
@@ -15,6 +15,7 @@ import type { RoomInput, DesignConditions } from '../../../engines/manualJ';
 import { generateCadFloorFromManualJ } from '../../../engines/manualJToCad';
 import { buildGeometryTakeoff, sanitizePolygon, impliesRescale } from '../../../engines/blueprintToCad';
 import type { GeometryRoom, NormalizedPoint, UnderlayRect } from '../../../engines/blueprintToCad';
+import { buildScanTakeoff } from '../../../engines/scanToCad';
 import { segmentsToWalls } from '../../../engines/pdfVector';
 import type { VectorSegment } from '../../../engines/pdfVector';
 import { traceUnderlayVectors, NoVectorSourceError } from '../utils/vectorTrace';
@@ -33,6 +34,7 @@ export default function BlueprintDialogs() {
   const aiExtractRequest = useCadStore(s => s.aiExtractRequest);
   const underlayMigration = useCadStore(s => s.underlayMigration);
   const vectorTraceRequest = useCadStore(s => s.vectorTraceRequest);
+  const scanImportRequest = useCadStore(s => s.scanImportRequest);
 
   return (
     <>
@@ -42,6 +44,7 @@ export default function BlueprintDialogs() {
       {calibrationRequest && <CalibrateScale />}
       {aiExtractRequest && <AiExtract />}
       {vectorTraceRequest && <VectorTrace />}
+      {scanImportRequest && <ScanImport />}
     </>
   );
 }
@@ -551,6 +554,249 @@ function ExtractionScanner() {
       </div>
       <div className="let-scan-line" />
     </div>
+  );
+}
+
+// ── LiDAR scan import review ─────────────────────────────────────────────────
+// Measured geometry (RoomPlan JSON) with mandatory human review — the LET
+// idiom applied to a scan: ghost on the canvas, warnings said out loud,
+// nothing applied until Confirm. The inversion vs LET: the scan's window and
+// door DIMENSIONS are real measurements and DO import; what it cannot know is
+// constructions (R-values, glazing packages) and true north — both are the
+// reviewer's explicit job here, per ACCA rule 4.
+
+/** Shoelace area of a plan-feet polygon — row display only. */
+function scanPolyAreaFt(pts: Array<{ x: number; y: number }>): number {
+  let sum = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    sum += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(sum) / 2;
+}
+
+function ScanImport() {
+  const request = useCadStore(s => s.scanImportRequest)!;
+  const setRequest = useCadStore(s => s.setScanImportRequest);
+  const pxPerFt = useCadStore(s => s.projectScale.pxPerFt);
+
+  const [rotationDeg, setRotationDeg] = useState(0);
+  const [applyCeiling, setApplyCeiling] = useState(true);
+  const [included, setIncluded] = useState<boolean[]>(() => request.model.rooms.map(() => true));
+  const [names, setNames] = useState<string[]>(() => request.model.rooms.map(r => r.name));
+
+  // Room selection edits the MODEL side, before the takeoff: walls are
+  // measured geometry and always import; the checkboxes only govern which
+  // room records ride along. Renames flow the same way so the ghost, the CAD
+  // room, and this list can never disagree.
+  const reviewedModel = useMemo(() => ({
+    ...request.model,
+    rooms: request.model.rooms
+      .map((r, i) => ({ ...r, name: names[i].trim() || r.name }))
+      .filter((_, i) => included[i]),
+  }), [request.model, names, included]);
+
+  const takeoff = useMemo(
+    () => buildScanTakeoff(reviewedModel, pxPerFt, { originX: 120, originY: 120, rotationDeg }, request.captureId),
+    [reviewedModel, pxPerFt, rotationDeg, request.captureId],
+  );
+
+  // Ghost the measured geometry on the canvas — sky blue, distinct from LET's
+  // green: blue is a measurement, green is a trace.
+  useEffect(() => {
+    const canvas = useCadStore.getState().canvas;
+    if (!canvas) return;
+    const objs: fabric.Object[] = [];
+    for (const w of takeoff.walls) {
+      const line = new fabric.Line([w.x1, w.y1, w.x2, w.y2], {
+        stroke: '#38bdf8',
+        strokeWidth: 2,
+        strokeDashArray: [8, 4],
+        selectable: false,
+        evented: false,
+        objectCaching: false,
+        excludeFromExport: true,
+      });
+      line.name = 'scan-preview';
+      objs.push(line);
+    }
+    for (const p of takeoff.roomPolygons) {
+      const poly = new fabric.Polygon(p.points, {
+        fill: 'rgba(56,189,248,0.06)',
+        stroke: '#38bdf8',
+        strokeWidth: 1,
+        strokeDashArray: [4, 4],
+        selectable: false,
+        evented: false,
+        objectCaching: false,
+        excludeFromExport: true,
+      });
+      poly.name = 'scan-preview';
+      objs.push(poly);
+    }
+    objs.forEach(o => canvas.add(o));
+    canvas.requestRenderAll();
+    return () => {
+      objs.forEach(o => canvas.remove(o));
+      canvas.requestRenderAll();
+    };
+  }, [takeoff]);
+
+  const dismiss = () => {
+    // Best-effort: the reviewer rejected the capture; tell the record so.
+    if (request.captureId) void api.setScanStatus(request.captureId, 'discarded').catch(() => { /* offline — row stays 'parsed' */ });
+    setRequest(null);
+  };
+
+  const rotate = (delta: number) => setRotationDeg(d => d + delta);
+  const displayDeg = ((rotationDeg % 360) + 360) % 360;
+
+  const windowCount = takeoff.openings.filter(o => o.type === 'window').length;
+  const doorCount = takeoff.openings.length - windowCount;
+
+  const confirm = () => {
+    if (takeoff.walls.length === 0) {
+      toast.warning('No walls to import from this scan.');
+      return;
+    }
+    useCadStore.setState((s) => ({
+      floors: s.floors.map(f => f.id !== s.activeFloorId ? f : {
+        ...f,
+        walls: [...f.walls, ...takeoff.walls],
+        openings: [...f.openings, ...takeoff.openings],
+        rooms: [...f.rooms, ...takeoff.rooms],
+        // Reviewer-approved measured ceiling → floor height (full precision).
+        ...(applyCeiling && takeoff.ceilingHeightFt !== null ? { heightFt: takeoff.ceilingHeightFt } : {}),
+      }),
+      isDirty: true,
+      undoStack: [],
+      redoStack: [],
+    }));
+    if (request.captureId) {
+      void api.setScanStatus(request.captureId, 'confirmed').catch(() => {
+        toast.warning('Geometry applied — the server capture record could not be updated (offline?).');
+      });
+    }
+    setRequest(null);
+    toast.success(
+      `${takeoff.walls.length} measured wall${takeoff.walls.length === 1 ? '' : 's'}, ${takeoff.openings.length} opening${takeoff.openings.length === 1 ? '' : 's'}, and ${takeoff.rooms.length} room${takeoff.rooms.length === 1 ? '' : 's'} imported from the scan. ` +
+      'Assign wall constructions and glazing packages, then pull the rooms into Manual J.',
+    );
+    useGuidanceStore.getState().setHint('mj_calculate');
+  };
+
+  return (
+    <DialogShell icon={<Radar className="w-5 h-5" />} title="Import LiDAR Scan" variant="panel">
+      <p className="text-xs text-slate-500 mb-3 break-words">
+        <span className="text-slate-300">{request.fileName}</span>
+        {request.captureId === null && ' — local only (no server record)'}
+      </p>
+
+      {/* What a scan IS and ISN'T — said every time, like LET's glazing note. */}
+      <div className="flex gap-2 items-start mb-3 p-3 rounded-xl border border-sky-500/30 bg-sky-500/5 text-sky-200 text-xs">
+        <Radar className="w-4 h-4 shrink-0 mt-0.5" />
+        <span>
+          Dashed <strong>blue</strong> geometry is <strong>measured</strong> — wall lengths, heights, and
+          window/door sizes come from the LiDAR capture and import at true dimensions with scan provenance.
+        </span>
+      </div>
+      <div className="flex gap-2 items-start mb-3 p-3 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-200 text-xs">
+        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+        <span>
+          A scan cannot measure <strong>constructions</strong>: walls arrive at R-13 defaults and windows
+          without U-factor/SHGC. Assign real assemblies before the load calc is accurate. And rotate the
+          plan so its top faces <strong>true North</strong> — orientation drives the solar load.
+        </span>
+      </div>
+
+      {takeoff.warnings.length > 0 && (
+        <ul className="mb-3 space-y-1 max-h-24 overflow-y-auto">
+          {takeoff.warnings.map((w, i) => (
+            <li key={i} className="text-xs text-amber-400/90 flex gap-1.5">
+              <span className="shrink-0">⚠</span><span className="break-words">{w}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Counts + north alignment */}
+      <div className="flex items-center justify-between gap-2 mb-3 text-xs text-slate-400">
+        <span>
+          <span className="text-slate-200">{takeoff.walls.length}</span> walls ·{' '}
+          <span className="text-slate-200">{windowCount}</span> windows ·{' '}
+          <span className="text-slate-200">{doorCount}</span> doors ·{' '}
+          <span className="text-slate-200">{takeoff.rooms.length}</span> rooms
+        </span>
+        <span className="flex items-center gap-1">
+          <button onClick={() => rotate(-90)} aria-label="Rotate 90° counter-clockwise" className="p-2 rounded-lg hover:bg-slate-800/80 text-slate-300 min-h-[44px] min-w-[44px] flex items-center justify-center"><RotateCcw className="w-4 h-4" /></button>
+          <button onClick={() => rotate(-5)} aria-label="Rotate 5° counter-clockwise" className="px-2 py-2 rounded-lg hover:bg-slate-800/80 text-slate-400 min-h-[44px]">−5°</button>
+          <span className="w-10 text-center text-slate-200 tabular-nums">{displayDeg}°</span>
+          <button onClick={() => rotate(5)} aria-label="Rotate 5° clockwise" className="px-2 py-2 rounded-lg hover:bg-slate-800/80 text-slate-400 min-h-[44px]">+5°</button>
+          <button onClick={() => rotate(90)} aria-label="Rotate 90° clockwise" className="p-2 rounded-lg hover:bg-slate-800/80 text-slate-300 min-h-[44px] min-w-[44px] flex items-center justify-center"><RotateCw className="w-4 h-4" /></button>
+        </span>
+      </div>
+
+      {takeoff.ceilingHeightFt !== null && (
+        <label className="flex items-start gap-2 mb-3 p-3 rounded-xl border border-sky-500/30 bg-sky-500/5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={applyCeiling}
+            onChange={(e) => setApplyCeiling(e.target.checked)}
+            className="w-4 h-4 accent-sky-500 mt-0.5 shrink-0"
+          />
+          <span className="text-xs text-slate-300">
+            Apply the measured ceiling height ({takeoff.ceilingHeightFt.toFixed(1)} ft) to this floor
+            <span className="block text-slate-500 mt-0.5">Median of the scanned wall heights. Uncheck to keep the floor's current height.</span>
+          </span>
+        </label>
+      )}
+
+      <div className="max-h-[30vh] overflow-y-auto -mx-1 px-1 mb-4">
+        {request.model.rooms.length === 0 && (
+          <p className="text-sm text-slate-500 py-4">
+            No room outlines in this scan — the walls still import; run Detect Rooms (or draw rooms) afterward.
+          </p>
+        )}
+        {request.model.rooms.map((r, i) => (
+          <div key={r.id} className={`flex items-center gap-2 py-2 border-b border-slate-800 ${included[i] ? '' : 'opacity-40'}`}>
+            <input
+              type="checkbox"
+              checked={included[i]}
+              onChange={(e) => setIncluded(prev => prev.map((v, idx) => (idx === i ? e.target.checked : v)))}
+              className="w-4 h-4 accent-sky-500 shrink-0"
+              aria-label={`Include ${names[i]}`}
+            />
+            <input
+              type="text"
+              value={names[i]}
+              onChange={(e) => setNames(prev => prev.map((v, idx) => (idx === i ? e.target.value : v)))}
+              className="flex-1 min-w-0 bg-slate-900/60 border border-slate-700/60 rounded-lg px-2 py-1.5 text-sm text-slate-100 focus:outline-none focus:border-sky-500/60"
+              aria-label="Room name"
+            />
+            <span className="text-xs text-slate-500 tabular-nums shrink-0">
+              {r.polygon ? `${scanPolyAreaFt(r.polygon).toFixed(1)} ft²` : 'no outline'}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <button
+          onClick={dismiss}
+          className="min-h-[44px] px-4 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 transition-colors text-sm"
+        >
+          Discard Scan
+        </button>
+        <button
+          onClick={confirm}
+          disabled={takeoff.walls.length === 0}
+          className="min-h-[44px] px-4 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
+        >
+          Import Measured Geometry
+        </button>
+      </div>
+    </DialogShell>
   );
 }
 
