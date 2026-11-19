@@ -11,6 +11,9 @@ import { toast } from '../stores/useToastStore';
 import { scopedKey } from '../utils/storage';
 import { syncCalcToD1 } from '../features/calculations/calcStorage';
 import { ENGINE_VERSIONS } from '../engines/versions';
+import { useProjectAutosave } from '../utils/useProjectAutosave';
+import NumericInput from '../components/NumericInput';
+import { isAedPlaceholder } from '../features/calculations/legacyPlaceholders';
 
 // ── Display formatting ──────────────────────────────────────────────────────
 function fmt(value: number): string {
@@ -31,7 +34,10 @@ function getMjResultsKey(projectId: string | null): string {
 function loadSavedInputs(projectId: string | null): GlassGroup[] | null {
   try {
     const raw = localStorage.getItem(getInputsKey(projectId));
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const groups = JSON.parse(raw);
+    // The invented house older builds saved on open is not this project's glass.
+    return isAedPlaceholder(groups) ? null : groups;
   } catch { return null; }
 }
 
@@ -66,13 +72,10 @@ function saveResults(projectId: string | null, result: AedResult) {
 // ── Default glass groups ────────────────────────────────────────────────────
 const ORIENTATIONS: Exposure[] = ['N', 'S', 'E', 'W', 'NE', 'NW', 'SE', 'SW'];
 
+// One blank row. The page used to open on an invented house (S 64 / W 24 /
+// E 18 / N 12 ft²) that could be run, stored and reported as the project's AED.
 function createDefaultGroups(): GlassGroup[] {
-  return [
-    { orientation: 'S', areaSqFt: 64, shgc: 0.25, interiorShading: 0.7 },
-    { orientation: 'W', areaSqFt: 24, shgc: 0.25, interiorShading: 0.7 },
-    { orientation: 'E', areaSqFt: 18, shgc: 0.25, interiorShading: 0.7 },
-    { orientation: 'N', areaSqFt: 12, shgc: 0.25, interiorShading: 0.7 },
-  ];
+  return [{ orientation: 'S', areaSqFt: 0, shgc: 0.25, interiorShading: 0.7 }];
 }
 
 // ── Auto-import from Manual J data ──────────────────────────────────────────
@@ -162,26 +165,50 @@ export default function AedAnalysis() {
 
   const [groups, setGroups] = useState<GlassGroup[]>(initialGroups);
   const [result, setResult] = useState<AedResult | null>(null);
-  const isFirstRender = useRef(true);
+  // Which project `groups` was loaded for. It trails `activeProjectId` by the
+  // one render in which the state is still the previous project's.
+  const [loadedProjectId, setLoadedProjectId] = useState(activeProjectId);
 
-  // Auto-save on input change
-  useEffect(() => {
-    if (isFirstRender.current) { isFirstRender.current = false; return; }
-    saveInputs(activeProjectId, groups);
-  }, [groups, activeProjectId]);
+  // Auto-save — only edits the user made, and never while `groups` still
+  // belongs to another project. (This effect used to run before the reload
+  // below and wrote the previous project's glass under the new project's key,
+  // which the reload then read back as its own.)
+  const rebaseline = useProjectAutosave<GlassGroup[]>(
+    activeProjectId,
+    loadedProjectId,
+    groups,
+    (next) => {
+      saveInputs(activeProjectId, next);
+      setResult(null); // a verdict must not outlive the glass it was run on
+    },
+  );
 
   // Reload on project change
   useEffect(() => {
+    if (loadedProjectId === activeProjectId) return;
     const data = loadSavedInputs(activeProjectId) ??
       tryImportFromManualJ(activeProjectId) ??
       createDefaultGroups();
     setGroups(data);
+    rebaseline(data);
+    setLoadedProjectId(activeProjectId);
     setResult(null);
     setGateAccepted(!!activeProjectId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProjectId]);
 
   // ── Handlers ────────────────────────────────────────────────────────────
   const handleCalculate = () => {
+    const ok = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+    for (const [i, g] of groups.entries()) {
+      if (!ok(g.areaSqFt) || g.areaSqFt < 0) { toast.error(`Row ${i + 1}: enter the glass area (0 or more).`); return; }
+      if (!ok(g.shgc) || g.shgc < 0 || g.shgc > 1) { toast.error(`Row ${i + 1}: SHGC must be between 0 and 1.`); return; }
+      if (!ok(g.interiorShading) || g.interiorShading < 0 || g.interiorShading > 1) { toast.error(`Row ${i + 1}: shading must be between 0 and 1.`); return; }
+    }
+    if (!(groups.reduce((sum, g) => sum + g.areaSqFt, 0) > 0)) {
+      toast.error('Enter the glass area for at least one orientation, or import it from Manual J or CAD.');
+      return;
+    }
     const t0 = performance.now();
     const res = calculateAed(groups);
     const durationMs = Math.round(performance.now() - t0);
@@ -189,7 +216,8 @@ export default function AedAnalysis() {
     // Persist results + back-patch into Manual J results for cross-tool coherence
     saveResults(activeProjectId, res);
     if (res.excursion > 0) {
-      toast.warning(`AED FAIL — excursion penalty ${Math.round(res.excursion).toLocaleString()} BTU/hr added to cooling load`);
+      // This page reports the excursion; it does not change the Manual J totals.
+      toast.warning(`AED FAIL — excursion ${Math.round(res.excursion).toLocaleString()} BTU/hr above the 130% limit`);
     } else {
       toast.success(`AED PASS — ratio ${Math.round(res.ratio * 100 * 10) / 10}% (under 130% threshold)`);
     }
@@ -206,9 +234,14 @@ export default function AedAnalysis() {
   };
 
   const handleReset = () => {
-    setGroups(createDefaultGroups());
+    const blank = createDefaultGroups();
+    setGroups(blank);
+    rebaseline(blank); // the blank form is the new starting point, not an edit to save
     setResult(null);
-    try { localStorage.removeItem(getResultsKey(activeProjectId)); } catch { /* */ }
+    try {
+      localStorage.removeItem(getInputsKey(activeProjectId));
+      localStorage.removeItem(getResultsKey(activeProjectId));
+    } catch { /* */ }
   };
 
   const handleImportFromMJ = () => {
@@ -413,18 +446,18 @@ export default function AedAnalysis() {
                       </select>
                     </td>
                     <td className="p-2">
-                      <input type="number" value={g.areaSqFt} min={0} step={1}
-                        onChange={e => updateGroup(i, 'areaSqFt', Number(e.target.value))}
+                      <NumericInput value={g.areaSqFt} min={0} step={1} aria-label={`Row ${i + 1} glass area (ft²)`}
+                        onChange={v => updateGroup(i, 'areaSqFt', v)}
                         className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-right text-slate-100 min-h-[44px] w-full" />
                     </td>
                     <td className="p-2">
-                      <input type="number" value={g.shgc} min={0} max={1} step={0.01}
-                        onChange={e => updateGroup(i, 'shgc', Number(e.target.value))}
+                      <NumericInput value={g.shgc} min={0} max={1} step={0.01} aria-label={`Row ${i + 1} SHGC`}
+                        onChange={v => updateGroup(i, 'shgc', v)}
                         className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-right text-slate-100 min-h-[44px] w-full" />
                     </td>
                     <td className="p-2">
-                      <input type="number" value={g.interiorShading} min={0} max={1} step={0.05}
-                        onChange={e => updateGroup(i, 'interiorShading', Number(e.target.value))}
+                      <NumericInput value={g.interiorShading} min={0} max={1} step={0.05} aria-label={`Row ${i + 1} interior shading`}
+                        onChange={v => updateGroup(i, 'interiorShading', v)}
                         className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-right text-slate-100 min-h-[44px] w-full" />
                     </td>
                     <td className="p-2">
