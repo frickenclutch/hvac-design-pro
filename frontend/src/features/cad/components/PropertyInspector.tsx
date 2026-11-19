@@ -199,27 +199,29 @@ export default function PropertyInspector() {
           {/* ── WALL SELECTED ── */}
           {selectedWall ? (
             <WallPanel
+              key={selectedWall.id}
               wall={selectedWall}
               onUpdate={(patch) => updateWall(selectedWall.id, patch)}
             />
 
           ) : selectedOpening ? (
-            <OpeningPanel opening={selectedOpening} onUpdate={(patch) => updateOpening(selectedOpening.id, patch)} />
+            <OpeningPanel key={selectedOpening.id} opening={selectedOpening} onUpdate={(patch) => updateOpening(selectedOpening.id, patch)} />
 
           ) : selectedHvac ? (
-            <HvacPanel unit={selectedHvac} onUpdate={(patch) => updateHvacUnit(selectedHvac.id, patch)} />
+            <HvacPanel key={selectedHvac.id} unit={selectedHvac} onUpdate={(patch) => updateHvacUnit(selectedHvac.id, patch)} />
 
           ) : selectedPipe ? (
-            <PipePanel pipe={selectedPipe} onUpdate={(patch) => useCadStore.getState().updatePipe(selectedPipe.id, patch)} />
+            <PipePanel key={selectedPipe.id} pipe={selectedPipe} onUpdate={(patch) => useCadStore.getState().updatePipe(selectedPipe.id, patch)} />
 
           ) : selectedDuct ? (
-            <DuctSegmentPanel duct={selectedDuct} onUpdate={(patch) => { useCadStore.getState().updateDuctSegment(selectedDuct.id, patch); useCadStore.getState().markDirty(); }} />
+            <DuctSegmentPanel key={selectedDuct.id} duct={selectedDuct} onUpdate={(patch) => { useCadStore.getState().updateDuctSegment(selectedDuct.id, patch); useCadStore.getState().markDirty(); }} />
 
           ) : selectedFitting ? (
-            <DuctFittingPanel fitting={selectedFitting} onUpdate={(patch) => { useCadStore.getState().updateDuctFitting(selectedFitting.id, patch); useCadStore.getState().markDirty(); }} />
+            <DuctFittingPanel key={selectedFitting.id} fitting={selectedFitting} onUpdate={(patch) => { useCadStore.getState().updateDuctFitting(selectedFitting.id, patch); useCadStore.getState().markDirty(); }} />
 
           ) : selectedUnderlay ? (
             <UnderlayPanel
+              key={selectedUnderlay.id}
               underlay={selectedUnderlay}
               onUpdate={(patch) => updateUnderlay(selectedUnderlay.id, patch)}
               onDelete={() => {
@@ -229,7 +231,7 @@ export default function PropertyInspector() {
             />
 
           ) : selectedAnnotation && selectedAnnotation.type === 'label' ? (
-            <AnnotationPanel annotation={selectedAnnotation} onUpdate={(patch) => { updateAnnotation(selectedAnnotation.id, patch); useCadStore.getState().markDirty(); }} />
+            <AnnotationPanel key={selectedAnnotation.id} annotation={selectedAnnotation} onUpdate={(patch) => { updateAnnotation(selectedAnnotation.id, patch); useCadStore.getState().markDirty(); }} />
 
           ) : floor && floor.rooms.length > 0 && !selectedObject ? (
             <RoomSummaryPanel rooms={floor.rooms} />
@@ -1335,6 +1337,10 @@ function PropertyField({
         {label}
       </label>
       <input
+        // Uncontrolled, so remount when the label or value changes — otherwise
+        // React reuses the input across panels and it keeps showing the
+        // previous object's value (a wall's "Type" read "9 ft").
+        key={`${label}:${value}`}
         type="text"
         defaultValue={value}
         readOnly={isReadOnly}

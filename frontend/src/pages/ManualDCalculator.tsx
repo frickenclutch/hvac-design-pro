@@ -11,6 +11,11 @@ import {
 } from '../engines/manualD';
 import { useCadStore } from '../features/cad/store/useCadStore';
 import { useProjectStore } from '../stores/useProjectStore';
+import { useProjectAutosave } from '../utils/useProjectAutosave';
+import NumericInput from '../components/NumericInput';
+import { toast } from '../stores/useToastStore';
+import { isManualDPlaceholder } from '../features/calculations/legacyPlaceholders';
+import { stampBudgetEstimateAllPages } from '../features/reports/budgetEstimateWatermark';
 import ProjectContextBar from '../components/ProjectContextBar';
 import ProjectGateDialog from '../components/ProjectGateDialog';
 import { scopedKey } from '../utils/storage';
@@ -45,7 +50,15 @@ function getMjInputsKey(projectId: string | null): string {
 
 type SavedState = { application: 'residential' | 'commercial'; equipmentCfm: number; blowerEsp: number; filterDrop: number; coilDrop: number; ductMaterial: DuctMaterial; preferredShape: DuctShape; maxAspectRatio: number; rooms: ManualDRoomInput[] };
 
-function loadSaved(projectId: string | null): SavedState | null { try { const r = localStorage.getItem(getStorageKey(projectId)); return r ? JSON.parse(r) : null; } catch { return null; } }
+function loadSaved(projectId: string | null): SavedState | null {
+  try {
+    const r = localStorage.getItem(getStorageKey(projectId));
+    if (!r) return null;
+    const state = JSON.parse(r) as SavedState;
+    // The untouched placeholder run older builds saved on open is not a design.
+    return isManualDPlaceholder(state) ? null : state;
+  } catch { return null; }
+}
 function saveState(projectId: string | null, s: SavedState) { try { localStorage.setItem(getStorageKey(projectId), JSON.stringify(s)); } catch { /* */ } }
 
 const FITTING_OPTIONS: { value: FittingType; label: string }[] = [
@@ -97,6 +110,8 @@ export default function ManualDCalculator() {
   const showGate = !activeProjectId && !gateAccepted;
 
   const saved = useRef(loadSaved(activeProjectId)).current;
+  // Which project the state in memory was loaded for (see useProjectAutosave).
+  const [loadedProjectId, setLoadedProjectId] = useState(activeProjectId);
 
   const [application, setApplication] = useState<'residential' | 'commercial'>(saved?.application ?? 'residential');
   const [equipmentCfm, setEquipmentCfm] = useState(saved?.equipmentCfm ?? 1200);
@@ -115,44 +130,59 @@ export default function ManualDCalculator() {
   const [fittingEditorId, setFittingEditorId] = useState<string | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
+  const applyState = (data: SavedState) => {
+    setApplication(data.application);
+    setEquipmentCfm(data.equipmentCfm);
+    setBlowerEsp(data.blowerEsp);
+    setFilterDrop(data.filterDrop);
+    setCoilDrop(data.coilDrop);
+    setDuctMaterial(data.ductMaterial);
+    setPreferredShape(data.preferredShape);
+    setMaxAspectRatio(data.maxAspectRatio);
+    setRooms(data.rooms);
+  };
+  const defaultState = (): SavedState => ({
+    application: 'residential', equipmentCfm: 1200, blowerEsp: 0.5, filterDrop: 0.1, coilDrop: 0.2,
+    ductMaterial: 'sheet_metal', preferredShape: 'round', maxAspectRatio: 4, rooms: [createDefaultRoom(0)],
+  });
+  const packState = (d: SavedState): SavedState => ({
+    application: d.application, equipmentCfm: d.equipmentCfm, blowerEsp: d.blowerEsp, filterDrop: d.filterDrop,
+    coilDrop: d.coilDrop, ductMaterial: d.ductMaterial, preferredShape: d.preferredShape,
+    maxAspectRatio: d.maxAspectRatio, rooms: d.rooms,
+  });
+
+  // Auto-save (project-scoped) — only for edits the user made, never while the
+  // state in memory belongs to another project, and never the placeholder run
+  // the form opens with. Any edit also retires the sizing on screen so a
+  // result cannot outlive the inputs it was computed from.
+  const rebaseline = useProjectAutosave<SavedState>(
+    activeProjectId,
+    loadedProjectId,
+    packState({ application, equipmentCfm, blowerEsp, filterDrop, coilDrop, ductMaterial, preferredShape, maxAspectRatio, rooms }),
+    (state) => {
+      saveState(activeProjectId, state);
+      setResult(null);
+      setSaveStatus('saved');
+    },
+  );
+  useEffect(() => {
+    if (saveStatus !== 'saved') return;
+    const t = setTimeout(() => setSaveStatus('idle'), 1500);
+    return () => clearTimeout(t);
+  }, [saveStatus]);
+
   // Reload data when project changes
   useEffect(() => {
-    const data = loadSaved(activeProjectId);
-    if (data) {
-      setApplication(data.application);
-      setEquipmentCfm(data.equipmentCfm);
-      setBlowerEsp(data.blowerEsp);
-      setFilterDrop(data.filterDrop);
-      setCoilDrop(data.coilDrop);
-      setDuctMaterial(data.ductMaterial);
-      setPreferredShape(data.preferredShape);
-      setMaxAspectRatio(data.maxAspectRatio);
-      setRooms(data.rooms);
-    } else {
-      setApplication('residential');
-      setEquipmentCfm(1200);
-      setBlowerEsp(0.5);
-      setFilterDrop(0.1);
-      setCoilDrop(0.2);
-      setDuctMaterial('sheet_metal');
-      setPreferredShape('round');
-      setMaxAspectRatio(4);
-      setRooms([createDefaultRoom(0)]);
-    }
+    if (loadedProjectId === activeProjectId) return;
+    const data = packState(loadSaved(activeProjectId) ?? defaultState());
+    applyState(data);
+    rebaseline(data);
+    setLoadedProjectId(activeProjectId);
     setResult(null);
+    setCadTakeoff(null);
     setGateAccepted(!!activeProjectId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProjectId]);
-
-  // Auto-save (project-scoped)
-  const isFirst = useRef(true);
-  useEffect(() => {
-    if (isFirst.current) { isFirst.current = false; return; }
-    saveState(activeProjectId, { application, equipmentCfm, blowerEsp, filterDrop, coilDrop, ductMaterial, preferredShape, maxAspectRatio, rooms });
-    setSaveStatus('saved');
-    const t = setTimeout(() => setSaveStatus('idle'), 1500);
-    return () => clearTimeout(t);
-  }, [application, equipmentCfm, blowerEsp, filterDrop, coilDrop, ductMaterial, preferredShape, maxAspectRatio, rooms, activeProjectId]);
 
   // ── Duct-assumption drift vs Manual J ───────────────────────────────────
   // After a calculation, compare this design's total straight-run length
@@ -276,7 +306,24 @@ export default function ManualDCalculator() {
     } catch { alert('Failed to parse Manual J data.'); }
   }, []);
 
+  const validate = (): string | null => {
+    const ok = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+    if (!ok(equipmentCfm) || equipmentCfm <= 0) return 'Equipment CFM must be greater than zero.';
+    if (!ok(blowerEsp) || blowerEsp <= 0) return 'Blower external static pressure must be greater than zero.';
+    if (!ok(filterDrop) || filterDrop < 0 || !ok(coilDrop) || coilDrop < 0) return 'Filter and coil pressure drops must be 0 or more.';
+    if (rooms.length === 0) return 'Add at least one duct run.';
+    for (const room of rooms) {
+      const label = room.roomName || 'Run';
+      // A zero or empty CFM used to come back from the sizer as a 36" duct.
+      if (!ok(room.requiredCfm) || room.requiredCfm <= 0) return `${label}: enter the airflow (CFM), or remove the run.`;
+      if (!ok(room.actualLengthFt) || room.actualLengthFt <= 0) return `${label}: enter the run length in feet.`;
+    }
+    return null;
+  };
+
   const runCalculation = useCallback(() => {
+    const invalid = validate();
+    if (invalid) { toast.error(invalid); return; }
     const t0 = performance.now();
     const input: ManualDSystemInput = {
       systemName: activeProjectName || 'Manual D Design',
@@ -310,19 +357,14 @@ export default function ManualDCalculator() {
     });
   }, [activeProjectId, activeProjectName, equipmentCfm, blowerEsp, filterDrop, coilDrop, ductMaterial, preferredShape, maxAspectRatio, application, rooms]);
 
-  const resetAll = useCallback(() => {
-    setApplication('residential');
-    setEquipmentCfm(1200);
-    setBlowerEsp(0.5);
-    setFilterDrop(0.1);
-    setCoilDrop(0.2);
-    setDuctMaterial('sheet_metal');
-    setPreferredShape('round');
-    setMaxAspectRatio(4);
-    setRooms([createDefaultRoom(0)]);
+  const resetAll = () => {
+    const d = defaultState();
+    applyState(d);
+    rebaseline(d); // the blank form is the new starting point, not an edit to save
     setResult(null);
+    setCadTakeoff(null);
     localStorage.removeItem(getStorageKey(activeProjectId));
-  }, [activeProjectId]);
+  };
 
   const exportPdf = useCallback(async () => {
     if (!result) { alert('Run a calculation first.'); return; }
@@ -447,6 +489,15 @@ export default function ManualDCalculator() {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(6); doc.setTextColor(150);
     doc.text(`Engine ${ENGINE_VERSIONS.manualD}  —  ACCA Manual D (Equal Friction Method)`, margin, ph - 20);
     doc.text(new Date().toISOString().slice(0, 10), pw - margin, ph - 20, { align: 'right' });
+
+    // Budget-estimate stamp (un-removable): commercial work is sized from
+    // residential-method loads until Manual N ships, so the duct schedule is
+    // not a permit document either. Follows the project's type as well as the
+    // page's own Residential/Commercial switch.
+    const projectType = (useProjectStore.getState().activeProjectType ?? '').toLowerCase();
+    if (application === 'commercial' || projectType === 'commercial') {
+      stampBudgetEstimateAllPages(doc);
+    }
 
     const safeName = (activeProjectName || 'Manual_D').replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '');
     doc.save(`ManualD_DuctDesign_${safeName}_${new Date().toISOString().slice(0, 10)}.pdf`);
@@ -662,13 +713,13 @@ export default function ManualDCalculator() {
                             className="w-full bg-transparent border-b border-slate-700/50 text-white font-semibold text-sm py-1 focus:outline-none focus:border-emerald-500/60 transition-colors" />
                         </td>
                         <td className="p-3">
-                          <input type="number" value={room.requiredCfm}
-                            onChange={e => updateRoom(room.roomId, { requiredCfm: Number(e.target.value) })}
+                          <NumericInput value={room.requiredCfm} aria-label={`${room.roomName} airflow (CFM)`}
+                            onChange={v => updateRoom(room.roomId, { requiredCfm: v })}
                             className="w-20 bg-transparent border-b border-slate-700/50 text-right text-emerald-400 font-mono text-sm py-1 focus:outline-none focus:border-emerald-500/60 transition-colors" />
                         </td>
                         <td className="p-3">
-                          <input type="number" value={room.actualLengthFt}
-                            onChange={e => updateRoom(room.roomId, { actualLengthFt: Number(e.target.value) })}
+                          <NumericInput value={room.actualLengthFt} aria-label={`${room.roomName} run length (ft)`}
+                            onChange={v => updateRoom(room.roomId, { actualLengthFt: v })}
                             className="w-20 bg-transparent border-b border-slate-700/50 text-right text-white font-mono text-sm py-1 focus:outline-none focus:border-emerald-500/60 transition-colors" />
                         </td>
                         <td className="p-3 text-center relative">
@@ -843,8 +894,7 @@ function NumField({ label, value, onChange, step }: { label: string; value: numb
   return (
     <div>
       <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{label}</label>
-      <input type="number" value={value} step={step}
-        onChange={e => onChange(Number(e.target.value))}
+      <NumericInput value={value} step={step} onChange={onChange} aria-label={label}
         className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl py-3.5 px-4 text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all min-h-[44px]" />
     </div>
   );

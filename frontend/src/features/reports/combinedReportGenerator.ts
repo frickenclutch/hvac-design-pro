@@ -36,7 +36,6 @@ import {
   calculateManualD,
   type ManualDResult,
 } from '../../engines/manualD';
-import { MANUAL_J8_ENGINE_VERSION } from '../../engines/manualJ8';
 import { ENGINE_VERSIONS } from '../../engines/versions';
 import { stampBudgetEstimateAllPages } from './budgetEstimateWatermark';
 
@@ -231,11 +230,11 @@ export async function generateCombinedReport(data: CombinedReportData): Promise<
   ];
   const included = sections.filter((s) => s.present);
 
-  // Manual J engine-version stamp. The combined report's Manual J section
-  // displays whichever engine the user has selected; stamp that version.
-  const manualJEngineVersion = prefs.engineVersion === 'manualJ8'
-    ? MANUAL_J8_ENGINE_VERSION
-    : ENGINE_VERSIONS.manualJLegacy;
+  // Manual J engine-version stamp. The stored Manual J result this section
+  // prints is always produced by the legacy engine — the L0 "Active Engine"
+  // preference does not change which engine computes it — so that is the
+  // version stamped (and hashed), whatever the preference says.
+  const manualJEngineVersion = ENGINE_VERSIONS.manualJLegacy;
 
   // AED pass/fail — taken from the standalone AED result when present, else
   // from the whole-house Manual J AED summary. Drives the section-header /

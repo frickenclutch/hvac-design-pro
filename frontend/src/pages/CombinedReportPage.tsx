@@ -3,6 +3,7 @@ import {
   FileText, CheckCircle, XCircle, ArrowRight, Thermometer, Sun, PackageCheck, GitBranch,
 } from 'lucide-react';
 import { useProjectStore } from '../stores/useProjectStore';
+import { isManualSPlaceholder, isManualDPlaceholder } from '../features/calculations/legacyPlaceholders';
 import ProjectContextBar from '../components/ProjectContextBar';
 import ProjectGateDialog from '../components/ProjectGateDialog';
 import { scopedKey } from '../utils/storage';
@@ -76,14 +77,17 @@ function gather(projectId: string | null, projectName: string): GatheredData {
   // Manual S — recompute from stored flat inputs.
   let manualS: ManualSResult | null = null;
   const msInputs = safeParse<StoredManualSInputs>(localStorage.getItem(manualSInputsKey(projectId)));
-  if (msInputs && typeof msInputs.totalCoolingBtu === 'number') {
+  // Only a selection the user actually entered: not the placeholder form older
+  // builds saved on open, and not an empty one.
+  const msHasLoads = !!msInputs && (Number(msInputs.totalCoolingBtu) > 0 || Number(msInputs.heatingBtu) > 0);
+  if (msInputs && msHasLoads && !isManualSPlaceholder(msInputs)) {
     try { manualS = recomputeManualS(msInputs, projectName || 'Manual S Selection'); } catch { manualS = null; }
   }
 
   // Manual D — recompute from stored inputs (null when there are no runs).
   let manualD: ManualDResult | null = null;
   const mdInputs = safeParse<StoredManualDInputs>(localStorage.getItem(manualDInputsKey(projectId)));
-  if (mdInputs && Array.isArray(mdInputs.rooms) && mdInputs.rooms.length > 0) {
+  if (mdInputs && Array.isArray(mdInputs.rooms) && mdInputs.rooms.length > 0 && !isManualDPlaceholder(mdInputs)) {
     try { manualD = recomputeManualD(mdInputs, projectName || 'Manual D Design'); } catch { manualD = null; }
   }
 
@@ -135,7 +139,11 @@ export default function CombinedReportPage() {
         manualS: data.manualS,
         manualD: data.manualD,
         conditions: data.conditions,
-        buildingType: data.buildingType,
+        // The project's own type wins: a commercial project is budget-estimate
+        // even if its Manual J inputs were saved with the page set to Res.
+        buildingType: (useProjectStore.getState().activeProjectType ?? '').toLowerCase() === 'commercial'
+          ? 'commercial'
+          : data.buildingType,
       });
     } catch {
       alert('Failed to generate the combined report. Please try again.');

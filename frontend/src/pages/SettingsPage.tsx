@@ -448,7 +448,7 @@ function EngineSection() {
       {prefs.engineVersion === 'manualJ8' && (
         <div className="flex items-start gap-2 px-3 py-2 mt-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300">
           <span className="font-bold uppercase tracking-wider text-[10px] flex-shrink-0">Heads up</span>
-          <span>Cert-grade engine selected. Display flips to cert-grade results on the next calc. Phase 2 inverse-adapter for per-room display is not yet shipped — room cards may show approximated loads. Switch back to legacy if results look off.</span>
+          <span>Cert-grade engine selected, but the display flip is not shipped: Manual J still shows, prints, stores and stamps legacy-engine results. This setting currently changes nothing a user sees.</span>
         </div>
       )}
     </Section>

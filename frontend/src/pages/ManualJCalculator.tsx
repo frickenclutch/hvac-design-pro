@@ -26,6 +26,9 @@ import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { usePreferencesStore } from '../stores/usePreferencesStore';
 import { scopedKey } from '../utils/storage';
 import { escapeHtml } from '../utils/html';
+import { useProjectAutosave } from '../utils/useProjectAutosave';
+import NumericInput from '../components/NumericInput';
+import { wholeHouseLoadRows } from '../engines/manualJLoadRows';
 import { buildFormJ1, MANUAL_J8_ENGINE_VERSION } from '../engines/manualJ8';
 import { ENGINE_VERSIONS } from '../engines/versions';
 import { stampBudgetEstimateAllPages, budgetEstimatePrintOverlayHtml } from '../features/reports/budgetEstimateWatermark';
@@ -70,7 +73,18 @@ function getDuctDismissKey(projectId: string | null): string {
   } catch { /* ignore */ }
 })();
 
-function loadSavedInputs(projectId: string | null): { buildingType: 'residential' | 'commercial'; rooms: RoomInput[]; conditions: DesignConditions } | null {
+type BuildingKind = 'residential' | 'commercial';
+
+interface SavedInputs {
+  buildingType: BuildingKind;
+  rooms: RoomInput[];
+  conditions: DesignConditions;
+  /** False until the user has picked a duct location themselves. Absent on
+   *  inputs saved before this flag existed. */
+  ductLocationConfirmed?: boolean;
+}
+
+function loadSavedInputs(projectId: string | null): SavedInputs | null {
   try {
     const raw = localStorage.getItem(getInputsKey(projectId));
     if (!raw) return null;
@@ -78,10 +92,32 @@ function loadSavedInputs(projectId: string | null): { buildingType: 'residential
   } catch { return null; }
 }
 
-function saveInputs(projectId: string | null, buildingType: string, rooms: RoomInput[], conditions: DesignConditions) {
+function saveInputs(projectId: string | null, inputs: SavedInputs) {
   try {
-    localStorage.setItem(getInputsKey(projectId), JSON.stringify({ buildingType, rooms, conditions }));
+    localStorage.setItem(getInputsKey(projectId), JSON.stringify(inputs));
   } catch { /* storage full — silently fail */ }
+}
+
+/**
+ * Has the user chosen where the ducts run?
+ *
+ * The form used to open on "Attic", which adds up to 15% to every load, and
+ * nothing asked the user to look at it (ACCA: no worst-case default without
+ * user intervention). Inputs saved before the flag existed count as confirmed
+ * only when they hold something other than that pre-filled value.
+ */
+function isDuctLocationConfirmed(saved: SavedInputs | null): boolean {
+  if (!saved) return false;
+  if (typeof saved.ductLocationConfirmed === 'boolean') return saved.ductLocationConfirmed;
+  return saved.conditions?.ductLocation !== 'attic';
+}
+
+/** A project's type is set when it is created; the calculator follows it so a
+ *  commercial project cannot be run, stamped and stored as residential. */
+function projectBuildingKind(projectId: string | null, projectType: string | null): BuildingKind | null {
+  if (!projectId || !projectType) return null;
+  const t = projectType.trim().toLowerCase();
+  return t === 'commercial' ? 'commercial' : t === 'residential' ? 'residential' : null;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -95,8 +131,16 @@ export default function ManualJCalculator() {
   const [gateAccepted, setGateAccepted] = useState(!!activeProjectId);
   const showGate = !activeProjectId && !gateAccepted;
 
+  const activeProjectType = useProjectStore((s) => s.activeProjectType);
+  const lockedBuildingType = projectBuildingKind(activeProjectId, activeProjectType);
+
   const saved = useRef(loadSavedInputs(activeProjectId)).current;
-  const [buildingType, setBuildingType] = useState<'residential' | 'commercial'>(saved?.buildingType ?? 'residential');
+  const [buildingType, setBuildingType] = useState<BuildingKind>(lockedBuildingType ?? saved?.buildingType ?? 'residential');
+  const [ductLocationConfirmed, setDuctLocationConfirmed] = useState(() => isDuctLocationConfirmed(saved));
+  // Which project the inputs in memory were loaded for. It trails
+  // `activeProjectId` by the one render in which the state is still the
+  // previous project's — nothing may be saved during that render.
+  const [loadedProjectId, setLoadedProjectId] = useState(activeProjectId);
   const [rooms, setRooms] = useState<RoomInput[]>(saved?.rooms ?? [createDefaultRoom(0)]);
   const [wholeHouse, setWholeHouse] = useState<WholeHouseResult | null>(null);
   const [expandedRoom, setExpandedRoom] = useState<string | null>(null);
@@ -109,32 +153,50 @@ export default function ManualJCalculator() {
   const [showExportCadDialog, setShowExportCadDialog] = useState(false);
   const [layoutAlgorithm, setLayoutAlgorithm] = useState<LayoutAlgorithm>('horizontal_strip');
 
-  // Reload data when project changes
+  // Auto-save inputs (project-scoped) — only for edits the user made, and never
+  // while the state in memory still belongs to another project. Any edit also
+  // retires the last calculation, on screen and in storage, so the PDF, Manual
+  // D, Manual S and /reports cannot pair old loads with new inputs.
+  const rebaseline = useProjectAutosave<SavedInputs>(
+    activeProjectId,
+    loadedProjectId,
+    { buildingType, rooms, conditions, ductLocationConfirmed },
+    (inputs) => {
+      saveInputs(activeProjectId, inputs);
+      setWholeHouse(null);
+      try { localStorage.removeItem(getResultsKey(activeProjectId)); } catch { /* ignore */ }
+      setSaveStatus('saved');
+    },
+  );
   useEffect(() => {
-    const data = loadSavedInputs(activeProjectId);
-    if (data) {
-      setBuildingType(data.buildingType);
-      setRooms(data.rooms);
-      setConditions(data.conditions);
-    } else {
-      setBuildingType('residential');
-      setRooms([createDefaultRoom(0)]);
-      setConditions(createDefaultConditions());
-    }
-    setWholeHouse(null);
-    setGateAccepted(!!activeProjectId);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProjectId]);
-
-  // Auto-save all inputs to localStorage whenever they change (project-scoped)
-  const isFirstRender = useRef(true);
-  useEffect(() => {
-    if (isFirstRender.current) { isFirstRender.current = false; return; }
-    saveInputs(activeProjectId, buildingType, rooms, conditions);
-    setSaveStatus('saved');
+    if (saveStatus !== 'saved') return;
     const t = setTimeout(() => setSaveStatus('idle'), 1500);
     return () => clearTimeout(t);
-  }, [buildingType, rooms, conditions, activeProjectId]);
+  }, [saveStatus]);
+
+  // Reload data when project changes
+  useEffect(() => {
+    if (loadedProjectId === activeProjectId) return;
+    const data = loadSavedInputs(activeProjectId);
+    const next: SavedInputs = {
+      buildingType: lockedBuildingType ?? data?.buildingType ?? 'residential',
+      rooms: data?.rooms ?? [createDefaultRoom(0)],
+      conditions: data?.conditions ?? createDefaultConditions(),
+      ductLocationConfirmed: isDuctLocationConfirmed(data),
+    };
+    setBuildingType(next.buildingType);
+    setRooms(next.rooms);
+    setConditions(next.conditions);
+    setDuctLocationConfirmed(next.ductLocationConfirmed ?? false);
+    rebaseline(next);
+    setLoadedProjectId(activeProjectId);
+    setWholeHouse(null);
+    setGateAccepted(!!activeProjectId);
+    setZipCode('');
+    setZipLocation(null);
+    setZipGeo(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProjectId]);
 
   // ── Manual D duct-design reconciliation ─────────────────────────────────
   // Manual D's persisted design (per-room run lengths) is compared against
@@ -234,6 +296,18 @@ export default function ManualJCalculator() {
       alert('No detected rooms found in the CAD workspace. Use the Detect Rooms (R) tool first.');
       return;
     }
+    // Rooms detected before wall tracking was fixed carry no wall ids, so the
+    // bridge would hand Manual J rooms with no exterior walls and no glass.
+    // Refuse rather than import an envelope-less building.
+    const unbound = floorsWithRooms.flatMap(f => f.rooms).filter(r => r.wallIds.length === 0);
+    if (unbound.length > 0) {
+      toast.error(
+        `${unbound.length} room${unbound.length === 1 ? ' was' : 's were'} detected without wall data ` +
+        `(${unbound.slice(0, 4).map(r => r.name).join(', ')}${unbound.length > 4 ? '…' : ''}). ` +
+        'Run Detect Rooms again in the CAD workspace, then import.',
+      );
+      return;
+    }
     const converted = convertAllFloorsToManualJ(floorsWithRooms);
     setRooms(converted);
     setWholeHouse(null);
@@ -320,6 +394,39 @@ export default function ManualJCalculator() {
   // engine's cert-validated math is untouched; invalid input is refused
   // here with a message instead. (`!(x > 0)` also rejects NaN.)
   const validateInputs = (): string | null => {
+    const c = conditions;
+    const required: [string, number][] = [
+      ['Outdoor heating temperature', c.outdoorHeatingTemp],
+      ['Outdoor cooling temperature', c.outdoorCoolingTemp],
+      ['Indoor heating temperature', c.indoorHeatingTemp],
+      ['Indoor cooling temperature', c.indoorCoolingTemp],
+      ['Outdoor grains', c.outdoorGrains],
+      ['Indoor grains', c.indoorGrains],
+      ['Latitude', c.latitude],
+      ['Elevation', c.elevation],
+      ['Total floor area', c.totalFloorArea],
+      ['Bedrooms', c.numBedrooms],
+      ['Duct insulation', c.ductInsulationR],
+      ['Duct leakage', c.ductLeakagePercent],
+    ];
+    for (const [name, value] of required) {
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return `${name} is empty — enter a value before calculating.`;
+      }
+    }
+    if (!(c.indoorHeatingTemp > c.outdoorHeatingTemp)) {
+      return 'Outdoor heating design temperature must be below the indoor heating setpoint.';
+    }
+    if (!(c.outdoorCoolingTemp > c.indoorCoolingTemp)) {
+      return 'Outdoor cooling design temperature must be above the indoor cooling setpoint.';
+    }
+    if (!(c.totalFloorArea > 0)) return 'Total floor area must be greater than zero.';
+    if (c.numBedrooms < 0 || c.ductInsulationR < 0 || c.ductLeakagePercent < 0) {
+      return 'Bedrooms, duct insulation and duct leakage cannot be negative.';
+    }
+    if (!ductLocationConfirmed) {
+      return 'Select where the ducts run (Duct System). The location changes every load by up to 15%, so it is not assumed.';
+    }
     for (const room of rooms) {
       const label = room.name || 'Room';
       if (!(room.lengthFt > 0) || !(room.widthFt > 0) || !(room.ceilingHeightFt > 0)) {
@@ -333,6 +440,26 @@ export default function ManualJCalculator() {
       }
       if (!Number.isFinite(room.windowSqFt) || room.windowSqFt < 0) {
         return `${label}: window area must be a number of 0 or more.`;
+      }
+      if (!Number.isFinite(room.exteriorWalls) || room.exteriorWalls < 0) {
+        return `${label}: exterior walls must be 0 or more.`;
+      }
+      // The engine subtracts glass from the wall and clamps at zero, so glass
+      // larger than the wall it sits in would be computed without complaint.
+      const grossWallSqFt = room.exteriorWalls * room.lengthFt * room.ceilingHeightFt;
+      if (room.windowSqFt > grossWallSqFt) {
+        return room.exteriorWalls === 0
+          ? `${label}: has ${room.windowSqFt} ft² of window but no exterior walls.`
+          : `${label}: window area (${room.windowSqFt} ft²) is larger than its exterior wall area (${Math.round(grossWallSqFt)} ft²).`;
+      }
+      if (!(room.windowSHGC >= 0 && room.windowSHGC <= 1)) {
+        return `${label}: SHGC must be between 0 and 1.`;
+      }
+      if (!(room.interiorShading >= 0 && room.interiorShading <= 1)) {
+        return `${label}: interior shading must be between 0 and 1.`;
+      }
+      if (!Number.isFinite(room.occupantCount) || room.occupantCount < 0) {
+        return `${label}: occupants must be 0 or more.`;
       }
     }
     return null;
@@ -452,12 +579,38 @@ export default function ManualJCalculator() {
   };
 
   const resetAll = () => {
-    setRooms([createDefaultRoom(0)]);
-    setConditions(createDefaultConditions());
-    setBuildingType('residential');
+    const next: SavedInputs = {
+      buildingType: lockedBuildingType ?? 'residential',
+      rooms: [createDefaultRoom(0)],
+      conditions: createDefaultConditions(),
+      ductLocationConfirmed: false,
+    };
+    setBuildingType(next.buildingType);
+    setRooms(next.rooms);
+    setConditions(next.conditions);
+    setDuctLocationConfirmed(false);
+    // The blank form is the new starting point, not an edit to be saved.
+    rebaseline(next);
     setWholeHouse(null);
+    setZipCode('');
+    setZipLocation(null);
+    setZipGeo(null);
     localStorage.removeItem(getInputsKey(activeProjectId));
     localStorage.removeItem(getResultsKey(activeProjectId));
+  };
+
+  const applyZip = () => {
+    if (zipCode.length !== 5) return;
+    const result = lookupByZip(zipCode);
+    if (result.found && result.conditions) {
+      setConditions(c => ({ ...c, ...result.conditions }));
+      setZipLocation(`${result.city}, ${result.state}`);
+      setZipGeo({ city: result.city ?? '', state: result.state ?? '' });
+    } else {
+      setZipLocation(null);
+      setZipGeo(null);
+      toast.error(`No design data on file for ZIP ${zipCode}. Enter the outdoor conditions manually.`);
+    }
   };
 
   const results = wholeHouse?.rooms ?? null;
@@ -545,6 +698,7 @@ export default function ManualJCalculator() {
         <thead><tr><th style="text-align:left">Room</th><th>Heating</th><th>Sensible</th><th>Latent</th><th>Cooling Total</th></tr></thead>
         <tbody>
           ${wh.rooms.map(r => `<tr><td style="font-weight:600">${escapeHtml(r.roomName)}</td><td>${fmt(r.heatingBtu)}</td><td>${fmt(r.coolingBtuSensible)}</td><td>${fmt(r.coolingBtuLatent)}</td><td style="font-weight:700">${fmt(r.coolingBtuTotal)}</td></tr>`).join('')}
+          ${wholeHouseLoadRows(wh).map(r => `<tr><td style="font-style:italic">${escapeHtml(r.label)}</td><td>${fmt(r.heatingBtu)}</td><td>${fmt(r.coolingBtuSensible)}</td><td>${fmt(r.coolingBtuLatent)}</td><td>${fmt(r.coolingBtuTotal)}</td></tr>`).join('')}
           <tr><td>TOTAL</td><td>${totalHeating.toLocaleString()}</td><td>${fmt(wh.totalCoolingSensible)}</td><td>${fmt(wh.totalCoolingLatent)}</td><td>${totalCooling.toLocaleString()}</td></tr>
         </tbody>
       </table>
@@ -593,9 +747,10 @@ export default function ManualJCalculator() {
     // legacy engine; once Phase 2 flips, the stamp switches to the
     // cert-grade version. Reviewer can match this against the
     // `engine_version` column on the calc record in D1.
-    const engineStamp = usePreferencesStore.getState().engineVersion === 'manualJ8'
-      ? `Engine ${MANUAL_J8_ENGINE_VERSION} (cert-grade)`
-      : `Engine ${ENGINE_VERSIONS.manualJLegacy} (production display)`;
+    // The loads on this page always come from the legacy engine (see
+    // runCalculation); the stamp must say so whatever the L0 "Active Engine"
+    // preference is set to, or the PDF attributes legacy numbers to manualJ8.
+    const engineStamp = `Engine ${ENGINE_VERSIONS.manualJLegacy} (production display)`;
     const drawFooter = () => {
       doc.setFont('helvetica', 'normal'); doc.setFontSize(6); doc.setTextColor(150);
       doc.text(`${watermark}  \u2014  ACCA Manual J 8th Edition (ANSI/ACCA 2-2016)  \u2014  ASHRAE 62.2-2022`, margin, ph - 20);
@@ -773,6 +928,22 @@ export default function ManualJCalculator() {
         y += 16;
       });
 
+      // Whole-house loads that belong to no single room — without these the
+      // column does not add up to the TOTAL below it.
+      y += 2;
+      doc.setDrawColor(200); doc.setLineWidth(0.5);
+      doc.line(margin, y - 8, pw - margin, y - 8);
+      doc.setFont('helvetica', 'italic'); doc.setTextColor(60);
+      wholeHouseLoadRows(wh).forEach((r) => {
+        if (y > ph - 60) { drawFooter(); doc.addPage(); pageNum++; y = 50; }
+        doc.text(r.label, cols[0], y);
+        doc.text(fmt(r.heatingBtu), cols[1], y, { align: 'right' });
+        doc.text(fmt(r.coolingBtuSensible), cols[2], y, { align: 'right' });
+        doc.text(fmt(r.coolingBtuLatent), cols[3], y, { align: 'right' });
+        doc.text(fmt(r.coolingBtuTotal), cols[4], y, { align: 'right' });
+        y += 16;
+      });
+
       // Totals
       doc.setDrawColor(0); doc.setLineWidth(1);
       doc.line(margin, y - 4, pw - margin, y - 4); y += 8;
@@ -873,13 +1044,17 @@ export default function ManualJCalculator() {
       doc.line(margin, y, pw - margin, y); y += 10;
 
       doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(30);
-      let totWall = 0, totWin = 0, totCeil = 0, totFloor = 0, totSolar = 0, totInfil = 0, totVent = 0, totDuct = 0;
+      let totWall = 0, totWin = 0, totCeil = 0, totFloor = 0, totSolar = 0, totInfil = 0;
+      // Ventilation and duct loss are whole-house heating loads: shown on the
+      // TOTAL row only, with a dash per room (they printed as 0 everywhere).
+      const totVent = wh.ventilationSensible;
+      const totDuct = wh.ductLossHeating;
       wh.rooms.forEach((r) => {
         if (y > ph - 60) { drawFooter(); doc.addPage(); pageNum++; y = 50; }
         const b = r.breakdown;
         totWall += b.wallLoss; totWin += b.windowLoss; totCeil += b.ceilingLoss;
         totFloor += b.floorLoss; totSolar += b.solarGain;
-        totInfil += b.infiltrationSensible; totVent += b.ventilationSensible; totDuct += b.ductLoss;
+        totInfil += b.infiltrationSensible;
 
         doc.setFont('helvetica', 'bold'); doc.text(r.roomName, eCols[0], y);
         doc.setFont('helvetica', 'normal');
@@ -889,8 +1064,8 @@ export default function ManualJCalculator() {
         doc.text(fmt(b.floorLoss), eCols[4], y, { align: 'right' });
         doc.text(fmt(b.solarGain), eCols[5], y, { align: 'right' });
         doc.text(fmt(b.infiltrationSensible), eCols[6], y, { align: 'right' });
-        doc.text(fmt(b.ventilationSensible), eCols[7], y, { align: 'right' });
-        doc.text(fmt(b.ductLoss), eCols[8], y, { align: 'right' });
+        doc.text('\u2014', eCols[7], y, { align: 'right' });
+        doc.text('\u2014', eCols[8], y, { align: 'right' });
         y += 14;
       });
 
@@ -925,7 +1100,7 @@ export default function ManualJCalculator() {
         '  \u2022 Wall cooling loads use CLTD method with construction-group-specific thermal mass factors.',
         '  \u2022 Solar heat gain calculated using SHGC method with latitude-interpolated ASHRAE SHGF values.',
         '  \u2022 Ventilation rates per ASHRAE Standard 62.2-2022.',
-        '  \u2022 Duct losses per Manual J Table 7, adjusted for insulation R-value and measured/estimated leakage.',
+        '  \u2022 Duct losses use a location multiplier adjusted for insulation R-value and leakage (simplified; not a Manual J Table 7 lookup).',
         '  \u2022 Slab-on-grade floors use perimeter method (F × P × \u0394T) per ASHRAE 90.1 / Manual J Table 4A.',
         '  \u2022 AED evaluation per Manual J Section N (2016); excursion penalty applied if ratio exceeds 130%.',
         '  \u2022 Infiltration via default ACH table or LBL blower door method (ASHRAE 136) when test data provided.',
@@ -1019,24 +1194,16 @@ export default function ManualJCalculator() {
                 type="text"
                 value={zipCode}
                 onChange={e => setZipCode(e.target.value.replace(/\D/g, '').slice(0, 5))}
+                onKeyDown={e => { if (e.key === 'Enter') applyZip(); }}
                 placeholder="Enter ZIP code..."
+                aria-label="ZIP code for design conditions"
+                inputMode="numeric"
                 className="w-40 px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-sm placeholder-slate-500 focus:outline-none focus:border-emerald-500/60 transition-colors"
                 maxLength={5}
               />
               <button
-                onClick={() => {
-                  const result = lookupByZip(zipCode);
-                  if (result.found && result.conditions) {
-                    setConditions(c => ({ ...c, ...result.conditions }));
-                    setZipLocation(`${result.city}, ${result.state}`);
-                    setZipGeo({ city: result.city ?? '', state: result.state ?? '' });
-                  } else {
-                    setZipLocation(null);
-                    setZipGeo(null);
-                    alert(`No ASHRAE data found for ZIP ${zipCode}. Enter outdoor conditions manually.`);
-                  }
-                }}
-                disabled={zipCode.length < 3}
+                onClick={applyZip}
+                disabled={zipCode.length !== 5}
                 className="px-5 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-sm font-bold hover:bg-emerald-500/25 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 Auto-Fill
@@ -1079,15 +1246,18 @@ export default function ManualJCalculator() {
             <div>
               <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Building Type</label>
               <div className="flex gap-2">
-                <button onClick={() => setBuildingType('residential')}
-                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border text-sm font-bold transition-all ${buildingType === 'residential' ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400' : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}>
+                <button onClick={() => setBuildingType('residential')} disabled={!!lockedBuildingType} aria-pressed={buildingType === 'residential'}
+                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border text-sm font-bold transition-all disabled:cursor-not-allowed ${buildingType === 'residential' ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400' : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}>
                   <Home className="w-4 h-4" /> Res
                 </button>
-                <button onClick={() => setBuildingType('commercial')}
-                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border text-sm font-bold transition-all ${buildingType === 'commercial' ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400' : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}>
+                <button onClick={() => setBuildingType('commercial')} disabled={!!lockedBuildingType} aria-pressed={buildingType === 'commercial'}
+                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border text-sm font-bold transition-all disabled:cursor-not-allowed ${buildingType === 'commercial' ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400' : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}>
                   <Building2 className="w-4 h-4" /> Com
                 </button>
               </div>
+              {lockedBuildingType && (
+                <p className="mt-1.5 text-[11px] text-slate-500">Set by the project type.</p>
+              )}
             </div>
             <SelectField label="Construction Quality" value={conditions.constructionQuality}
               options={[['tight', 'Tight (0.25 ACH)'], ['average', 'Average (0.50 ACH)'], ['leaky', 'Leaky (0.75 ACH)']]}
@@ -1113,15 +1283,21 @@ export default function ManualJCalculator() {
             Duct System
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            <SelectField label="Duct Location" value={conditions.ductLocation}
+            <SelectField label={ductLocationConfirmed ? 'Duct Location' : 'Duct Location — select'}
+              value={ductLocationConfirmed ? conditions.ductLocation : ''}
               options={[
+                ...(ductLocationConfirmed ? [] : [['', 'Select where the ducts run…'] as [string, string]]),
                 ['conditioned', 'Conditioned Space'],
                 ['attic', 'Attic'],
                 ['crawlspace', 'Crawlspace'],
                 ['garage', 'Garage'],
                 ['basement_uncond', 'Uncond. Basement'],
               ]}
-              onChange={v => setConditions(c => ({ ...c, ductLocation: v as DuctLocation }))} />
+              onChange={v => {
+                if (!v) return;
+                setConditions(c => ({ ...c, ductLocation: v as DuctLocation }));
+                setDuctLocationConfirmed(true);
+              }} />
             <NumericField label="Duct Insulation (R)" value={conditions.ductInsulationR}
               onChange={v => setConditions(c => ({ ...c, ductInsulationR: v }))} />
             <NumericField label="Duct Leakage (%)" value={conditions.ductLeakagePercent}
@@ -1368,6 +1544,15 @@ export default function ManualJCalculator() {
                         <td className="p-4 text-right text-emerald-400 font-bold font-mono">{fmt(r.coolingBtuTotal)}</td>
                       </tr>
                     ))}
+                    {wholeHouseLoadRows(wholeHouse).map(r => (
+                      <tr key={r.key} className="border-b border-slate-800/30 text-slate-400 italic">
+                        <td className="p-4">{r.label}</td>
+                        <td className="p-4 text-right font-mono">{fmt(r.heatingBtu)}</td>
+                        <td className="p-4 text-right font-mono">{fmt(r.coolingBtuSensible)}</td>
+                        <td className="p-4 text-right font-mono">{fmt(r.coolingBtuLatent)}</td>
+                        <td className="p-4 text-right font-mono">{fmt(r.coolingBtuTotal)}</td>
+                      </tr>
+                    ))}
                     <tr className="bg-slate-800/30 font-bold">
                       <td className="p-4 text-white">TOTAL</td>
                       <td className="p-4 text-right text-orange-400 font-mono">{totalHeating.toLocaleString()}</td>
@@ -1398,11 +1583,11 @@ function NumericField({ label, value, onChange, step }: { label: string; value: 
   return (
     <div>
       <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5 sm:mb-2">{label}</label>
-      <input
-        type="number"
+      <NumericInput
         value={value}
         step={step}
-        onChange={e => onChange(Number(e.target.value))}
+        onChange={onChange}
+        aria-label={label}
         className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl py-3.5 px-4 text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all min-h-[44px]"
       />
     </div>

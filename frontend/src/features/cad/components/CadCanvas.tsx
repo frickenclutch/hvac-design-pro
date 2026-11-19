@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import * as fabric from 'fabric';
 import { useCadStore } from '../store/useCadStore';
+import { detectRoomOutlines } from '../../../engines/roomDetect';
 import type { WallMaterial, WallSegment, Opening, HvacUnit, PipeMaterial, PipeSegment, Annotation, DuctSegment, DuctFitting, DuctShape, DuctMaterial, DuctSide, DuctRole, FittingType } from '../store/useCadStore';
 import { showSnapPulse, showPlacementConfirm, triggerHapticVibration } from '../utils/haptics';
 import { importUnderlayFiles } from '../utils/underlayImport';
@@ -899,141 +900,36 @@ export default function CadCanvas() {
 
   // Keep ref in sync for image import handlers
 
-  // ── Room detection algorithm ──────────────────────────────────────────────
+  // ── Room detection ────────────────────────────────────────────────────────
+  // The geometry lives in engines/roomDetect.ts (pure, unit-tested). This
+  // wrapper only converts its pixel outlines into store rooms at the project
+  // scale.
   const detectRooms = useCallback(() => {
     const state = useCadStore.getState();
     const floor = state.floors.find(f => f.id === state.activeFloorId);
     if (!floor || floor.walls.length < 3) return;
 
-    // Build adjacency graph from wall endpoints
-    const SNAP_DIST = 15;
-    const nodes: Map<string, { x: number; y: number; edges: string[] }> = new Map();
-
-    const nodeKey = (x: number, y: number): string => {
-      // Snap endpoints to merge nearby points
-      const sx = Math.round(x / SNAP_DIST) * SNAP_DIST;
-      const sy = Math.round(y / SNAP_DIST) * SNAP_DIST;
-      return `${sx},${sy}`;
-    };
-
-    const getOrCreateNode = (x: number, y: number) => {
-      const key = nodeKey(x, y);
-      if (!nodes.has(key)) {
-        const sx = Math.round(x / SNAP_DIST) * SNAP_DIST;
-        const sy = Math.round(y / SNAP_DIST) * SNAP_DIST;
-        nodes.set(key, { x: sx, y: sy, edges: [] });
-      }
-      return key;
-    };
-
-    // Build graph
-    for (const w of floor.walls) {
-      const k1 = getOrCreateNode(w.x1, w.y1);
-      const k2 = getOrCreateNode(w.x2, w.y2);
-      if (k1 === k2) continue;
-      const n1 = nodes.get(k1)!;
-      const n2 = nodes.get(k2)!;
-      if (!n1.edges.includes(k2)) n1.edges.push(k2);
-      if (!n2.edges.includes(k1)) n2.edges.push(k1);
-    }
-
-    // Find minimal cycles using right-hand walk
-    const visited = new Set<string>();
-    const rooms: Array<{ keys: string[] }> = [];
-
-    for (const [startKey, startNode] of nodes.entries()) {
-      if (startNode.edges.length < 2) continue;
-
-      for (const firstNeighbor of startNode.edges) {
-        const edgeKey = `${startKey}->${firstNeighbor}`;
-        if (visited.has(edgeKey)) continue;
-
-        const path: string[] = [startKey];
-        let prev = startKey;
-        let curr = firstNeighbor;
-        let found = false;
-
-        for (let steps = 0; steps < 20; steps++) {
-          path.push(curr);
-          visited.add(`${prev}->${curr}`);
-
-          if (curr === startKey && path.length >= 4) {
-            found = true;
-            break;
-          }
-
-          const node = nodes.get(curr);
-          if (!node || node.edges.length < 2) break;
-
-          // Pick next edge by smallest clockwise angle
-          const fromAngle = Math.atan2(
-            nodes.get(prev)!.y - node.y,
-            nodes.get(prev)!.x - node.x
-          );
-
-          let bestAngle = Infinity;
-          let bestNext = '';
-          for (const neighbor of node.edges) {
-            if (neighbor === prev && node.edges.length > 1) continue;
-            const nNode = nodes.get(neighbor)!;
-            let angle = Math.atan2(nNode.y - node.y, nNode.x - node.x) - fromAngle;
-            if (angle <= 0) angle += Math.PI * 2;
-            if (angle < bestAngle) {
-              bestAngle = angle;
-              bestNext = neighbor;
-            }
-          }
-
-          if (!bestNext) break;
-          prev = curr;
-          curr = bestNext;
-        }
-
-        if (found && path.length >= 4) {
-          const sorted = [...path].sort().join('|');
-          if (!rooms.some(r => [...r.keys].sort().join('|') === sorted)) {
-            rooms.push({ keys: path.slice(0, -1) }); // remove duplicate start
-          }
-        }
-      }
-    }
-
-    // Convert graph cycles to DetectedRoom
+    const outlines = detectRoomOutlines(floor.walls);
     const colors = ['#22d3ee40', '#a78bfa40', '#fb923c40', '#34d39940', '#f472b640', '#facc1540'];
-    const { projectScale } = state;
+    const pxPerFt = state.projectScale.pxPerFt;
+    const stamp = Date.now();
 
-    const detectedRooms = rooms.map((room, i) => {
-      const points = room.keys.map(k => nodes.get(k)!);
-      const cx = points.reduce((s, p) => s + p.x, 0) / points.length;
-      const cy = points.reduce((s, p) => s + p.y, 0) / points.length;
-
-      // Shoelace area
-      let area = 0;
-      let perim = 0;
-      for (let j = 0; j < points.length; j++) {
-        const p1 = points[j];
-        const p2 = points[(j + 1) % points.length];
-        area += p1.x * p2.y - p2.x * p1.y;
-        perim += Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2);
-      }
-      area = Math.abs(area) / 2;
-
-      const pxPerFt = projectScale.pxPerFt;
-      return {
-        id: `room-${Date.now()}-${i}`,
-        name: `Room ${i + 1}`,
-        wallIds: [] as string[],
-        areaSqFt: area / (pxPerFt * pxPerFt),
-        perimeterFt: perim / pxPerFt,
-        centroid: { x: cx, y: cy },
-        color: colors[i % colors.length],
-        // The outline the area and centroid were derived from. Keeping it is
-        // what lets duct segments be placed by containment instead of by
-        // proximity guessing — copied to bare {x,y} so the graph nodes' `edges`
-        // arrays never reach persisted state.
-        polygon: points.map(p => ({ x: p.x, y: p.y })),
-      };
-    });
+    const detectedRooms = outlines.map((outline, i) => ({
+      id: `room-${stamp}-${i}`,
+      name: `Room ${i + 1}`,
+      // Which walls bound the room. The Manual J bridge reads R-values,
+      // windows and exterior exposure through these — without them a room
+      // arrives at the load calculation with no envelope.
+      wallIds: outline.wallIds,
+      areaSqFt: outline.areaPx2 / (pxPerFt * pxPerFt),
+      perimeterFt: outline.perimeterPx / pxPerFt,
+      centroid: outline.centroid,
+      color: colors[i % colors.length],
+      // The outline the area and centroid were derived from. Keeping it is
+      // what lets duct segments be placed by containment instead of by
+      // proximity guessing.
+      polygon: outline.polygon,
+    }));
 
     useCadStore.getState().setDetectedRooms(detectedRooms);
     // Ducts drawn BEFORE detection now have rooms to land in.
@@ -1041,7 +937,11 @@ export default function CadCanvas() {
     if (fabricRef.current) syncFloorToCanvas(fabricRef.current);
 
     // Next ideal action: pull the detected rooms into the Manual J calculator
-    if (detectedRooms.length > 0) useGuidanceStore.getState().setHint('mj_import_cad');
+    if (detectedRooms.length > 0) {
+      useGuidanceStore.getState().setHint('mj_import_cad');
+    } else {
+      toast.warning('No enclosed rooms found. Walls must meet end-to-end to close a room.');
+    }
   }, [syncFloorToCanvas]);
 
   // ── Main canvas setup (runs once) ─────────────────────────────────────────

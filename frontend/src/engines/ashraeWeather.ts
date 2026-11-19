@@ -993,7 +993,13 @@ export function lookupByZip(zip: string): {
   state?: string;
   conditions?: Partial<DesignConditions>;
 } {
-  const prefix = zip.replace(/\D/g, '').slice(0, 3);
+  // Only a complete ZIP is looked up. Taking the first three digits of
+  // whatever was typed mapped a Vermont ZIP with its leading zero dropped
+  // ("5401") to Wausau, WI and "99999" to Ketchikan, AK — a wrong city's design
+  // temperatures, applied without complaint.
+  const digits = zip.replace(/\D/g, '');
+  if (digits.length !== 5 && digits.length !== 9) return { found: false };
+  const prefix = digits.slice(0, 3);
   const entry = DATA[prefix];
   if (!entry) return { found: false };
 
