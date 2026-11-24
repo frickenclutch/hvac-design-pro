@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { setAudit } from '../middleware/audit';
-import { sendEmail, buildInviteEmail, buildReparentEmail } from '../utils/email';
+import { sendEmail, buildInviteEmail, buildReparentEmail, applyBrandFrom } from '../utils/email';
 import { computeRoleChangePlan } from '../utils/roleChange';
 import { uniqueOrgSlug } from '../utils/id';
 import { nowIso } from '../utils/time';
@@ -17,6 +17,7 @@ import {
   mergeNotificationPolicyIntoSettings,
 } from '../utils/notificationPolicy';
 import { notifyUser } from '../utils/notifications';
+import { loadEmailBrand } from '../utils/branding';
 
 interface Env {
   DB: D1Database;
@@ -659,6 +660,8 @@ orgRoutes.post('/invite', async (c) => {
 
   // Send the email. waitUntil keeps the response fast — the API call
   // returns immediately even if Resend is slow / down.
+  // The inviting tenant's own name / logo / colour, when it has set any.
+  const emailBrand = await loadEmailBrand(c.env.DB, user.orgId, new URL(c.req.url).origin);
   const inviteEmail = buildInviteEmail({
     orgName,
     inviterName,
@@ -666,10 +669,11 @@ orgRoutes.post('/invite', async (c) => {
     invitedRole: role,
     redeemUrl,
     expiresAt,
-  });
+  }, emailBrand);
   inviteEmail.to = email;
   const fromAddress = c.env.INVITE_FROM_ADDRESS || c.env.FEEDBACK_FROM_ADDRESS;
   if (fromAddress) inviteEmail.from = fromAddress;
+  applyBrandFrom(inviteEmail, emailBrand);
 
   // Track delivery outcome so we can surface "email sent / failed" in the
   // invite list. Awaited only to capture the result for the API response;
@@ -972,6 +976,8 @@ orgRoutes.post('/reparent', async (c) => {
   // The consent step is IN-APP (authenticated /api/auth/transfers), so the
   // email just points the user at the app — no token in the link.
   const frontendBase = c.env.FRONTEND_BASE_URL || 'https://hvac-design-pro.pages.dev';
+  // Branded as the REQUESTING tenant — it is the one writing to the user.
+  const emailBrand = await loadEmailBrand(c.env.DB, user.orgId, new URL(c.req.url).origin);
   const reparentEmail = buildReparentEmail({
     orgName: (orgRow?.name as string) || 'their workspace',
     inviterName,
@@ -979,10 +985,11 @@ orgRoutes.post('/reparent', async (c) => {
     invitedRole: role,
     appUrl: `${frontendBase}/dashboard`,
     expiresAt,
-  });
+  }, emailBrand);
   reparentEmail.to = email;
   const fromAddress = c.env.INVITE_FROM_ADDRESS || c.env.FEEDBACK_FROM_ADDRESS;
   if (fromAddress) reparentEmail.from = fromAddress;
+  applyBrandFrom(reparentEmail, emailBrand);
 
   let emailResult: Awaited<ReturnType<typeof sendEmail>> | null = null;
   try {

@@ -317,6 +317,93 @@ export function buildFeedbackEmail(raw: FeedbackEmailData): EmailPayload & { sub
   };
 }
 
+// ── Tenant branding ──────────────────────────────────────────────────────────
+//
+// Emails a tenant sends (invitations, account-transfer requests) and emails
+// sent to a tenant's own members (password reset, MFA code) carry that
+// tenant's name, logo and colour when it has set any — see utils/branding.ts
+// `loadEmailBrand`, which returns null for an unbranded tenant so those emails
+// stay byte-identical to the platform default.
+//
+// Everything here is built from values the server has already validated
+// (strict hex colours it computed itself, a logo URL it constructed, a plain-
+// text name) and is escaped again on the way into the HTML.
+
+const PLATFORM_PRODUCT = 'HVAC DesignPro';
+
+export interface EmailBrand {
+  /** Tenant display name (plain text). */
+  displayName: string;
+  /** Absolute URL of the tenant logo, or null. */
+  logoUrl: string | null;
+  /** `#rrggbb` readable as text on the dark card. */
+  accentText: string;
+  /** `#rrggbb` for the call-to-action fill (dark text sits on it). */
+  accentFill: string;
+  /** True → the platform is not named anywhere in the email. */
+  whiteLabel: boolean;
+}
+
+interface ResolvedEmailBrand {
+  header: string;
+  footer: string;
+  /** Product name for HTML bodies (already escaped). */
+  product: string;
+  /** Product name for the plain-text subject. */
+  productSubject: string;
+  /** ' on <product>' for subjects that already name the tenant; empty when
+   *  white-labelled, where it would only repeat the tenant's name. */
+  onProductSubject: string;
+  accentText: string;
+  accentFill: string;
+}
+
+const HEX6 = /^#[0-9a-f]{6}$/;
+
+function resolveEmailBrand(brand?: EmailBrand | null): ResolvedEmailBrand {
+  if (!brand || !brand.displayName) {
+    return {
+      header: `<span style="font-size:24px;font-weight:800;color:#34d399;letter-spacing:-0.5px;">${PLATFORM_PRODUCT}</span>`,
+      footer: `C4 Technologies — ${PLATFORM_PRODUCT}`,
+      product: PLATFORM_PRODUCT,
+      productSubject: PLATFORM_PRODUCT,
+      onProductSubject: ` on ${PLATFORM_PRODUCT}`,
+      accentText: '#34d399',
+      accentFill: '#10b981',
+    };
+  }
+  const name = escapeHtml(brand.displayName);
+  const accentText = HEX6.test(brand.accentText) ? brand.accentText : '#34d399';
+  const accentFill = HEX6.test(brand.accentFill) ? brand.accentFill : '#10b981';
+  const logo = brand.logoUrl
+    ? `<img src="${escapeHtml(brand.logoUrl)}" alt="" height="36" style="height:36px;max-width:160px;vertical-align:middle;margin-right:12px;border:0;">`
+    : '';
+  return {
+    header: `${logo}<span style="font-size:24px;font-weight:800;color:${accentText};letter-spacing:-0.5px;vertical-align:middle;">${name}</span>`,
+    footer: brand.whiteLabel ? name : `${name} · Powered by ${PLATFORM_PRODUCT}`,
+    product: brand.whiteLabel ? name : PLATFORM_PRODUCT,
+    productSubject: brand.whiteLabel ? subjectText(brand.displayName, 60) : PLATFORM_PRODUCT,
+    onProductSubject: brand.whiteLabel ? '' : ` on ${PLATFORM_PRODUCT}`,
+    accentText,
+    accentFill,
+  };
+}
+
+/** Put the tenant's name on the From: line. Only the DISPLAY name changes —
+ *  the sending address stays the platform's verified one, so SPF/DKIM hold.
+ *  The name is reduced to a conservative character set: it lands in a mail
+ *  header, where quotes, angle brackets and line breaks are injection vectors. */
+export function applyBrandFrom<T extends EmailPayload>(payload: T, brand?: EmailBrand | null): T {
+  if (!brand || !brand.displayName) return payload;
+  const safeName = brand.displayName.replace(/[^A-Za-z0-9 .&'-]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+  if (!safeName) return payload;
+  const base = payload.from || DEFAULT_FROM_ADDRESS;
+  const address = (base.match(/<([^<>\s]+)>/)?.[1] ?? base).trim();
+  const label = brand.whiteLabel ? safeName : `${safeName} via ${PLATFORM_PRODUCT}`;
+  payload.from = `${label} <${address}>`;
+  return payload;
+}
+
 // ── Verification Code Email ──────────────────────────────────────────────────
 
 export function buildVerificationEmail(rawFirstName: string, rawCode: string): EmailPayload & { subject: string; html: string } {
@@ -374,12 +461,13 @@ export function buildVerificationEmail(rawFirstName: string, rawCode: string): E
 
 // ── Password Reset Email ────────────────────────────────────────────────────
 
-export function buildPasswordResetEmail(rawFirstName: string, rawCode: string): EmailPayload & { subject: string; html: string } {
+export function buildPasswordResetEmail(rawFirstName: string, rawCode: string, brand?: EmailBrand | null): EmailPayload & { subject: string; html: string } {
+  const b = resolveEmailBrand(brand);
   const firstName = escapeHtml(rawFirstName);
   const code = escapeHtml(rawCode);
   return {
     to: '',
-    subject: `Reset your HVAC DesignPro password`,
+    subject: `Reset your ${b.productSubject} password`,
     html: `
 <!DOCTYPE html>
 <html>
@@ -391,7 +479,7 @@ export function buildPasswordResetEmail(rawFirstName: string, rawCode: string): 
         <table width="560" cellpadding="0" cellspacing="0" style="background-color:#1e293b;border-radius:16px;border:1px solid #334155;overflow:hidden;">
           <tr>
             <td style="padding:32px 40px 24px;border-bottom:1px solid #334155;">
-              <span style="font-size:24px;font-weight:800;color:#34d399;letter-spacing:-0.5px;">HVAC DesignPro</span>
+              ${b.header}
             </td>
           </tr>
           <tr>
@@ -403,7 +491,7 @@ export function buildPasswordResetEmail(rawFirstName: string, rawCode: string): 
                 Enter this code to reset your password:
               </p>
               <div style="text-align:center;padding:24px;background-color:#0f172a;border:2px solid #334155;border-radius:16px;margin-bottom:28px;">
-                <span style="font-size:40px;font-weight:800;font-family:'Courier New',monospace;color:#34d399;letter-spacing:12px;">${code}</span>
+                <span style="font-size:40px;font-weight:800;font-family:'Courier New',monospace;color:${b.accentText};letter-spacing:12px;">${code}</span>
               </div>
               <p style="margin:0;font-size:14px;color:#64748b;line-height:1.6;">
                 This code expires in <strong style="color:#94a3b8;">15 minutes</strong>. If you didn't request a password reset, you can safely ignore this email.
@@ -413,7 +501,7 @@ export function buildPasswordResetEmail(rawFirstName: string, rawCode: string): 
           <tr>
             <td style="padding:20px 40px;border-top:1px solid #334155;background-color:#0f172a;">
               <p style="margin:0;font-size:11px;color:#475569;line-height:1.6;">
-                C4 Technologies — HVAC DesignPro<br>
+                ${b.footer}<br>
                 This email was sent because a password reset was requested for this account.
               </p>
             </td>
@@ -434,12 +522,13 @@ export function buildPasswordResetEmail(rawFirstName: string, rawCode: string): 
 // validated inside POST /api/auth/mfa/challenge with method:'email'. Short
 // 5-minute TTL — it's a live login step, not an onboarding loop.
 
-export function buildMfaEmailCode(rawFirstName: string, rawCode: string): EmailPayload & { subject: string; html: string } {
+export function buildMfaEmailCode(rawFirstName: string, rawCode: string, brand?: EmailBrand | null): EmailPayload & { subject: string; html: string } {
+  const b = resolveEmailBrand(brand);
   const firstName = escapeHtml(rawFirstName);
   const code = escapeHtml(rawCode);
   return {
     to: '',
-    subject: `Your HVAC DesignPro sign-in code: ${code}`,
+    subject: `Your ${b.productSubject} sign-in code: ${code}`,
     html: `
 <!DOCTYPE html>
 <html>
@@ -451,7 +540,7 @@ export function buildMfaEmailCode(rawFirstName: string, rawCode: string): EmailP
         <table width="560" cellpadding="0" cellspacing="0" style="background-color:#1e293b;border-radius:16px;border:1px solid #334155;overflow:hidden;">
           <tr>
             <td style="padding:32px 40px 24px;border-bottom:1px solid #334155;">
-              <span style="font-size:24px;font-weight:800;color:#34d399;letter-spacing:-0.5px;">HVAC DesignPro</span>
+              ${b.header}
             </td>
           </tr>
           <tr>
@@ -463,7 +552,7 @@ export function buildMfaEmailCode(rawFirstName: string, rawCode: string): EmailP
                 Enter this code to finish signing in. We sent it because you requested an email code instead of your authenticator app:
               </p>
               <div style="text-align:center;padding:24px;background-color:#0f172a;border:2px solid #334155;border-radius:16px;margin-bottom:28px;">
-                <span style="font-size:40px;font-weight:800;font-family:'Courier New',monospace;color:#34d399;letter-spacing:12px;">${code}</span>
+                <span style="font-size:40px;font-weight:800;font-family:'Courier New',monospace;color:${b.accentText};letter-spacing:12px;">${code}</span>
               </div>
               <p style="margin:0;font-size:14px;color:#64748b;line-height:1.6;">
                 This code expires in <strong style="color:#94a3b8;">5 minutes</strong>. If you didn't try to sign in, change your password immediately — someone may have it.
@@ -473,7 +562,7 @@ export function buildMfaEmailCode(rawFirstName: string, rawCode: string): EmailP
           <tr>
             <td style="padding:20px 40px;border-top:1px solid #334155;background-color:#0f172a;">
               <p style="margin:0;font-size:11px;color:#475569;line-height:1.6;">
-                C4 Technologies — HVAC DesignPro<br>
+                ${b.footer}<br>
                 This email was sent because an email sign-in code was requested for this account.
               </p>
             </td>
@@ -564,7 +653,8 @@ interface InviteEmailData {
   expiresAt: string;          // ISO date — formatted humanely in the email
 }
 
-export function buildInviteEmail(raw: InviteEmailData): EmailPayload & { subject: string; html: string } {
+export function buildInviteEmail(raw: InviteEmailData, brand?: EmailBrand | null): EmailPayload & { subject: string; html: string } {
+  const b = resolveEmailBrand(brand);
   // HTML-safe view for the template; `raw` is used only for the text subject.
   const data: InviteEmailData = {
     ...raw,
@@ -582,7 +672,7 @@ export function buildInviteEmail(raw: InviteEmailData): EmailPayload & { subject
 
   return {
     to: '',
-    subject: `${subjectText(raw.inviterName)} invited you to join ${subjectText(raw.orgName)} on HVAC DesignPro`,
+    subject: `${subjectText(raw.inviterName)} invited you to join ${subjectText(raw.orgName)}${b.onProductSubject}`,
     html: `
 <!DOCTYPE html>
 <html>
@@ -594,14 +684,14 @@ export function buildInviteEmail(raw: InviteEmailData): EmailPayload & { subject
         <!-- Header -->
         <tr>
           <td style="padding:32px 40px 24px;border-bottom:1px solid #334155;">
-            <span style="font-size:24px;font-weight:800;color:#34d399;letter-spacing:-0.5px;">HVAC DesignPro</span>
+            ${b.header}
           </td>
         </tr>
         <!-- Body -->
         <tr>
           <td style="padding:32px 40px;">
             <h1 style="margin:0 0 16px;font-size:24px;font-weight:800;color:#f1f5f9;line-height:1.3;">
-              You're invited to join <span style="color:#34d399;">${data.orgName}</span>
+              You're invited to join <span style="color:${b.accentText};">${data.orgName}</span>
             </h1>
             <p style="margin:0 0 24px;font-size:16px;color:#94a3b8;line-height:1.6;">
               <strong style="color:#e2e8f0;">${data.inviterName}</strong> added you as a
@@ -611,7 +701,7 @@ export function buildInviteEmail(raw: InviteEmailData): EmailPayload & { subject
             <!-- CTA -->
             <table cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
               <tr>
-                <td style="background-color:#10b981;border-radius:12px;padding:14px 32px;">
+                <td style="background-color:${b.accentFill};border-radius:12px;padding:14px 32px;">
                   <a href="${data.redeemUrl}" style="color:#0f172a;font-size:16px;font-weight:700;text-decoration:none;display:inline-block;">
                     Accept invitation
                   </a>
@@ -633,7 +723,7 @@ export function buildInviteEmail(raw: InviteEmailData): EmailPayload & { subject
         <tr>
           <td style="padding:20px 40px;border-top:1px solid #334155;background-color:#0f172a;">
             <p style="margin:0;font-size:11px;color:#475569;line-height:1.6;">
-              C4 Technologies — HVAC DesignPro<br>
+              ${b.footer}<br>
               Invited by <a href="mailto:${data.inviterEmail}" style="color:#475569;text-decoration:none;">${data.inviterEmail}</a> ·
               <a href="https://hvac-design-pro.pages.dev" style="color:#475569;text-decoration:none;">hvac-design-pro.pages.dev</a>
             </p>
@@ -661,7 +751,8 @@ interface ReparentEmailData {
   expiresAt: string;
 }
 
-export function buildReparentEmail(raw: ReparentEmailData): EmailPayload & { subject: string; html: string } {
+export function buildReparentEmail(raw: ReparentEmailData, brand?: EmailBrand | null): EmailPayload & { subject: string; html: string } {
+  const b = resolveEmailBrand(brand);
   // HTML-safe view for the template; `raw` is used only for the text subject.
   const data: ReparentEmailData = {
     ...raw,
@@ -678,7 +769,7 @@ export function buildReparentEmail(raw: ReparentEmailData): EmailPayload & { sub
 
   return {
     to: '',
-    subject: `${subjectText(raw.orgName)} wants to bring your HVAC DesignPro account into their team`,
+    subject: `${subjectText(raw.orgName)} wants to bring your ${b.productSubject} account into their team`,
     html: `
 <!DOCTYPE html>
 <html>
@@ -690,18 +781,18 @@ export function buildReparentEmail(raw: ReparentEmailData): EmailPayload & { sub
         <!-- Header -->
         <tr>
           <td style="padding:32px 40px 24px;border-bottom:1px solid #334155;">
-            <span style="font-size:24px;font-weight:800;color:#34d399;letter-spacing:-0.5px;">HVAC DesignPro</span>
+            ${b.header}
           </td>
         </tr>
         <!-- Body -->
         <tr>
           <td style="padding:32px 40px;">
             <h1 style="margin:0 0 16px;font-size:24px;font-weight:800;color:#f1f5f9;line-height:1.3;">
-              Join <span style="color:#34d399;">${data.orgName}</span> with your existing account
+              Join <span style="color:${b.accentText};">${data.orgName}</span> with your existing account
             </h1>
             <p style="margin:0 0 24px;font-size:16px;color:#94a3b8;line-height:1.6;">
               <strong style="color:#e2e8f0;">${data.inviterName}</strong> asked to move your
-              HVAC DesignPro account into the <strong style="color:#e2e8f0;">${data.orgName}</strong>
+              ${b.product} account into the <strong style="color:#e2e8f0;">${data.orgName}</strong>
               workspace as a <strong style="color:#e2e8f0;">${roleLabel}</strong>.
               Nothing happens without your say-so &mdash; sign in and you'll see the request
               waiting for you to accept or decline.
@@ -709,7 +800,7 @@ export function buildReparentEmail(raw: ReparentEmailData): EmailPayload & { sub
             <!-- CTA -->
             <table cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
               <tr>
-                <td style="background-color:#10b981;border-radius:12px;padding:14px 32px;">
+                <td style="background-color:${b.accentFill};border-radius:12px;padding:14px 32px;">
                   <a href="${data.appUrl}" style="color:#0f172a;font-size:16px;font-weight:700;text-decoration:none;display:inline-block;">
                     Review the request
                   </a>
@@ -728,7 +819,7 @@ export function buildReparentEmail(raw: ReparentEmailData): EmailPayload & { sub
         <tr>
           <td style="padding:20px 40px;border-top:1px solid #334155;background-color:#0f172a;">
             <p style="margin:0;font-size:11px;color:#475569;line-height:1.6;">
-              C4 Technologies — HVAC DesignPro<br>
+              ${b.footer}<br>
               Requested by <a href="mailto:${data.inviterEmail}" style="color:#475569;text-decoration:none;">${data.inviterEmail}</a> ·
               <a href="https://hvac-design-pro.pages.dev" style="color:#475569;text-decoration:none;">hvac-design-pro.pages.dev</a>
             </p>
@@ -744,11 +835,12 @@ export function buildReparentEmail(raw: ReparentEmailData): EmailPayload & { sub
 
 // ── Welcome Email ─────────────────────────────────────────────────────────────
 
-export function buildWelcomeEmail(rawFirstName: string): EmailPayload & { subject: string; html: string } {
+export function buildWelcomeEmail(rawFirstName: string, brand?: EmailBrand | null): EmailPayload & { subject: string; html: string } {
+  const b = resolveEmailBrand(brand);
   const firstName = escapeHtml(rawFirstName);
   return {
     to: '', // caller fills this in
-    subject: `Welcome to HVAC DesignPro, ${subjectText(rawFirstName, 80)}!`,
+    subject: `Welcome to ${b.productSubject}, ${subjectText(rawFirstName, 80)}!`,
     html: `
 <!DOCTYPE html>
 <html>
@@ -764,7 +856,7 @@ export function buildWelcomeEmail(rawFirstName: string): EmailPayload & { subjec
           <!-- Header -->
           <tr>
             <td style="padding:32px 40px 24px;border-bottom:1px solid #334155;">
-              <span style="font-size:24px;font-weight:800;color:#34d399;letter-spacing:-0.5px;">HVAC DesignPro</span>
+              ${b.header}
             </td>
           </tr>
           <!-- Body -->
@@ -778,7 +870,7 @@ export function buildWelcomeEmail(rawFirstName: string): EmailPayload & { subjec
               </p>
               <table cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
                 <tr>
-                  <td style="background-color:#10b981;border-radius:12px;padding:14px 32px;">
+                  <td style="background-color:${b.accentFill};border-radius:12px;padding:14px 32px;">
                     <a href="https://hvac-design-pro.pages.dev/dashboard" style="color:#0f172a;font-size:16px;font-weight:700;text-decoration:none;display:inline-block;">
                       Open Your Dashboard
                     </a>
@@ -793,7 +885,7 @@ export function buildWelcomeEmail(rawFirstName: string): EmailPayload & { subjec
                 <li>Export professional PDF reports</li>
               </ul>
               <p style="margin:0;font-size:14px;color:#64748b;line-height:1.6;">
-                Need help? Visit the <a href="https://hvac-design-pro.pages.dev/guide" style="color:#34d399;text-decoration:none;">User Guide</a> or ask Mason, your built-in AI assistant.
+                Need help? Visit the <a href="https://hvac-design-pro.pages.dev/guide" style="color:${b.accentText};text-decoration:none;">User Guide</a> or ask Mason, your built-in AI assistant.
               </p>
             </td>
           </tr>
@@ -801,7 +893,7 @@ export function buildWelcomeEmail(rawFirstName: string): EmailPayload & { subjec
           <tr>
             <td style="padding:20px 40px;border-top:1px solid #334155;background-color:#0f172a;">
               <p style="margin:0;font-size:11px;color:#475569;line-height:1.6;">
-                C4 Technologies — HVAC DesignPro<br>
+                ${b.footer}<br>
                 This email was sent because you created an account at hvac-design-pro.pages.dev
               </p>
             </td>
