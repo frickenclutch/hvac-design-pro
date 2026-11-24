@@ -4,6 +4,7 @@ import {
   Layers, Building2, Keyboard, ChevronRight,
   Save, Box, Thermometer, GitBranch, FolderOpen, FileText,
 } from 'lucide-react';
+import { useProductName } from '../../../stores/useBrandingStore';
 
 interface HelpSection {
   id: string;
@@ -291,6 +292,7 @@ const sections: HelpSection[] = [
 ];
 
 export default function HelpCenter({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  const product = useProductName();
   const [expandedSection, setExpandedSection] = useState<string | null>('getting-started');
 
   if (!isOpen) return null;
@@ -360,7 +362,7 @@ export default function HelpCenter({ isOpen, onClose }: { isOpen: boolean; onClo
       {/* Footer */}
       <div className="px-4 py-2.5 border-t border-slate-800 bg-slate-900/50 flex-shrink-0">
         <p className="text-[10px] text-slate-600 text-center font-medium">
-          HVAC DesignPro CAD Workspace — Press <kbd className="text-emerald-500/70 font-mono">ESC</kbd> to return to Select at any time
+          {product} CAD Workspace — Press <kbd className="text-emerald-500/70 font-mono">ESC</kbd> to return to Select at any time
         </p>
       </div>
     </div>

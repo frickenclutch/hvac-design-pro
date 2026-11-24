@@ -45,12 +45,17 @@ body {
 @utility premium-gradient-text {
   background-clip: text;
   color: transparent;
-  background-image: linear-gradient(to right, var(--color-hvac-400), #34d399);
+  background-image: linear-gradient(to right, var(--color-hvac-400), var(--color-emerald-400));
 }
 
 /* ── Theme Variants ──────────────────────────────────────────────────────── */
 :root {
   --accent-rgb: 16 185 129;
+  /* Soft glow tint (emerald-400) for drop-shadows; a tenant palette re-points it. */
+  --accent-glow-rgb: 52 211 153;
+  /* Stronger glow tint (emerald-500) under filled accent buttons. Separate from
+     --accent-rgb so a member's personal accent never recolours these. */
+  --accent-glow-strong-rgb: 16 185 129;
   --density-scale: 1;
 }
 
@@ -632,8 +637,8 @@ body {
   left: 0;
   width: 2px;
   height: 100%;
-  background: linear-gradient(to bottom, transparent, rgba(52, 211, 153, 0.9), transparent);
-  box-shadow: 0 0 10px 1px rgba(52, 211, 153, 0.5);
+  background: linear-gradient(to bottom, transparent, rgb(var(--accent-glow-rgb) / 0.9), transparent);
+  box-shadow: 0 0 10px 1px rgb(var(--accent-glow-rgb) / 0.5);
   opacity: 0;
   animation: let-scan-line 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }

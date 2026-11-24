@@ -19,7 +19,7 @@ export default function LandingPage() {
       <nav className="sticky top-0 z-50 backdrop-blur-xl bg-slate-950/80 border-b border-slate-800/40">
         <div className="flex items-center justify-between px-6 py-3 max-w-6xl mx-auto">
           <div className="flex items-center gap-2">
-            <Compass className="w-7 h-7 text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.5)]" />
+            <Compass className="w-7 h-7 text-emerald-400 drop-shadow-[0_0_10px_rgb(var(--accent-glow-rgb)/0.5)]" />
             <span className="text-lg font-bold tracking-tight premium-gradient-text">HVAC DesignPro</span>
           </div>
           <div className="flex items-center gap-2">
@@ -53,7 +53,7 @@ export default function LandingPage() {
             <div className="flex flex-wrap items-center gap-3">
               <Link
                 to="/onboarding"
-                className="flex items-center gap-2 bg-emerald-500 text-slate-950 px-7 py-3.5 rounded-full font-bold hover:bg-emerald-400 hover:shadow-[0_0_25px_rgba(16,185,129,0.35)] transition-all"
+                className="flex items-center gap-2 bg-emerald-500 text-slate-950 px-7 py-3.5 rounded-full font-bold hover:bg-emerald-400 hover:shadow-[0_0_25px_rgb(var(--accent-glow-strong-rgb)/0.35)] transition-all"
               >
                 Start Free <ArrowRight className="w-4 h-4" />
               </Link>
@@ -200,7 +200,7 @@ export default function LandingPage() {
           </p>
           <Link
             to="/onboarding"
-            className="inline-flex items-center gap-2 bg-emerald-500 text-slate-950 px-8 py-4 rounded-full text-lg font-bold hover:bg-emerald-400 hover:shadow-[0_0_30px_rgba(16,185,129,0.4)] transition-all"
+            className="inline-flex items-center gap-2 bg-emerald-500 text-slate-950 px-8 py-4 rounded-full text-lg font-bold hover:bg-emerald-400 hover:shadow-[0_0_30px_rgb(var(--accent-glow-strong-rgb)/0.4)] transition-all"
           >
             Get Started Free <ArrowRight className="w-5 h-5" />
           </Link>

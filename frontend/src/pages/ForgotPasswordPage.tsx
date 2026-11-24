@@ -3,10 +3,12 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { SecurityBadge } from '../features/auth/components/SecurityComponents';
 import { Compass, Mail, Lock, ArrowRight, ArrowLeft, Eye, EyeOff, AlertCircle, CheckCircle2, RotateCw, KeyRound } from 'lucide-react';
+import { useSignInName } from '../stores/useBrandingStore';
 
 type Step = 'email' | 'code' | 'success';
 
 export default function ForgotPasswordPage() {
+  const brandName = useSignInName();
   const { forgotPassword, resetPassword, authError, authLoading, clearError } = useAuthStore();
   const navigate = useNavigate();
   const [step, setStep] = useState<Step>('email');
@@ -80,9 +82,9 @@ export default function ForgotPasswordPage() {
       <div className="md:w-1/2 p-6 md:p-12 flex flex-col justify-between relative z-10">
         <div className="flex items-center gap-2.5">
           <div className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-900 border border-slate-700 shadow-xl">
-            <Compass className="w-6 h-6 text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.5)]" />
+            <Compass className="w-6 h-6 text-emerald-400 drop-shadow-[0_0_10px_rgb(var(--accent-glow-rgb)/0.5)]" />
           </div>
-          <span className="text-xl font-bold tracking-tight premium-gradient-text">HVAC DesignPro</span>
+          <span className="text-xl font-bold tracking-tight premium-gradient-text truncate">{brandName}</span>
         </div>
 
         <div className="mb-20">
@@ -255,7 +257,7 @@ export default function ForgotPasswordPage() {
                 <button
                   type="submit"
                   disabled={authLoading || code.length !== 6 || !newPassword || newPassword.length < 8 || newPassword !== confirmPassword}
-                  className="w-full bg-emerald-500 text-slate-950 py-4 rounded-2xl font-bold text-lg hover:bg-emerald-400 hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all transform hover:-translate-y-1 active:scale-95 shadow-xl flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                  className="w-full bg-emerald-500 text-slate-950 py-4 rounded-2xl font-bold text-lg hover:bg-emerald-400 hover:shadow-[0_0_30px_rgb(var(--accent-glow-strong-rgb)/0.3)] transition-all transform hover:-translate-y-1 active:scale-95 shadow-xl flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
                 >
                   {authLoading ? (
                     <div className="w-5 h-5 border-2 border-slate-700 border-t-transparent rounded-full animate-spin" />
@@ -302,7 +304,7 @@ export default function ForgotPasswordPage() {
               </p>
               <button
                 onClick={() => navigate('/login')}
-                className="bg-emerald-500 text-slate-950 px-12 py-4 rounded-2xl font-bold text-lg hover:bg-emerald-400 hover:shadow-[0_0_40px_rgba(16,185,129,0.4)] transition-all transform hover:-translate-y-1 active:scale-95 shadow-xl inline-flex items-center gap-2"
+                className="bg-emerald-500 text-slate-950 px-12 py-4 rounded-2xl font-bold text-lg hover:bg-emerald-400 hover:shadow-[0_0_40px_rgb(var(--accent-glow-strong-rgb)/0.4)] transition-all transform hover:-translate-y-1 active:scale-95 shadow-xl inline-flex items-center gap-2"
               >
                 Go to Sign In <ArrowRight className="w-5 h-5" />
               </button>

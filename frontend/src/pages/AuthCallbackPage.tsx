@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { Compass, AlertCircle, ArrowLeft, ArrowRight, MailCheck } from 'lucide-react';
+import { useSignInName } from '../stores/useBrandingStore';
 
 export default function AuthCallbackPage() {
+  const brandName = useSignInName();
   const {
     ssoCallback, submitSsoLink, clearError,
     isAuthenticated, authError, authLoading,
@@ -86,9 +88,9 @@ export default function AuthCallbackPage() {
       <div className="relative z-10 text-center max-w-md mx-auto px-6 py-10 w-full">
         <div className="flex items-center justify-center gap-2.5 mb-12">
           <div className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-900 border border-slate-700 shadow-xl">
-            <Compass className="w-6 h-6 text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.5)]" />
+            <Compass className="w-6 h-6 text-emerald-400 drop-shadow-[0_0_10px_rgb(var(--accent-glow-rgb)/0.5)]" />
           </div>
-          <span className="text-xl font-bold tracking-tight premium-gradient-text">HVAC DesignPro</span>
+          <span className="text-xl font-bold tracking-tight premium-gradient-text truncate">{brandName}</span>
         </div>
 
         {ssoLinkRequired ? (
@@ -130,7 +132,7 @@ export default function AuthCallbackPage() {
               <button
                 type="submit"
                 disabled={authLoading || linkCode.length !== 6}
-                className="w-full bg-emerald-500 text-slate-950 py-4 rounded-2xl font-bold text-lg hover:bg-emerald-400 hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all transform hover:-translate-y-1 active:scale-95 shadow-xl flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none min-h-[44px]"
+                className="w-full bg-emerald-500 text-slate-950 py-4 rounded-2xl font-bold text-lg hover:bg-emerald-400 hover:shadow-[0_0_30px_rgb(var(--accent-glow-strong-rgb)/0.3)] transition-all transform hover:-translate-y-1 active:scale-95 shadow-xl flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none min-h-[44px]"
               >
                 {authLoading ? (
                   <div className="w-5 h-5 border-2 border-slate-700 border-t-transparent rounded-full animate-spin" />

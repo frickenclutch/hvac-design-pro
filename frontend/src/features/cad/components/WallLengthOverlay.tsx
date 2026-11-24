@@ -46,8 +46,8 @@ export default function WallLengthOverlay() {
 
       return (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
-          <div className="flex items-center gap-3 px-5 py-2.5 rounded-2xl bg-slate-900/90 border border-emerald-500/30 shadow-[0_0_30px_rgba(52,211,153,0.15)] backdrop-blur-xl">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+          <div className="flex items-center gap-3 px-5 py-2.5 rounded-2xl bg-slate-900/90 border border-emerald-500/30 shadow-[0_0_30px_rgb(var(--accent-glow-rgb)/0.15)] backdrop-blur-xl">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgb(var(--accent-glow-rgb)/0.8)]" />
             <span className="text-slate-300 text-xs font-mono tracking-wide">
               Wall
             </span>

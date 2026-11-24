@@ -148,7 +148,7 @@ export default function DemoPage() {
               onClick={() => setCurrentStep(i)}
               className={`h-1.5 rounded-full transition-all duration-500 ${
                 i === currentStep
-                  ? 'w-8 bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]'
+                  ? 'w-8 bg-emerald-400 shadow-[0_0_8px_rgb(var(--accent-glow-rgb)/0.5)]'
                   : i < currentStep
                   ? 'w-4 bg-emerald-500/40'
                   : 'w-4 bg-slate-800'
@@ -192,7 +192,7 @@ export default function DemoPage() {
 
               {step.visual === 'cta' && (
                 <div className="mt-8 flex flex-wrap gap-3">
-                  <Link to="/onboarding" className="flex items-center gap-2 bg-emerald-500 text-slate-950 px-8 py-4 rounded-full font-bold text-lg hover:bg-emerald-400 hover:shadow-[0_0_25px_rgba(16,185,129,0.35)] transition-all">
+                  <Link to="/onboarding" className="flex items-center gap-2 bg-emerald-500 text-slate-950 px-8 py-4 rounded-full font-bold text-lg hover:bg-emerald-400 hover:shadow-[0_0_25px_rgb(var(--accent-glow-strong-rgb)/0.35)] transition-all">
                     Create Free Account <ArrowRight className="w-5 h-5" />
                   </Link>
                   <Link to="/login" className="flex items-center gap-2 px-8 py-4 rounded-full font-bold text-slate-300 border border-slate-700 hover:border-slate-500 hover:text-white transition-all">
@@ -244,7 +244,7 @@ function DemoVisual({ type }: { type: string; color: string }) {
   if (type === 'hero' || type === 'cta') {
     return (
       <div className="glass-panel rounded-2xl border border-slate-700/40 p-8 flex flex-col items-center justify-center min-h-[300px] text-center">
-        <Compass className="w-16 h-16 text-emerald-400 mb-4 drop-shadow-[0_0_20px_rgba(52,211,153,0.4)]" />
+        <Compass className="w-16 h-16 text-emerald-400 mb-4 drop-shadow-[0_0_20px_rgb(var(--accent-glow-rgb)/0.4)]" />
         <p className="text-2xl font-bold text-white mb-2">Free. Instant. Professional.</p>
         <p className="text-slate-500 text-sm max-w-xs">The best engineering tools should be accessible to everyone, everywhere.</p>
       </div>

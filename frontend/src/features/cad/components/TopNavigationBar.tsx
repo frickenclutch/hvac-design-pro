@@ -11,6 +11,7 @@ import { useAuthStore } from '../../auth/store/useAuthStore';
 import { useProjectStore } from '../../../stores/useProjectStore';
 import { useAccessPolicyStore } from '../../../stores/useAccessPolicyStore';
 import { avatarUrl } from '../../../utils/avatar';
+import { productName } from '../../../stores/useBrandingStore';
 
 // Lazy-load heavy dependencies (Three.js ~1.2MB, jsPDF ~200KB)
 const Viewer3D = lazy(() => import('./Viewer3D'));
@@ -227,7 +228,7 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
     const metadata = {
       projectName: activeProjectName ?? displayName,
       engineerName: user ? `${user.firstName} ${user.lastName}` : 'HVAC Engineer',
-      organisationName: organisation?.name || 'HVAC Design Pro',
+      organisationName: organisation?.name || productName(),
       date: new Date().toLocaleDateString(),
       region: organisation?.regionCode || 'NA_ASHRAE',
       projectId: activeProjectId || id || 'DRAFT',
@@ -548,7 +549,7 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
               <div className="mb-8">
                 <div className="flex gap-1.5 mb-6">
                   {[1, 2].map(s => (
-                    <div key={s} className={`h-1.5 flex-1 rounded-full transition-all ${saveStep >= s ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.3)]' : 'bg-slate-800'}`} />
+                    <div key={s} className={`h-1.5 flex-1 rounded-full transition-all ${saveStep >= s ? 'bg-emerald-500 shadow-[0_0_10px_rgb(var(--accent-glow-strong-rgb)/0.3)]' : 'bg-slate-800'}`} />
                   ))}
                 </div>
                 <h2 className="text-3xl font-extrabold text-white tracking-tight">
@@ -660,7 +661,7 @@ export default function TopNavigationBar({ onHelpOpen, onVersionsOpen }: { onHel
                   <button
                     disabled={!saveName.trim() || isSavingProject}
                     onClick={handleSaveModalSubmit}
-                    className="flex-[2] py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+                    className="flex-[2] py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold hover:shadow-[0_0_30px_rgb(var(--accent-glow-strong-rgb)/0.3)] transition-all flex items-center justify-center gap-2 disabled:opacity-40"
                   >
                     <Check className="w-5 h-5" /> {isSavingProject ? 'Creating…' : modalMode === 'newProject' ? 'Create Project' : 'Create & Save'}
                   </button>

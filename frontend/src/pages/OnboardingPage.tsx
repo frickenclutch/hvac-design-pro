@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuthStore, type OrgType, type RegionCode, type Address } from '../features/auth/store/useAuthStore';
 import { SecureInput, SecurityBadge } from '../features/auth/components/SecurityComponents';
 import { Building2, Globe, User, ArrowRight, ArrowLeft, ChevronRight, MapPin, Phone, Mail, Lock, Eye, EyeOff, CheckCircle2, AlertCircle, ShieldCheck, Zap } from 'lucide-react';
+import { useProductName, useBrandingStore } from '../stores/useBrandingStore';
 
 interface InvitePreview {
   invitedEmail: string;
@@ -32,6 +33,7 @@ export default function OnboardingPage() {
 // 4) on success redirect to dashboard. The user arrives session-authenticated.
 
 function InviteAcceptance({ token }: { token: string }) {
+  const product = useProductName();
   const navigate = useNavigate();
   const { redeemInvite, logout, authLoading, authError, isAuthenticated, user, clearError } = useAuthStore();
 
@@ -65,6 +67,10 @@ function InviteAcceptance({ token }: { token: string }) {
           setPreviewError(body?.error ?? 'This invitation could not be loaded.');
         } else {
           setPreview(body as InvitePreview);
+          // Wear the inviting tenant's look for the rest of this signed-out
+          // visit — an invitation is most members' first sight of the app.
+          const invitedSlug = (body as InvitePreview)?.organisation?.slug;
+          if (typeof invitedSlug === 'string') void useBrandingStore.getState().loadPublic(invitedSlug);
         }
       } catch {
         if (cancelled) return;
@@ -133,7 +139,7 @@ function InviteAcceptance({ token }: { token: string }) {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-white">Accept invitation</h1>
-            <p className="text-sm text-slate-400">Join your team on HVAC DesignPro</p>
+            <p className="text-sm text-slate-400">Join your team on {product}</p>
           </div>
         </div>
 
@@ -294,7 +300,7 @@ function InviteAcceptance({ token }: { token: string }) {
             <button
               type="submit"
               disabled={!canSubmit}
-              className="w-full px-4 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed rounded-xl text-slate-950 font-bold flex items-center justify-center gap-2 transition-colors min-h-[48px] shadow-[0_0_20px_rgba(16,185,129,0.2)]"
+              className="w-full px-4 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed rounded-xl text-slate-950 font-bold flex items-center justify-center gap-2 transition-colors min-h-[48px] shadow-[0_0_20px_rgb(var(--accent-glow-strong-rgb)/0.2)]"
             >
               {authLoading ? (
                 <>
@@ -325,6 +331,7 @@ function InviteAcceptance({ token }: { token: string }) {
 // ── Standard org-creation wizard ───────────────────────────────────────────
 
 function OnboardingWizard() {
+  const product = useProductName();
   const [step, setStep] = useState(1);
   const [role, setRole] = useState<OrgType | null>(null);
   const [region, setRegion] = useState<RegionCode>('NA_ASHRAE');
@@ -389,7 +396,7 @@ function OnboardingWizard() {
         {/* Progress Bar */}
         <div className="flex gap-2 mb-12">
           {[1, 2, 3, 4, 5].map(s => (
-            <div key={s} className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${step >= s ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-slate-800'}`} />
+            <div key={s} className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${step >= s ? 'bg-emerald-500 shadow-[0_0_10px_rgb(var(--accent-glow-strong-rgb)/0.5)]' : 'bg-slate-800'}`} />
           ))}
         </div>
 
@@ -596,7 +603,7 @@ function OnboardingWizard() {
             </div>
             <h1 className="text-4xl font-extrabold text-white mb-3 tracking-tight">Account Created</h1>
             <p className="text-slate-400 text-lg leading-relaxed max-w-md mx-auto mb-8">
-              Welcome to HVAC DesignPro. Your engineering workspace is ready.
+              Welcome to {product}. Your engineering workspace is ready.
             </p>
 
             {/* Meet Mason — introduce the always-on assistant + feedback route */}
@@ -619,7 +626,7 @@ function OnboardingWizard() {
 
             <button
               onClick={() => navigate('/dashboard')}
-              className="bg-emerald-500 text-slate-950 px-12 py-4 rounded-2xl font-bold text-lg hover:bg-emerald-400 hover:shadow-[0_0_40px_rgba(16,185,129,0.4)] transition-all transform hover:-translate-y-1 active:scale-95 shadow-xl inline-flex items-center gap-2"
+              className="bg-emerald-500 text-slate-950 px-12 py-4 rounded-2xl font-bold text-lg hover:bg-emerald-400 hover:shadow-[0_0_40px_rgb(var(--accent-glow-strong-rgb)/0.4)] transition-all transform hover:-translate-y-1 active:scale-95 shadow-xl inline-flex items-center gap-2"
             >
               Open Dashboard <ArrowRight className="w-5 h-5" />
             </button>
@@ -649,7 +656,7 @@ function OnboardingWizard() {
             <button
               onClick={handleComplete}
               disabled={!fullName || !orgName || !email || !password || password.length < 8 || password !== confirmPassword || authLoading}
-              className="flex items-center gap-2 bg-emerald-500 text-slate-950 px-10 py-4 rounded-full font-bold hover:bg-emerald-400 hover:shadow-[0_0_40px_rgba(16,185,129,0.4)] transition-all transform hover:-translate-y-1 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-slate-950"
+              className="flex items-center gap-2 bg-emerald-500 text-slate-950 px-10 py-4 rounded-full font-bold hover:bg-emerald-400 hover:shadow-[0_0_40px_rgb(var(--accent-glow-strong-rgb)/0.4)] transition-all transform hover:-translate-y-1 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-slate-950"
             >
               {authLoading ? (
                 <><div className="w-5 h-5 border-2 border-slate-700 border-t-transparent rounded-full animate-spin" /> Creating Account...</>
@@ -668,7 +675,7 @@ function RoleChoice({ icon, title, description, selected, onClick, className }: 
   return (
     <button 
       onClick={onClick}
-      className={`relative glass-panel p-6 rounded-3xl border text-left transition-all duration-500 group ${className} ${selected ? 'border-opacity-100 shadow-[0_0_30px_rgba(16,185,129,0.1)] -translate-y-1' : 'border-opacity-10 translate-y-0 opacity-60 hover:opacity-100'}`}
+      className={`relative glass-panel p-6 rounded-3xl border text-left transition-all duration-500 group ${className} ${selected ? 'border-opacity-100 shadow-[0_0_30px_rgb(var(--accent-glow-strong-rgb)/0.1)] -translate-y-1' : 'border-opacity-10 translate-y-0 opacity-60 hover:opacity-100'}`}
     >
       <div className={`w-12 h-12 flex items-center justify-center rounded-2xl bg-slate-900 border border-slate-700/50 mb-6 group-hover:scale-110 transition-transform shadow-xl ${selected ? 'text-white' : 'text-slate-500'}`}>
         {icon}
@@ -687,7 +694,7 @@ function RegionChoice({ title, subtitle, description, selected, onClick }: { tit
     >
       <div className="flex justify-between items-start mb-4">
         <h3 className="text-lg font-extrabold text-white leading-tight">{title}</h3>
-        {selected && <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)]" />}
+        {selected && <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_10px_rgb(var(--accent-glow-strong-rgb)/0.8)]" />}
       </div>
       <p className="text-xs font-bold text-emerald-400 uppercase tracking-widest mb-2 opacity-80">{subtitle}</p>
       <p className="text-slate-500 text-xs leading-relaxed font-medium">{description}</p>

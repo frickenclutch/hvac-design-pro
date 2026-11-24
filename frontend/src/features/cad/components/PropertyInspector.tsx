@@ -486,7 +486,7 @@ function OpeningPanel({ opening, onUpdate }: { opening: Opening; onUpdate: (patc
                   onClick={() => applyAndSync({ swingDirection: dir })}
                   className={`flex-1 flex flex-col items-center gap-1 px-2 py-2.5 rounded-lg border text-xs font-semibold transition-all ${
                     isActive
-                      ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.15)]'
+                      ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-400 shadow-[0_0_10px_rgb(var(--accent-glow-strong-rgb)/0.15)]'
                       : 'border-slate-700 bg-slate-950/60 text-slate-500 hover:text-slate-300 hover:border-slate-600'
                   }`}
                 >

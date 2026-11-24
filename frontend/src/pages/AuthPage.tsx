@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { SecurityBadge } from '../features/auth/components/SecurityComponents';
 import { Compass, Mail, Lock, ArrowRight, Eye, EyeOff, AlertCircle, Play } from 'lucide-react';
+import { useBrandingStore, orgLogoUrl, PLATFORM_NAME } from '../stores/useBrandingStore';
 
 export default function AuthPage() {
   const { login, ssoMicrosoft, ssoCloudflare, authError, authLoading, clearError } = useAuthStore();
@@ -10,6 +11,14 @@ export default function AuthPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  // Tenant sign-in branding — set when this page was opened from a tenant's
+  // sign-in link, or the device last signed in to a branded tenant. The
+  // palette is already painted by the store; this is the name and logo.
+  const signIn = useBrandingStore((s) => s.signIn);
+  const branding = useBrandingStore((s) => s.branding);
+  const tenantLogo = signIn ? orgLogoUrl(signIn.orgId, branding.logoKey) : null;
+  const tenantSubline = signIn ? (branding.whiteLabel ? branding.tagline : `Powered by ${PLATFORM_NAME}`) : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,16 +48,23 @@ export default function AuthPage() {
       {/* Hero Side */}
       <div className="md:w-1/2 p-6 md:p-12 flex flex-col justify-between relative z-10">
         <div className="flex items-center gap-2.5">
-          <div className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-900 border border-slate-700 shadow-xl">
-            <Compass className="w-6 h-6 text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.5)]" />
+          <div className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-900 border border-slate-700 shadow-xl overflow-hidden">
+            {tenantLogo
+              ? <img src={tenantLogo} alt="" aria-hidden className="max-w-full max-h-full object-contain" />
+              : <Compass className="w-6 h-6 text-emerald-400 drop-shadow-[0_0_10px_rgb(var(--accent-rgb)/0.5)]" />}
           </div>
-          <span className="text-xl font-bold tracking-tight premium-gradient-text">HVAC DesignPro</span>
+          <span className="flex flex-col min-w-0">
+            <span className="text-xl font-bold tracking-tight premium-gradient-text truncate">{signIn ? signIn.name : 'HVAC DesignPro'}</span>
+            {tenantSubline && (
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 truncate">{tenantSubline}</span>
+            )}
+          </span>
         </div>
 
         <div className="mb-20">
           <h1 className="text-6xl font-extrabold text-white leading-tight tracking-tight mb-6">
             Sign in to <br />
-            <span className="text-slate-500">DesignPro</span>
+            <span className="text-slate-500">{signIn ? signIn.name : 'DesignPro'}</span>
           </h1>
           <p className="text-lg text-slate-400 max-w-sm leading-relaxed">
             Access your engineering workspace and cloud calculations.
@@ -183,6 +199,10 @@ export default function AuthPage() {
             </div>
           </div>
 
+          {/* Platform marketing (demo + self-serve signup, which creates a NEW
+              organisation). A white-labelled tenant sign-in page omits it:
+              the platform is not named there, and members join by invitation. */}
+          {!(signIn && branding.whiteLabel) && (
           <div className="pt-10 mt-10 border-t border-slate-800 space-y-4">
             <Link
               to="/demo"
@@ -198,6 +218,7 @@ export default function AuthPage() {
               </Link>
             </div>
           </div>
+          )}
         </div>
       </div>
     </div>
