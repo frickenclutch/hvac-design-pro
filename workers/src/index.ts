@@ -11,6 +11,8 @@ import { userRoutes, avatarPublicRoutes } from './routes/users';
 import { pricingRoutes } from './routes/pricing';
 import { feedbackRoutes } from './routes/feedback';
 import { platformRoutes } from './routes/platform';
+import { brandingRoutes, platformBrandingRoutes, orgLogoPublicRoutes, publicBrandingRoutes } from './routes/branding';
+import { navLayoutRoutes } from './routes/navLayout';
 import { forumRoutes } from './routes/forum';
 import { permitRoutes } from './routes/permits';
 import { auditRoutes } from './routes/audit';
@@ -82,6 +84,11 @@ app.get('/health', (c) => c.json({ status: 'ok', env: c.env.ENVIRONMENT }));
 // Public auth routes
 app.route('/api/auth', authRoutes);
 
+// Public tenant sign-in branding — the name / colour / logo pointer a tenant
+// chose for its shell, so its sign-in page can wear it before login. Mounted
+// ahead of authMiddleware; see routes/branding.ts for the enumeration notes.
+app.route('/api/auth/tenant-branding', publicBrandingRoutes);
+
 // Provider webhook ingress — PUBLIC by design. Webhooks are signed by the
 // payment provider, not sent by a logged-in user, so they are NOT bearer-authed
 // (signature verification lives in each provider's handleWebhook). Mounted here,
@@ -94,6 +101,11 @@ app.route('/api/webhooks', webhookRoutes);
 // must be unauthenticated. Exposure is negligible: random, non-enumerable user
 // ids and non-sensitive identity photos. See routes/users.ts.
 app.route('/avatars', avatarPublicRoutes);
+
+// Public tenant-logo bytes — PUBLIC by design for the same <img src> reason as
+// avatars. Only ever serves a key under the org's own `org-logos/<orgId>/`
+// prefix (re-validated on read). See routes/branding.ts.
+app.route('/org-logos', orgLogoPublicRoutes);
 
 // Protected routes
 app.use('/api/*', authMiddleware);
@@ -118,6 +130,8 @@ app.use('/api/*', async (c, next) => {
   }
   await next();
 });
+app.route('/api/org/branding', brandingRoutes);
+app.route('/api/org/nav-layout', navLayoutRoutes);
 app.route('/api/org', orgRoutes);
 // Admin-configured per-org real pricing (CSV live; webhook/api registered).
 // Reads (/status, /items) open to any member; writes admin-gated. Org-scoped.
@@ -131,6 +145,7 @@ app.route('/api/calculations', calcRoutes);
 app.route('/api/uploads', uploadRoutes);
 app.route('/api/cad', cadRoutes);
 app.route('/api/feedback', feedbackRoutes);
+app.route('/api/platform/branding', platformBrandingRoutes);
 app.route('/api/platform', platformRoutes);
 app.route('/api/forum', forumRoutes);
 app.route('/api/permits', permitRoutes);

@@ -54,7 +54,7 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
           <div className="mb-8">
              <div className="flex gap-1.5 mb-6">
                 {[1, 2, 3].map(s => (
-                  <div key={s} className={`h-1.5 flex-1 rounded-full ${step >= s ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.3)]' : 'bg-slate-800'}`} />
+                  <div key={s} className={`h-1.5 flex-1 rounded-full ${step >= s ? 'bg-emerald-500 shadow-[0_0_10px_rgb(var(--accent-glow-strong-rgb)/0.3)]' : 'bg-slate-800'}`} />
                 ))}
              </div>
              <h2 className="text-3xl font-extrabold text-white tracking-tight">
@@ -137,7 +137,7 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
               <button
                 disabled={loading || !name.trim()}
                 onClick={handleSubmit}
-                className="flex-[2] py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+                className="flex-[2] py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold hover:shadow-[0_0_30px_rgb(var(--accent-glow-strong-rgb)/0.3)] transition-all flex items-center justify-center gap-2 disabled:opacity-60"
               >
                 {loading ? "Syncing to cloud…" : "Initialize Workspace"} <ArrowRight className="w-5 h-5" />
               </button>
@@ -164,7 +164,7 @@ function TypeCard({ title, icon, active, onClick }: any) {
 function ProtocolItem({ label, active }: any) {
   return (
     <div className="flex items-center gap-3">
-      <div className={`w-2 h-2 rounded-full ${active ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-slate-700'}`} />
+      <div className={`w-2 h-2 rounded-full ${active ? 'bg-emerald-500 shadow-[0_0_8px_rgb(var(--accent-glow-strong-rgb)/0.5)]' : 'bg-slate-700'}`} />
       <span className="text-sm font-semibold text-slate-300">{label}</span>
     </div>
   );

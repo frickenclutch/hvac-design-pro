@@ -3,7 +3,8 @@ import { generateId, uniqueOrgSlug } from '../utils/id';
 import { hashPassword, verifyPassword, isLegacyHash, hashToken, timingSafeEqual } from '../utils/crypto';
 import { mintTokenPair } from '../utils/session';
 import { nowIso } from '../utils/time';
-import { sendEmail, buildWelcomeEmail, buildVerificationEmail, buildPasswordResetEmail, buildMfaEmailCode, buildSsoLinkEmail } from '../utils/email';
+import { sendEmail, buildWelcomeEmail, buildVerificationEmail, buildPasswordResetEmail, buildMfaEmailCode, buildSsoLinkEmail, applyBrandFrom } from '../utils/email';
+import { loadEmailBrand } from '../utils/branding';
 import { createVerificationCode, validateVerificationCode, generateCode } from '../utils/verificationCodes';
 import { checkRateLimit, recordRateLimitEvent, cleanupRateLimitEvents, checkAuthRateLimit, recordAuthFailure } from '../utils/rateLimit';
 
@@ -443,7 +444,8 @@ authRoutes.post('/verify-email', async (c) => {
   });
 
   // Send welcome email (fire-and-forget)
-  const welcomeEmail = buildWelcomeEmail(userData.first_name as string);
+  const welcomeBrand = await loadEmailBrand(db, userData.org_id as string | null, new URL(c.req.url).origin);
+  const welcomeEmail = applyBrandFrom(buildWelcomeEmail(userData.first_name as string, welcomeBrand), welcomeBrand);
   welcomeEmail.to = normalizedEmail;
   c.executionCtx.waitUntil(sendEmail(c.env.RESEND_API_KEY, welcomeEmail));
 
@@ -513,12 +515,14 @@ authRoutes.post('/forgot-password', async (c) => {
 
   // Look up user — always return ok to prevent email enumeration
   const user = await db.prepare(
-    'SELECT id, first_name FROM users WHERE email = ?'
+    'SELECT id, first_name, org_id FROM users WHERE email = ?'
   ).bind(normalizedEmail).first();
 
   if (user) {
     const code = await createVerificationCode(db, user.id as string, normalizedEmail, 'password_reset');
-    const resetEmail = buildPasswordResetEmail(user.first_name as string, code);
+    // Branded as the member's own tenant, when it has set any branding.
+    const emailBrand = await loadEmailBrand(db, user.org_id as string | null, new URL(c.req.url).origin);
+    const resetEmail = applyBrandFrom(buildPasswordResetEmail(user.first_name as string, code, emailBrand), emailBrand);
     resetEmail.to = normalizedEmail;
     c.executionCtx.waitUntil(sendEmail(c.env.RESEND_API_KEY, resetEmail));
   }
@@ -908,7 +912,8 @@ async function completeMicrosoftSignIn(
     regionCode = 'NA_ASHRAE';
 
     // Send welcome email
-    const welcomeEmail = buildWelcomeEmail(firstName);
+    const welcomeBrand = await loadEmailBrand(db, orgId, new URL(c.req.url).origin);
+    const welcomeEmail = applyBrandFrom(buildWelcomeEmail(firstName, welcomeBrand), welcomeBrand);
     welcomeEmail.to = email;
     c.executionCtx.waitUntil(sendEmail(c.env.RESEND_API_KEY, welcomeEmail));
   }
@@ -1097,7 +1102,8 @@ authRoutes.post('/sso/cloudflare/callback', async (c) => {
     orgSlug = slug;
     regionCode = 'NA_ASHRAE';
 
-    const welcomeEmail = buildWelcomeEmail(firstName);
+    const welcomeBrand = await loadEmailBrand(db, orgId, new URL(c.req.url).origin);
+    const welcomeEmail = applyBrandFrom(buildWelcomeEmail(firstName, welcomeBrand), welcomeBrand);
     welcomeEmail.to = email;
     c.executionCtx.waitUntil(sendEmail(c.env.RESEND_API_KEY, welcomeEmail));
   }
@@ -2032,11 +2038,13 @@ authRoutes.post('/mfa/email-code', async (c) => {
   await recordRateLimitEvent(db, `mfa:${challenge.user_id}`, 'mfa_email_send');
 
   const userRow = await db.prepare(
-    `SELECT email, first_name FROM users WHERE id = ?`,
-  ).bind(challenge.user_id).first<{ email: string; first_name: string }>();
+    `SELECT email, first_name, org_id FROM users WHERE id = ?`,
+  ).bind(challenge.user_id).first<{ email: string; first_name: string; org_id: string | null }>();
   if (userRow?.email) {
     const code = await createVerificationCode(db, challenge.user_id, userRow.email, 'mfa_verification');
-    const msg = buildMfaEmailCode(userRow.first_name ?? 'there', code);
+    // Branded as the member's own tenant, when it has set any branding.
+    const emailBrand = await loadEmailBrand(db, userRow.org_id, new URL(c.req.url).origin);
+    const msg = applyBrandFrom(buildMfaEmailCode(userRow.first_name ?? 'there', code, emailBrand), emailBrand);
     msg.to = userRow.email;
     c.executionCtx.waitUntil(sendEmail(c.env.RESEND_API_KEY, msg));
   }

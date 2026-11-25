@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { tenantAccentRgb } from '../lib/tenantTheme';
 import { scopedKey } from '../utils/storage';
 
 export type ThemeMode = 'dark' | 'midnight' | 'light';
@@ -361,7 +362,9 @@ function applyTheme(prefs: UserPreferences) {
     amber: '245 158 11',
     rose: '244 63 94',
   };
-  root.style.setProperty('--accent-rgb', accents[prefs.accent]);
+  // A tenant brand colour, when one is applied, outranks the personal accent
+  // (see lib/tenantTheme.ts) — the member keeps theme mode, density, a11y.
+  root.style.setProperty('--accent-rgb', tenantAccentRgb() ?? accents[prefs.accent]);
 
   // Density
   const densityScale: Record<UIDensity, string> = {
@@ -412,3 +415,9 @@ export const usePreferencesStore = create<PreferencesStore>((set) => {
       }),
   };
 });
+
+/** Re-assert the current preferences on <html>. Called by the branding store
+ *  after it applies or removes a tenant palette. */
+export function reapplyTheme() {
+  applyTheme(usePreferencesStore.getState());
+}

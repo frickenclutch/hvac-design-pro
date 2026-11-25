@@ -26,6 +26,7 @@ import { manualJToManualD } from '../engines/manualJToManualD';
 import { measureCadDucts, cadRoomId, manualJRoomId } from '../engines/cadToManualD';
 import type { CadDuctTakeoff } from '../engines/cadToManualD';
 import type { WholeHouseResult } from '../engines/manualJ';
+import { stampTenantBrand, loadTenantPdfBrand } from '../features/reports/tenantPdfBrand';
 
 // ── User + project scoped persistence ────────────────────────────────────────
 function getStorageKey(projectId: string | null): string {
@@ -500,6 +501,8 @@ export default function ManualDCalculator() {
     }
 
     const safeName = (activeProjectName || 'Manual_D').replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '');
+    // Tenant logo + name in the top strip of every page (no-op when unbranded).
+    stampTenantBrand(doc, await loadTenantPdfBrand());
     doc.save(`ManualD_DuctDesign_${safeName}_${new Date().toISOString().slice(0, 10)}.pdf`);
   }, [result, rooms, application, equipmentCfm, blowerEsp, filterDrop, coilDrop, ductMaterial, activeProjectName]);
 
@@ -792,7 +795,7 @@ export default function ManualDCalculator() {
         {/* Action Buttons */}
         <div className="flex flex-col sm:flex-row gap-3 mb-10">
           <button onClick={runCalculation}
-            className="flex-1 py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold text-base sm:text-lg hover:bg-emerald-400 hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all flex items-center justify-center gap-3 min-h-[48px]">
+            className="flex-1 py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold text-base sm:text-lg hover:bg-emerald-400 hover:shadow-[0_0_30px_rgb(var(--accent-glow-strong-rgb)/0.3)] transition-all flex items-center justify-center gap-3 min-h-[48px]">
             Calculate Duct Sizing <ArrowRight className="w-5 h-5" />
           </button>
           <button onClick={resetAll}

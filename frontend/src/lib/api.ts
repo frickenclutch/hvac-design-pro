@@ -16,6 +16,15 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
  * ms — so the inbox needs no translation layer, only validation at the trust
  * boundary (see hydrateFromServer in useNotificationStore).
  */
+import type { TenantBranding } from '../stores/useBrandingStore';
+import type { NavLayout, RailDefault, RailName, SidebarItemLayout } from './navLayout';
+
+export interface TenantBrandingResponse {
+  branding: TenantBranding;
+  canEdit: boolean;
+  canWhiteLabel: boolean;
+}
+
 export interface ServerNotification {
   id: string;
   kind: NotificationKind;
@@ -880,6 +889,73 @@ class ApiClient {
         canEditPolicy: boolean;
       };
     }>('/api/org/access-policy', {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    });
+  }
+
+  // ── Tenant branding (per-tenant, admin-set) ─────────────────────────────
+  // Any member may GET (the whole tenant renders inside it); only the tenant
+  // admin or L0 may write (server-gated). The logo's public read counterpart
+  // is GET /org-logos/:orgId (see stores/useBrandingStore.ts orgLogoUrl).
+  async getBranding() {
+    return this.request<TenantBrandingResponse>('/api/org/branding');
+  }
+
+  /** Public, pre-auth: the sign-in look of the tenant with this slug.
+   *  Deliberately does NOT go through request(): this runs on the sign-in page
+   *  before any session exists, and a failed cosmetic lookup must never toast,
+   *  retry, or touch session state. Resolves:
+   *    object    — a branded tenant
+   *    null      — the server says there is none (unknown or unbranded)
+   *    undefined — the server could not be reached (caller keeps its cache) */
+  async getPublicBranding(slug: string): Promise<{ orgId: string; slug: string; name: string; branding: TenantBranding } | null | undefined> {
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/tenant-branding/${encodeURIComponent(slug)}`);
+      if (!res.ok) return undefined;
+      const body = await res.json() as { tenant?: { orgId?: unknown; slug?: unknown; name?: unknown; branding?: unknown } | null };
+      const t = body.tenant;
+      if (!t) return null;
+      if (typeof t.orgId !== 'string' || typeof t.name !== 'string') return null;
+      return { orgId: t.orgId, slug, name: t.name, branding: t.branding as TenantBranding };
+    } catch {
+      return undefined;
+    }
+  }
+
+  async setBranding(patch: Partial<Omit<TenantBranding, 'logoKey'>>) {
+    return this.request<TenantBrandingResponse>('/api/org/branding', {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    });
+  }
+
+  async uploadOrgLogo(file: File) {
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.request<{ branding: TenantBranding }>('/api/org/branding/logo', {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  async deleteOrgLogo() {
+    return this.request<{ branding: TenantBranding }>('/api/org/branding/logo', { method: 'DELETE' });
+  }
+
+  // ── Tenant navigation layout (per-tenant, admin-set) ────────────────────
+  // Sidebar arrangement, landing page, and rail defaults. Any member may GET;
+  // only the tenant admin or L0 may PUT. Presentation only — never a gate.
+  async getNavLayout() {
+    return this.request<{ layout: NavLayout; canEdit: boolean }>('/api/org/nav-layout');
+  }
+
+  async setNavLayout(patch: {
+    sidebar?: SidebarItemLayout[] | null;
+    landing?: string | null;
+    rails?: Partial<Record<RailName, RailDefault>>;
+  }) {
+    return this.request<{ layout: NavLayout; canEdit: boolean }>('/api/org/nav-layout', {
       method: 'PUT',
       body: JSON.stringify(patch),
     });

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { productName } from '../../../stores/useBrandingStore';
 
 /**
  * Collects all Mesh objects from a scene, applying world transforms.
@@ -179,7 +180,7 @@ export function exportSceneAsOBJ(
   const meshData = collectTriangles(scene);
 
   const lines: string[] = [];
-  lines.push('# HVAC Design Pro - OBJ Export');
+  lines.push(`# ${productName().replace(/[\r\n]+/g, ' ')} - OBJ Export`);
   lines.push(`# Generated: ${new Date().toISOString()}`);
   lines.push('');
 

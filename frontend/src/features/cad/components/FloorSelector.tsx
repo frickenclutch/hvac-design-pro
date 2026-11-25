@@ -186,7 +186,7 @@ export default function FloorSelector() {
                 key={floor.id}
                 className={`group relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg cursor-pointer transition-all duration-200 select-none ${
                   isActive
-                    ? 'bg-emerald-500/15 border border-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.15)]'
+                    ? 'bg-emerald-500/15 border border-emerald-500/40 shadow-[0_0_12px_rgb(var(--accent-glow-strong-rgb)/0.15)]'
                     : 'border border-transparent hover:bg-slate-800/60 hover:border-slate-700/40'
                 }`}
                 onClick={() => setActiveFloor(floor.id)}

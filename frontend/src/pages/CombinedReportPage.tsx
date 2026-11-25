@@ -283,7 +283,7 @@ export default function CombinedReportPage() {
           <button
             onClick={handleExport}
             disabled={!hasAny || generating}
-            className="flex-1 py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold text-base sm:text-lg hover:bg-emerald-400 hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all flex items-center justify-center gap-3 min-h-[48px] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-none"
+            className="flex-1 py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold text-base sm:text-lg hover:bg-emerald-400 hover:shadow-[0_0_30px_rgb(var(--accent-glow-strong-rgb)/0.3)] transition-all flex items-center justify-center gap-3 min-h-[48px] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-none"
           >
             {generating ? 'Building PDF…' : 'Export Combined PDF'} <ArrowRight className="w-5 h-5" />
           </button>

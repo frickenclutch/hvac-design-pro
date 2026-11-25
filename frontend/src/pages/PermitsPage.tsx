@@ -33,10 +33,13 @@ import {
   PauseCircle, PlayCircle, Ban, CalendarClock, History, RotateCcw,
   Inbox, Archive, BadgeCheck, LayoutList, Search, X,
   ArrowUpDown, Check, GripVertical, Minus, Plus,
+  Lock,
 } from 'lucide-react';
 import { useAuthStore } from '../features/auth/store/useAuthStore';
 import { usePreferencesStore, type UserPreferences } from '../stores/usePreferencesStore';
 import { api } from '../lib/api';
+import { useNavLayoutStore } from '../stores/useNavLayoutStore';
+import { effectiveRail } from '../lib/navLayout';
 import AuthorityBadge from '../components/AuthorityBadge';
 import EntityAuditModal from '../components/EntityAuditModal';
 import { useAccessPolicyStore } from '../stores/useAccessPolicyStore';
@@ -134,8 +137,15 @@ function PermitList() {
   const navigate = useNavigate();
 
   // Persisted rail state — mirrors the Settings / Admin / Team contract.
-  const navOrder = usePreferencesStore((s) => s.permitsNavOrder);
-  const navHidden = usePreferencesStore((s) => s.permitsNavHidden);
+  // Personal arrangement, laid over the tenant's default for this rail (which
+  // the tenant admin may also lock — see lib/navLayout.ts effectiveRail).
+  const personalNavOrder = usePreferencesStore((s) => s.permitsNavOrder);
+  const personalNavHidden = usePreferencesStore((s) => s.permitsNavHidden);
+  const orgRail = useNavLayoutStore((s) => s.layout.rails.permits);
+  const { order: navOrder, hidden: navHidden, locked: railLocked } = useMemo(
+    () => effectiveRail(personalNavOrder, personalNavHidden, orgRail),
+    [personalNavOrder, personalNavHidden, orgRail],
+  );
   const lastCategory = usePreferencesStore((s) => s.permitsLastCategory);
   const autoMs = usePreferencesStore((s) => s.permitsAutoRefreshMs);
   const updatePrefs = usePreferencesStore((s) => s.update);
@@ -302,7 +312,13 @@ function PermitList() {
             )}
 
             <div className="flex items-center gap-1.5 mb-3">
+              {railLocked && (
+                <span className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500" title="Your organisation's admin has set this arrangement for everyone">
+                  <Lock className="w-3.5 h-3.5" aria-hidden /> Set by your org
+                </span>
+              )}
               <button
+                hidden={railLocked}
                 onClick={() => (arrangeMode ? setArrangeMode(false) : enterArrange())}
                 aria-pressed={arrangeMode}
                 title={arrangeMode ? 'Done arranging' : 'Arrange folders — drag to reorder, hide what you don’t use'}

@@ -104,12 +104,18 @@ function DialogShell({ icon, title, children, variant = 'modal' }: { icon: React
       ? 'fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/60 backdrop-blur-sm'
       : 'fixed inset-0 z-[90] flex items-center justify-end pointer-events-none'}
     >
-      <div className={`w-full max-w-md mx-4 rounded-2xl border border-slate-700/60 bg-slate-900/95 backdrop-blur-xl shadow-[0_0_48px_rgba(0,0,0,0.8)] p-6 ${variant === 'panel' ? 'pointer-events-auto' : ''}`}>
-        <div className="flex items-center gap-3 mb-4">
+      {/* The card is capped to the viewport and its body scrolls. Without the
+          cap a long LET review (many warnings) grew taller than the window
+          inside this non-scrolling fixed layer, pushing the confirm button
+          off-screen where it could not be reached at all. */}
+      <div className={`w-full max-w-md mx-4 max-h-[calc(100dvh-2rem)] flex flex-col rounded-2xl border border-slate-700/60 bg-slate-900/95 backdrop-blur-xl shadow-[0_0_48px_rgba(0,0,0,0.8)] p-6 ${variant === 'panel' ? 'pointer-events-auto' : ''}`}>
+        <div className="flex items-center gap-3 mb-4 shrink-0">
           <div className="p-2 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-400">{icon}</div>
           <h2 className="text-base font-semibold text-slate-100">{title}</h2>
         </div>
-        {children}
+        <div className="min-h-0 flex-1 flex flex-col overflow-y-auto">
+          {children}
+        </div>
       </div>
     </div>
   );
@@ -849,7 +855,10 @@ function AiExtract() {
       )}
 
       {phase === 'review' && extraction && (
-        <div>
+        // Scrolling body + pinned footer: warnings and the room list share one
+        // scroll region, and Cancel / Draw stay on screen however long it gets.
+        <div className="flex flex-col min-h-0 flex-1">
+          <div className="min-h-0 flex-1 overflow-y-auto -mr-2 pr-2">
           {extraction.buildingType === 'commercial' && (
             <div className="flex gap-2 items-start mb-3 p-3 rounded-xl border border-red-500/40 bg-red-500/10 text-red-300 text-xs">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -916,7 +925,7 @@ function AiExtract() {
             </label>
           )}
 
-          <div className="max-h-[40vh] overflow-y-auto -mx-1 px-1 mb-4">
+          <div className="-mx-1 px-1">
             {rooms.length === 0 && (
               <p className="text-sm text-slate-500 py-4">No rooms were identified on this page.</p>
             )}
@@ -962,12 +971,13 @@ function AiExtract() {
               </div>
             ))}
           </div>
+          </div>
 
-          <p className="text-xs text-slate-500 mb-4">
+          <p className="text-xs text-slate-500 mt-4 mb-4 shrink-0">
             Review every dimension against the plan before importing — you are the engineer of record, not the AI.
           </p>
 
-          <div className="flex justify-end gap-2">
+          <div className="flex justify-end gap-2 shrink-0">
             <button
               onClick={dismiss}
               className="min-h-[44px] min-w-[44px] px-4 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 transition-colors text-sm"

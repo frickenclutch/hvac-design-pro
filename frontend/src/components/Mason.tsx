@@ -7,6 +7,7 @@ import { usePreferencesStore, type ToolboxPosition } from '../stores/usePreferen
 import { api } from '../lib/api';
 import { scopedKey } from '../utils/storage';
 import FeedbackAnnotator from './FeedbackAnnotator';
+import { brandText } from '../stores/useBrandingStore';
 
 // ── Mason — your AI HVAC engineering assistant ───────────────────────────────
 // Named after the masons who've built the world's buildings, brick by brick.
@@ -2065,7 +2066,9 @@ export default function Mason({ context }: MasonProps) {
     
     // Check for special commands first
     const commandResponse = processCommands(query, context);
-    const answer = commandResponse || findAnswer(query, context);
+    // Knowledge base is authored with the platform name; a white-labelled
+    // tenant sees its own (no-op otherwise).
+    const answer = brandText(commandResponse || findAnswer(query, context));
     
     const masonMsg: ChatMessage = { role: 'mason', content: answer };
     setMessages(prev => [...prev, userMsg, masonMsg]);

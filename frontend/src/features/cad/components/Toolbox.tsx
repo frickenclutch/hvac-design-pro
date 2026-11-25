@@ -256,7 +256,7 @@ export default function Toolbox() {
             onClick={() => setShowAssetLibrary(true)}
             className={`p-3 mx-2 rounded-xl transition-all duration-300 group relative ${
               showAssetLibrary
-                ? 'text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 shadow-[0_0_12px_rgba(52,211,153,0.15)]'
+                ? 'text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 shadow-[0_0_12px_rgb(var(--accent-glow-rgb)/0.15)]'
                 : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/80 border border-transparent'
             }`}
             aria-label="Asset Library"
@@ -629,7 +629,7 @@ function ToolButton({ icon, label, active, onClick, primary, glimmer }: ToolButt
 
   if (active) {
     if (primary) {
-      stateClass = "text-emerald-50 bg-emerald-500/20 border border-emerald-500/50 shadow-[0_0_20px_rgba(16,185,129,0.3)]";
+      stateClass = "text-emerald-50 bg-emerald-500/20 border border-emerald-500/50 shadow-[0_0_20px_rgb(var(--accent-glow-strong-rgb)/0.3)]";
     } else {
       stateClass = "text-sky-50 bg-sky-500/20 border border-sky-500/50 shadow-[0_0_20px_rgba(14,165,233,0.3)]";
     }

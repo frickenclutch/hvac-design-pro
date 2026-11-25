@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
+import { useState, useEffect, useRef, useMemo, lazy, Suspense, Fragment } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
 import { Home, Settings, Users, LogOut, Thermometer, PenTool, Menu, X, Search, BookOpen, GitBranch, Sun, Globe, ShieldCheck, Activity, PackageCheck, FileText } from 'lucide-react';
 import LandingPage from './pages/LandingPage';
 import OnboardingPage from './pages/OnboardingPage';
@@ -44,6 +44,26 @@ import { useAuthStore } from './features/auth/store/useAuthStore';
 import { usePreferencesStore } from './stores/usePreferencesStore';
 import { useAccessPolicyStore } from './stores/useAccessPolicyStore';
 import { useNotificationStore } from './stores/useNotificationStore';
+import { useBrandingStore, orgLogoUrl, PLATFORM_NAME } from './stores/useBrandingStore';
+import { useNavLayoutStore } from './stores/useNavLayoutStore';
+import { resolveSidebar, visibleSidebar, landingPath, DEFAULT_LANDING_PATH } from './lib/navLayout';
+
+// Icons for the main-nav registry (lib/navLayout.ts NAV_ITEMS), keyed by id.
+const NAV_ICONS: Record<string, React.ReactNode> = {
+  dashboard: <Home className="w-5 h-5" />,
+  calculator: <Thermometer className="w-5 h-5" />,
+  'manual-d': <GitBranch className="w-5 h-5" />,
+  aed: <Sun className="w-5 h-5" />,
+  'manual-s': <PackageCheck className="w-5 h-5" />,
+  reports: <FileText className="w-5 h-5" />,
+  cad: <PenTool className="w-5 h-5" />,
+  team: <Users className="w-5 h-5" />,
+  community: <Globe className="w-5 h-5" />,
+  permits: <ShieldCheck className="w-5 h-5" />,
+  'audit-log': <Activity className="w-5 h-5" />,
+  settings: <Settings className="w-5 h-5" />,
+  guide: <BookOpen className="w-5 h-5" />,
+};
 import { toast } from './stores/useToastStore';
 import NotificationCenter from './components/NotificationCenter';
 import SpotlightSearch, { SpotlightTrigger } from './features/spotlight/SpotlightSearch';
@@ -82,8 +102,15 @@ function AppLayout() {
       // already-signed-in boot.)
       void useNotificationStore.getState().hydrate();
       void useNotificationStore.getState().refreshOrgPolicy();
+      // Tenant branding — the store paints its cached copy at boot; this
+      // confirms it against the server.
+      void useBrandingStore.getState().refresh();
+      void useNavLayoutStore.getState().refresh();
     } else {
       resetAccessPolicy();
+      // Signed out: wear the sign-in tenant's look (its link, or the tenant
+      // last used on this device) across the public pages.
+      void useBrandingStore.getState().loadPublic();
     }
   }, [isAuthenticated, refreshAccessPolicy, resetAccessPolicy]);
 
@@ -136,6 +163,9 @@ function AppLayout() {
         // Pick up anything the server raised while we were away. Rides the
         // existing heartbeat rather than adding a second timer.
         void useNotificationStore.getState().hydrate();
+        // Same heartbeat: pick up a rebrand the tenant admin just saved.
+        void useBrandingStore.getState().refresh();
+        void useNavLayoutStore.getState().refresh();
       } catch {
         /* failure-safe: stores keep last-good state; try again next tick */
       } finally {
@@ -157,9 +187,64 @@ function AppLayout() {
   }, [isAuthenticated, restoreSession, refreshAccessPolicy]);
 
   const { sidebarCollapsed, update: updatePrefs } = usePreferencesStore();
+
+  // ── Tenant branding ───────────────────────────────────────────────────
+  // A tenant that has set a name or logo leads the shell. Unless the tenant
+  // is white-labelled, the platform stays credited on the line beneath.
+  const branding = useBrandingStore((s) => s.branding);
+  const tenantLogo = orgLogoUrl(organisation?.id, branding.logoKey);
+  // White-label alone counts: with no display name set yet, the shell falls
+  // back to the organisation's own name rather than the platform's.
+  const hasTenantBrand = !!(branding.displayName || tenantLogo || branding.whiteLabel);
+  const brandName = hasTenantBrand ? (branding.displayName ?? organisation?.name?.trim() ?? PLATFORM_NAME) : PLATFORM_NAME;
+  const brandSubline = branding.whiteLabel
+    ? branding.tagline
+    : hasTenantBrand ? `Powered by ${PLATFORM_NAME}` : 'Legacy Archive & Engineering';
+  const brandLogo = tenantLogo ?? hvacEmblem;
+  // The platform emblem is a round medallion; a tenant logo is shown whole.
+  const brandLogoShape = tenantLogo ? 'rounded-md object-contain' : 'rounded-full object-cover';
+  const brandGlow = tenantLogo
+    ? ''
+    : organisation?.type === 'municipality'
+      ? 'drop-shadow-[0_0_10px_rgba(245,158,11,0.45)]'
+      : 'drop-shadow-[0_0_10px_rgb(var(--accent-rgb)/0.35)]';
   const canViewAudit = useAccessPolicyStore((s) => s.capabilities.canViewAudit);
   const location = useLocation();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // ── Tenant navigation layout ──────────────────────────────────────────
+  // The tenant admin's sidebar (order / hidden / labels / dividers) laid over
+  // the registry, then filtered to what THIS viewer may see. Presentation
+  // only — every route below keeps its own gate.
+  const navLayout = useNavLayoutStore((s) => s.layout);
+  const navLayoutConfirmedFor = useNavLayoutStore((s) => s.confirmedFor);
+  const navRows = useMemo(
+    () => visibleSidebar(resolveSidebar(navLayout), { audit: canViewAudit }),
+    [navLayout, canViewAudit],
+  );
+  const landing = useMemo(() => landingPath(navLayout, { audit: canViewAudit }), [navLayout, canViewAudit]);
+
+  // Tenant landing page. Every sign-in path ends by routing to /dashboard, so
+  // rather than touch each one, catch the signed-out → signed-in transition
+  // here and, once the server has confirmed this org's layout, move a member
+  // still sitting on the default page to the tenant's chosen one. A member
+  // who has already navigated somewhere is left alone.
+  const navigate = useNavigate();
+  const wasAuthenticated = useRef(isAuthenticated);
+  const landingPending = useRef(false);
+  useEffect(() => {
+    if (isAuthenticated && !wasAuthenticated.current) landingPending.current = true;
+    if (!isAuthenticated) landingPending.current = false;
+    wasAuthenticated.current = isAuthenticated;
+  }, [isAuthenticated]);
+  useEffect(() => {
+    if (!landingPending.current || !isAuthenticated) return;
+    if (!organisation?.id || navLayoutConfirmedFor !== organisation.id) return;
+    landingPending.current = false;
+    if (location.pathname === DEFAULT_LANDING_PATH && landing !== DEFAULT_LANDING_PATH) {
+      navigate(landing, { replace: true });
+    }
+  }, [isAuthenticated, organisation?.id, navLayoutConfirmedFor, landing, location.pathname, navigate]);
 
   // Thermal surge — bloom the brand mark's ambient gradient while the sidebar
   // collapses/expands, then let it cool back to its idle drift.
@@ -187,11 +272,11 @@ function AppLayout() {
         <div className="md:hidden flex items-center justify-between px-4 py-3 glass-panel border-b border-slate-800/60 z-50 flex-shrink-0">
           <div className="flex items-center gap-2.5">
             <img
-              src={hvacEmblem}
-              alt="HVAC Design Pro"
-              className={`w-7 h-7 flex-shrink-0 rounded-full object-cover ${organisation?.type === 'municipality' ? 'drop-shadow-[0_0_10px_rgba(245,158,11,0.45)]' : 'drop-shadow-[0_0_10px_rgba(52,211,153,0.35)]'}`}
+              src={brandLogo}
+              alt={brandName}
+              className={`w-7 h-7 flex-shrink-0 ${brandLogoShape} ${brandGlow}`}
             />
-            <span className="text-sm font-bold premium-gradient-text">HVAC Design Pro</span>
+            <span className="text-sm font-bold premium-gradient-text truncate">{brandName}</span>
           </div>
           <div className="flex items-center gap-1">
             <NotificationCenter variant="compact" align="right" />
@@ -213,20 +298,12 @@ function AppLayout() {
         <div className="md:hidden fixed inset-0 top-[57px] z-40">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setMobileNavOpen(false)} />
           <nav className="relative glass-panel border-b border-slate-800/60 p-4 space-y-1 animate-in slide-in-from-top-2 duration-200">
-            <MobileNavLink to="/dashboard" icon={<Home className="w-5 h-5" />} label="Projects" onClick={() => setMobileNavOpen(false)} />
-            <MobileNavLink to="/calculator" icon={<Thermometer className="w-5 h-5" />} label="Manual J" onClick={() => setMobileNavOpen(false)} />
-            <MobileNavLink to="/manual-d" icon={<GitBranch className="w-5 h-5" />} label="Manual D" onClick={() => setMobileNavOpen(false)} />
-            <MobileNavLink to="/aed" icon={<Sun className="w-5 h-5" />} label="AED" onClick={() => setMobileNavOpen(false)} />
-            <MobileNavLink to="/manual-s" icon={<PackageCheck className="w-5 h-5" />} label="Manual S" onClick={() => setMobileNavOpen(false)} />
-            <MobileNavLink to="/reports" icon={<FileText className="w-5 h-5" />} label="Reports" onClick={() => setMobileNavOpen(false)} />
-            <MobileNavLink to="/cad" icon={<PenTool className="w-5 h-5" />} label="CAD" onClick={() => setMobileNavOpen(false)} />
-            <div className="h-px bg-slate-800/60 my-2" />
-            <MobileNavLink to="/team" icon={<Users className="w-5 h-5" />} label="Team" onClick={() => setMobileNavOpen(false)} />
-            <MobileNavLink to="/community" icon={<Globe className="w-5 h-5" />} label="Community" onClick={() => setMobileNavOpen(false)} />
-            <MobileNavLink to="/permits" icon={<ShieldCheck className="w-5 h-5" />} label="Permits" onClick={() => setMobileNavOpen(false)} />
-            {canViewAudit && <MobileNavLink to="/audit-log" icon={<Activity className="w-5 h-5" />} label="Audit log" onClick={() => setMobileNavOpen(false)} />}
-            <MobileNavLink to="/settings" icon={<Settings className="w-5 h-5" />} label="Settings" onClick={() => setMobileNavOpen(false)} />
-            <MobileNavLink to="/guide" icon={<BookOpen className="w-5 h-5" />} label="Guide" onClick={() => setMobileNavOpen(false)} />
+            {navRows.map((row) => (
+              <Fragment key={row.id}>
+                {row.dividerBefore && <div className="h-px bg-slate-800/60 my-2" />}
+                <MobileNavLink to={row.to} icon={NAV_ICONS[row.id]} label={row.label} onClick={() => setMobileNavOpen(false)} />
+              </Fragment>
+            ))}
             <div className="h-px bg-slate-800/60 my-2" />
             <button onClick={() => { logout(); setMobileNavOpen(false); }}
               className="flex w-full items-center gap-3 p-3 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors min-h-[44px]">
@@ -244,7 +321,7 @@ function AppLayout() {
             <button
               onClick={handleBrandToggle}
               title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              aria-label="HVAC Design Pro — toggle sidebar"
+              aria-label={`${brandName} — toggle sidebar`}
               className={`relative overflow-hidden rounded-xl flex items-center mb-8 text-emerald-400 hover:opacity-90 transition-opacity ${sidebarCollapsed ? 'w-11 h-11 justify-center left-1/2 -translate-x-1/2' : 'w-full gap-2 px-1 py-1.5'} ${thermalSurge ? 'thermal-surge' : ''}`}
             >
               {/* Machined-metal bezel — rim layers show only at the 1.5px ring
@@ -257,40 +334,32 @@ function AppLayout() {
               <span aria-hidden className="thermal-breeze absolute inset-[1.5px] rounded-[10px]" />
               {/* Gear-vortex emblem — shown in totality when collapsed */}
               <img
-                src={hvacEmblem}
+                src={brandLogo}
                 alt=""
                 aria-hidden
-                className={`relative z-10 shrink-0 max-w-none rounded-full object-cover transition-all duration-300 ${sidebarCollapsed ? 'w-10 h-10' : 'w-8 h-8'} ${organisation?.type === 'municipality' ? 'drop-shadow-[0_0_10px_rgba(245,158,11,0.45)]' : 'drop-shadow-[0_0_10px_rgba(52,211,153,0.35)]'}`}
+                className={`relative z-10 shrink-0 max-w-none transition-all duration-300 ${brandLogoShape} ${sidebarCollapsed ? 'w-10 h-10' : 'w-8 h-8'} ${brandGlow}`}
               />
               {!sidebarCollapsed && (
                 <span className="relative z-10 flex flex-col min-w-0 text-left">
                   <h1 className="text-sm font-bold tracking-tight premium-gradient-text truncate leading-tight">
-                    HVAC Design Pro
+                    {brandName}
                   </h1>
-                  <span className="text-[7px] font-semibold uppercase tracking-[0.05em] text-slate-400 truncate">
-                    Legacy Archive &amp; Engineering
-                  </span>
+                  {brandSubline && (
+                    <span className="text-[7px] font-semibold uppercase tracking-[0.05em] text-slate-400 truncate">
+                      {brandSubline}
+                    </span>
+                  )}
                 </span>
               )}
             </button>
 
             <div className="flex flex-col gap-1">
-              <NavigationLink to="/dashboard" icon={<Home className="w-5 h-5" />} label="Projects" collapsed={sidebarCollapsed} />
-              <NavigationLink to="/calculator" icon={<Thermometer className="w-5 h-5" />} label="Manual J" collapsed={sidebarCollapsed} />
-              <NavigationLink to="/manual-d" icon={<GitBranch className="w-5 h-5" />} label="Manual D" collapsed={sidebarCollapsed} />
-              <NavigationLink to="/aed" icon={<Sun className="w-5 h-5" />} label="AED" collapsed={sidebarCollapsed} />
-              <NavigationLink to="/manual-s" icon={<PackageCheck className="w-5 h-5" />} label="Manual S" collapsed={sidebarCollapsed} />
-              <NavigationLink to="/reports" icon={<FileText className="w-5 h-5" />} label="Reports" collapsed={sidebarCollapsed} />
-              <NavigationLink to="/cad" icon={<PenTool className="w-5 h-5" />} label="CAD" collapsed={sidebarCollapsed} />
-
-              <div className="h-px bg-slate-800/60 my-2" />
-
-              <NavigationLink to="/team" icon={<Users className="w-5 h-5" />} label="Team" collapsed={sidebarCollapsed} />
-              <NavigationLink to="/community" icon={<Globe className="w-5 h-5" />} label="Community" collapsed={sidebarCollapsed} />
-              <NavigationLink to="/permits" icon={<ShieldCheck className="w-5 h-5" />} label="Permits" collapsed={sidebarCollapsed} />
-              {canViewAudit && <NavigationLink to="/audit-log" icon={<Activity className="w-5 h-5" />} label="Audit log" collapsed={sidebarCollapsed} />}
-              <NavigationLink to="/settings" icon={<Settings className="w-5 h-5" />} label="Settings" collapsed={sidebarCollapsed} />
-              <NavigationLink to="/guide" icon={<BookOpen className="w-5 h-5" />} label="Guide" collapsed={sidebarCollapsed} />
+              {navRows.map((row) => (
+                <Fragment key={row.id}>
+                  {row.dividerBefore && <div className="h-px bg-slate-800/60 my-2" />}
+                  <NavigationLink to={row.to} icon={NAV_ICONS[row.id]} label={row.label} collapsed={sidebarCollapsed} />
+                </Fragment>
+              ))}
             </div>
           </div>
 
@@ -352,8 +421,8 @@ function AppLayout() {
         <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" /></div>}>
         <Routes>
           {/* Public routes — authentication required to proceed past sign-in */}
-          <Route path="/" element={isAuthenticated ? <Navigate to="/dashboard" /> : <AuthPage />} />
-          <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" /> : <AuthPage />} />
+          <Route path="/" element={isAuthenticated ? <Navigate to={landing} /> : <AuthPage />} />
+          <Route path="/login" element={isAuthenticated ? <Navigate to={landing} /> : <AuthPage />} />
           <Route path="/landing" element={<LandingPage />} />
           <Route path="/demo" element={<DemoPage />} />
           <Route path="/onboarding" element={<OnboardingPage />} />
@@ -444,7 +513,7 @@ function NavigationLink({ to, icon, label, collapsed = false }: { to: string; ic
 
   const activeClass = isMuni
     ? "bg-slate-800/50 text-amber-300 border-amber-500/20 shadow-[0_0_8px_rgba(245,158,11,0.1)]"
-    : "bg-slate-800/50 text-emerald-300 border-emerald-500/20 shadow-[0_0_8px_rgba(52,211,153,0.1)]";
+    : "bg-slate-800/50 text-emerald-300 border-emerald-500/20 shadow-[0_0_8px_rgb(var(--accent-glow-rgb)/0.1)]";
 
   return (
     <Link to={to} className={`flex items-center gap-2.5 p-3 rounded-xl transition-all border border-transparent hover:bg-slate-800/50 min-h-[44px] ${active ? activeClass : 'text-slate-400 hover:text-slate-100'} ${collapsed ? 'justify-center' : ''}`} title={collapsed ? label : undefined}>

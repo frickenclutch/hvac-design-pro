@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { usePreferencesStore, preferenceDefaults, type ThemeMode, type UIDensity, type UnitSystem, type EngineVersion, type MetalFinish, type UserPreferences } from '../stores/usePreferencesStore';
-import { Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle, Pencil, HardDrive, ChevronDown, Search, X, ArrowUpDown, GripVertical, Minus, Plus, ListFilter, Tag, Webhook, Bell } from 'lucide-react';
+import { Palette, Ruler, Grid3X3, Monitor, RotateCcw, Accessibility, FileText, Stamp, Upload, Trash2, Image, Building2, User, Save, BadgeCheck, ShieldCheck, Lock, Copy, Check, KeyRound, AlertCircle, Pencil, HardDrive, ChevronDown, ChevronUp, Search, X, ArrowUpDown, GripVertical, Minus, Plus, ListFilter, Tag, Webhook, Bell } from 'lucide-react';
 import { api, type PricingSourceRow } from '../lib/api';
 import A11yPanel from '../components/accessibility/A11yPanel';
 import TotpQr from '../components/TotpQr';
@@ -12,14 +12,25 @@ import { useAccessPolicyStore } from '../stores/useAccessPolicyStore';
 import { useNotificationStore, NOTIFICATION_KIND_META, resolveDelivery, type NotificationPolicy, type PolicyMode } from '../stores/useNotificationStore';
 import { toast } from '../stores/useToastStore';
 import { avatarUrl, downscaleImage } from '../utils/avatar';
+import { useBrandingStore, orgLogoUrl, PLATFORM_NAME, useProductName } from '../stores/useBrandingStore';
+import { buildPalette, normalizeHex, SHADES } from '../lib/tenantTheme';
+import { useNavLayoutStore } from '../stores/useNavLayoutStore';
+import { effectiveRail, resolveSidebar, defaultNavLayout, NAV_LABEL_MAX, PINNED_NAV_ID, type ResolvedNavItem, type RailName, type RailMode } from '../lib/navLayout';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
 export default function SettingsPage() {
   const { user, organisation, token } = useAuthStore();
   const settingsLastCategory = usePreferencesStore((s) => s.settingsLastCategory);
-  const navOrder = usePreferencesStore((s) => s.settingsNavOrder);
-  const navHidden = usePreferencesStore((s) => s.settingsNavHidden);
+  // Personal arrangement, laid over the tenant's default for this rail (which
+  // the tenant admin may also lock — see lib/navLayout.ts effectiveRail).
+  const personalNavOrder = usePreferencesStore((s) => s.settingsNavOrder);
+  const personalNavHidden = usePreferencesStore((s) => s.settingsNavHidden);
+  const orgRail = useNavLayoutStore((s) => s.layout.rails.settings);
+  const { order: navOrder, hidden: navHidden, locked: railLocked } = useMemo(
+    () => effectiveRail(personalNavOrder, personalNavHidden, orgRail),
+    [personalNavOrder, personalNavHidden, orgRail],
+  );
   const updatePrefs = usePreferencesStore((s) => s.update);
   // Whole-prefs snapshot for the "changed only" filter — re-renders as the
   // user edits a setting so the filtered list stays live.
@@ -158,7 +169,13 @@ export default function SettingsPage() {
             {/* Rail toolbar — Arrange (reorder/hide) and Changed-only filter.
                 Compact + muted so they stay out of the way of everyday use. */}
             <div className="flex items-center gap-1.5 mb-3">
+              {railLocked && (
+                <span className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500" title="Your organisation's admin has set this arrangement for everyone">
+                  <Lock className="w-3.5 h-3.5" aria-hidden /> Set by your org
+                </span>
+              )}
               <button
+                hidden={railLocked}
                 onClick={() => (arrangeMode ? setArrangeMode(false) : enterArrange())}
                 aria-pressed={arrangeMode}
                 title={arrangeMode ? 'Done arranging' : 'Arrange categories — drag to reorder, hide what you don’t use'}
@@ -456,13 +473,14 @@ function EngineSection() {
 }
 
 function SystemSection() {
+  const product = useProductName();
   const prefs = usePreferencesStore();
   return (
     <Section icon={<Monitor className="w-5 h-5 text-amber-400" />} title="System">
       <div className="flex items-center justify-between py-3">
         <div>
           <p className="text-sm font-semibold text-white">App Version</p>
-          <p className="text-xs text-slate-500">HVAC DesignPro PWA</p>
+          <p className="text-xs text-slate-500">{product} PWA</p>
         </div>
         <span className="text-xs font-mono text-slate-500 bg-slate-800 px-3 py-1 rounded-lg">v1.0.0</span>
       </div>
@@ -548,6 +566,8 @@ function buildSettingsCategories(ctx: RegistryCtx): SettingsCategoryEntry[] {
     ] },
     { id: 'organization', title: 'Organization', icon: <Building2 className="w-4 h-4" />, sections: [
       { id: 'org-profile', title: 'Organisation Profile', icon: <Building2 className="w-5 h-5 text-emerald-400" />, keywords: ['organisation', 'organization', 'company', 'tenant', 'profile'], visible: true, node: <OrgProfileSection token={ctx.token} orgId={ctx.organisation?.id} /> },
+      { id: 'tenant-branding', title: 'Tenant Branding', icon: <Palette className="w-5 h-5 text-emerald-400" />, keywords: ['brand', 'branding', 'logo', 'theme', 'color', 'colour', 'white label', 'white-label', 'tenant', 'company name', 'customize'], visible: isAdmin || isL0, node: <TenantBrandingSection orgId={ctx.organisation?.id} orgName={ctx.organisation?.name} orgSlug={ctx.organisation?.slug} /> },
+      { id: 'navigation-layout', title: 'Navigation Layout', icon: <ArrowUpDown className="w-5 h-5 text-emerald-400" />, keywords: ['navigation', 'nav', 'layout', 'sidebar', 'menu', 'reorder', 'rename', 'hide', 'landing', 'home page', 'default', 'lock', 'customize', 'tenant'], visible: isAdmin || isL0, node: <NavigationLayoutSection orgName={ctx.organisation?.name} /> },
       { id: 'backup', title: 'Legacy Archive & Backup', icon: <HardDrive className="w-5 h-5 text-amber-400" />, keywords: ['backup', 'archive', 'synology', 'nas', 'webhook'], visible: isAdmin, node: <SynologyBackupSection orgId={ctx.organisation?.id} /> },
       { id: 'authority', title: 'Authority Profile', icon: <ShieldCheck className="w-5 h-5 text-amber-400" />, keywords: ['authority', 'permit', 'jurisdiction', 'inspector', 'reviewer'], visible: isAdmin, node: <AuthorityProfileSection /> },
     ] },
@@ -1189,7 +1209,7 @@ function AvatarField({ initials }: { initials: string }) {
   return (
     <div className="flex items-center gap-5 pb-5 mb-5 border-b border-slate-800/60">
       <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={pickFile} className="hidden" />
-      <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-emerald-500/30 bg-emerald-500/10 flex items-center justify-center shrink-0 shadow-[0_0_20px_rgba(16,185,129,0.15)]">
+      <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-emerald-500/30 bg-emerald-500/10 flex items-center justify-center shrink-0 shadow-[0_0_20px_rgb(var(--accent-glow-strong-rgb)/0.15)]">
         {src
           ? <img src={src} alt="Your avatar" className="w-full h-full object-cover" />
           : <span className="text-2xl font-bold text-emerald-400 select-none">{initials}</span>}
@@ -1586,6 +1606,463 @@ function UserProfileSection({ token, user }: { token: string | null; user: { id:
         <button onClick={saveProfile} disabled={saving}
           className="flex items-center gap-2 bg-sky-500/10 text-sky-400 border border-sky-500/30 px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-sky-500/20 transition-all disabled:opacity-50">
           <Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save Profile'}
+        </button>
+      </div>
+    </Section>
+  );
+}
+
+// ── Tenant Branding (admin / L0) ───────────────────────────────────────────
+// The tenant's own name, tagline, colour and logo, applied to every member's
+// session. One brand colour in; the full accent palette is derived from it
+// (lib/tenantTheme.ts), so the result always stays readable on the dark shell.
+// The server validates and stores it (organisations.settings.branding).
+function TenantBrandingSection({ orgId, orgName, orgSlug }: { orgId?: string; orgName?: string; orgSlug?: string }) {
+  const branding = useBrandingStore((s) => s.branding);
+  const canWhiteLabel = useBrandingStore((s) => s.canWhiteLabel);
+  const refresh = useBrandingStore((s) => s.refresh);
+  const adopt = useBrandingStore((s) => s.adopt);
+  const preview = useBrandingStore((s) => s.preview);
+  const repaint = useBrandingStore((s) => s.repaint);
+
+  const [displayName, setDisplayName] = useState(branding.displayName ?? '');
+  const [tagline, setTagline] = useState(branding.tagline ?? '');
+  const [color, setColor] = useState(branding.primaryColor ?? '');
+  const [whiteLabel, setWhiteLabel] = useState(branding.whiteLabel);
+  const [saving, setSaving] = useState(false);
+  const [logoBusy, setLogoBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // Load the server copy once, then seed the form from it. Leaving the page
+  // drops any unsaved colour preview.
+  useEffect(() => {
+    let cancelled = false;
+    void refresh().then(() => {
+      if (cancelled) return;
+      const b = useBrandingStore.getState().branding;
+      setDisplayName(b.displayName ?? '');
+      setTagline(b.tagline ?? '');
+      setColor(b.primaryColor ?? '');
+      setWhiteLabel(b.whiteLabel);
+    });
+    return () => { cancelled = true; repaint(); };
+  }, [refresh, repaint]);
+
+  const validColor = normalizeHex(color);
+  const colorInvalid = color.trim() !== '' && !validColor;
+  const palette = buildPalette(validColor);
+
+  const changeColor = (v: string) => {
+    setColor(v);
+    const hex = normalizeHex(v);
+    // Live preview across the whole app; an empty field previews the default.
+    if (hex || v.trim() === '') preview(hex);
+  };
+
+  const save = async () => {
+    if (colorInvalid) { toast.error('Brand colour must be a 6-digit hex value, like #0b5fa5.'); return; }
+    setSaving(true);
+    try {
+      const res = await api.setBranding({
+        displayName: displayName.trim() || null,
+        tagline: tagline.trim() || null,
+        primaryColor: validColor,
+        // Only send the entitlement-gated flag when this caller may set it.
+        ...(canWhiteLabel ? { whiteLabel } : {}),
+      });
+      adopt(res.branding);
+      toast.success('Branding saved — your team will see it within a minute.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save branding');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onLogoPicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = e.target.files?.[0];
+    e.target.value = '';
+    if (!picked) return;
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(picked.type)) {
+      toast.error('Logo must be a PNG, JPEG, or WebP image.');
+      return;
+    }
+    setLogoBusy(true);
+    try {
+      // PNG keeps transparency; 512px is plenty for the shell and report headers.
+      const blob = await downscaleImage(picked, 512, 'image/png', 1);
+      const res = await api.uploadOrgLogo(new File([blob], 'logo.png', { type: 'image/png' }));
+      adopt(res.branding);
+      toast.success('Logo updated.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to upload logo');
+    } finally {
+      setLogoBusy(false);
+    }
+  };
+
+  const removeLogo = async () => {
+    setLogoBusy(true);
+    try {
+      const res = await api.deleteOrgLogo();
+      adopt(res.branding);
+      toast.success('Logo removed.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove logo');
+    } finally {
+      setLogoBusy(false);
+    }
+  };
+
+  const logo = orgLogoUrl(orgId, branding.logoKey);
+
+  return (
+    <Section icon={<Palette className="w-5 h-5 text-emerald-400" />} title="Tenant Branding">
+      <p className="text-xs text-slate-500 mb-5">
+        Give {orgName || 'your organisation'} its own look. Everyone signed in to this organisation sees the name, logo
+        and colour you set here. Members keep their own theme mode, density and accessibility settings.
+      </p>
+
+      <div className="flex items-center gap-4 mb-5">
+        <div className="w-16 h-16 rounded-xl border border-slate-700/60 bg-slate-900/80 flex items-center justify-center overflow-hidden flex-shrink-0">
+          {logo
+            ? <img src={logo} alt={`${displayName || orgName || 'Organisation'} logo`} className="max-w-full max-h-full object-contain" />
+            : <Image className="w-6 h-6 text-slate-600" aria-hidden />}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={onLogoPicked} className="hidden" aria-label="Choose logo image" />
+          <button onClick={() => fileRef.current?.click()} disabled={logoBusy}
+            className="flex items-center gap-2 bg-slate-800/60 text-slate-200 border border-slate-700/60 px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-slate-800 transition-all disabled:opacity-50 min-h-[44px]">
+            <Upload className="w-4 h-4" /> {logoBusy ? 'Working…' : logo ? 'Replace logo' : 'Upload logo'}
+          </button>
+          {logo && (
+            <button onClick={removeLogo} disabled={logoBusy}
+              className="flex items-center gap-2 text-slate-400 border border-slate-700/60 px-4 py-2.5 rounded-xl text-sm font-semibold hover:text-red-400 hover:border-red-500/40 transition-all disabled:opacity-50 min-h-[44px]">
+              <Trash2 className="w-4 h-4" /> Remove
+            </button>
+          )}
+          <p className="basis-full text-[11px] text-slate-600">PNG, JPEG or WebP. A transparent PNG on a dark background works best.</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <ProfileInput label="Display name" value={displayName} onChange={(v) => setDisplayName(v.slice(0, 60))} placeholder={orgName || 'Your company'} />
+        <ProfileInput label="Tagline" value={tagline} onChange={(v) => setTagline(v.slice(0, 60))} placeholder="Shown under the name when white-labelled" />
+      </div>
+
+      <div className="mt-4">
+        <label htmlFor="tenant-brand-color" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Brand colour</label>
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            type="color"
+            aria-label="Pick brand colour"
+            value={validColor ?? '#10b981'}
+            onChange={(e) => changeColor(e.target.value)}
+            className="w-11 h-11 rounded-xl border border-slate-700/60 bg-slate-900/80 cursor-pointer p-1"
+          />
+          <input
+            id="tenant-brand-color"
+            type="text"
+            value={color}
+            onChange={(e) => changeColor(e.target.value)}
+            placeholder="#0b5fa5"
+            spellCheck={false}
+            aria-invalid={colorInvalid}
+            className={`w-32 bg-slate-900/80 border rounded-xl px-3 py-2.5 text-sm font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 min-h-[44px] ${colorInvalid ? 'border-red-500/60' : 'border-slate-700/50'}`}
+          />
+          {color && (
+            <button onClick={() => changeColor('')}
+              className="flex items-center gap-2 text-slate-400 border border-slate-700/60 px-4 py-2.5 rounded-xl text-sm font-semibold hover:text-slate-200 transition-all min-h-[44px]">
+              <RotateCcw className="w-4 h-4" /> Platform default
+            </button>
+          )}
+        </div>
+        {colorInvalid && <p className="text-[11px] text-red-400 mt-1.5">Enter a 6-digit hex colour, like #0b5fa5.</p>}
+        {palette && (
+          <div className="mt-3 flex rounded-lg overflow-hidden border border-slate-700/60 w-full max-w-md" aria-hidden>
+            {SHADES.map((shade) => (
+              <svg key={shade} viewBox="0 0 1 1" preserveAspectRatio="none" className="h-6 flex-1">
+                <rect width="1" height="1" fill={palette[shade]} />
+              </svg>
+            ))}
+          </div>
+        )}
+        <p className="text-[11px] text-slate-600 mt-1.5">
+          The app builds a full palette from this one colour and keeps it readable on the dark shell. The change
+          previews live; it applies to your team once you save.
+        </p>
+      </div>
+
+      <div className="mt-5 flex items-start gap-3">
+        <input
+          id="tenant-white-label"
+          type="checkbox"
+          checked={whiteLabel}
+          disabled={!canWhiteLabel}
+          onChange={(e) => setWhiteLabel(e.target.checked)}
+          className="mt-1 w-5 h-5 rounded accent-emerald-500 disabled:opacity-40"
+        />
+        <label htmlFor="tenant-white-label" className="text-sm text-slate-300">
+          White-label — remove the “Powered by {PLATFORM_NAME}” line
+          <span className="block text-[11px] text-slate-600 mt-0.5">
+            {canWhiteLabel
+              ? 'Your tagline is shown in its place, and the browser tab carries your name.'
+              : 'Available on the Enterprise plan, or when enabled for your organisation by the platform owner.'}
+          </span>
+        </label>
+      </div>
+
+      {orgSlug && (
+        <div className="mt-5">
+          <p className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Your sign-in link</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="flex-1 min-w-0 truncate bg-slate-900/80 border border-slate-700/50 rounded-xl px-3 py-2.5 text-xs text-slate-300 min-h-[44px] flex items-center">
+              {`${window.location.origin}/login?org=${orgSlug}`}
+            </code>
+            <button
+              onClick={() => {
+                void navigator.clipboard.writeText(`${window.location.origin}/login?org=${orgSlug}`)
+                  .then(() => toast.success('Sign-in link copied.'))
+                  .catch(() => toast.error('Could not copy — select the link and copy it manually.'));
+              }}
+              className="flex items-center gap-2 bg-slate-800/60 text-slate-200 border border-slate-700/60 px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-slate-800 transition-all min-h-[44px]">
+              <Copy className="w-4 h-4" /> Copy
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-600 mt-1.5">
+            Share this with your team. The sign-in page opens in your branding, and a device remembers it after the
+            first sign-in. Your name, colour and logo are publicly visible on that page.
+          </p>
+        </div>
+      )}
+
+      <div className="flex justify-end pt-4">
+        <button onClick={save} disabled={saving}
+          className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-500/20 border border-emerald-500/30 transition-all disabled:opacity-50 min-h-[44px]">
+          <Save className="w-4 h-4" /> {saving ? 'Saving…' : 'Save branding'}
+        </button>
+      </div>
+    </Section>
+  );
+}
+
+// ── Navigation Layout (admin / L0) ─────────────────────────────────────────
+// The tenant's main-navigation arrangement, landing page, and the default
+// arrangement of the Settings / Team / Permits rails. Stored and validated by
+// the server (organisations.settings.navLayout). PRESENTATION ONLY: hiding an
+// item removes the link, not the capability — the copy below says so, because
+// an admin must not mistake this for the Access Policy.
+const RAIL_META: { name: RailName; title: string; orderKey: 'settingsNavOrder' | 'teamNavOrder' | 'permitsNavOrder'; hiddenKey: 'settingsNavHidden' | 'teamNavHidden' | 'permitsNavHidden' }[] = [
+  { name: 'settings', title: 'Settings categories', orderKey: 'settingsNavOrder', hiddenKey: 'settingsNavHidden' },
+  { name: 'team', title: 'Team categories', orderKey: 'teamNavOrder', hiddenKey: 'teamNavHidden' },
+  { name: 'permits', title: 'Permit folders', orderKey: 'permitsNavOrder', hiddenKey: 'permitsNavHidden' },
+];
+const RAIL_MODE_OPTIONS = [
+  { value: 'user_choice', label: 'Members choose' },
+  { value: 'locked', label: 'Locked' },
+];
+
+function NavigationLayoutSection({ orgName }: { orgName?: string }) {
+  const refresh = useNavLayoutStore((s) => s.refresh);
+  const adopt = useNavLayoutStore((s) => s.adopt);
+  const prefs = usePreferencesStore();
+
+  const [rows, setRows] = useState<ResolvedNavItem[]>(() => resolveSidebar(useNavLayoutStore.getState().layout));
+  const [landing, setLanding] = useState<string>(useNavLayoutStore.getState().layout.landing ?? '');
+  const [rails, setRails] = useState(useNavLayoutStore.getState().layout.rails);
+  const [saving, setSaving] = useState(false);
+
+  // Load the server copy once, then seed the form from it.
+  useEffect(() => {
+    let cancelled = false;
+    void refresh().then(() => {
+      if (cancelled) return;
+      const l = useNavLayoutStore.getState().layout;
+      setRows(resolveSidebar(l));
+      setLanding(l.landing ?? '');
+      setRails(l.rails);
+    });
+    return () => { cancelled = true; };
+  }, [refresh]);
+
+  const patchRow = (id: string, patch: Partial<ResolvedNavItem>) =>
+    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const move = (index: number, delta: -1 | 1) =>
+    setRows((rs) => {
+      const to = index + delta;
+      if (to < 0 || to >= rs.length) return rs;
+      const next = [...rs];
+      [next[index], next[to]] = [next[to], next[index]];
+      return next;
+    });
+  const resetSidebar = () => { setRows(resolveSidebar(defaultNavLayout())); setLanding(''); };
+
+  const landingOptions = rows.filter((r) => !r.hidden);
+  // A landing page that has since been hidden falls back to the default.
+  const landingValue = landingOptions.some((r) => r.id === landing) ? landing : '';
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const platformDefault = resolveSidebar(defaultNavLayout());
+      const isDefault = rows.every((r, i) =>
+        r.id === platformDefault[i]?.id && !r.hidden && r.label === r.defaultLabel && r.dividerBefore === platformDefault[i].dividerBefore);
+      const res = await api.setNavLayout({
+        // null keeps the tenant on the platform default, so nav items shipped
+        // later slot into their intended place instead of the end of the list.
+        sidebar: isDefault ? null : rows.map((r) => ({
+          id: r.id,
+          hidden: r.hidden,
+          label: r.label.trim() && r.label.trim() !== r.defaultLabel ? r.label.trim() : null,
+          dividerBefore: r.dividerBefore,
+        })),
+        landing: landingValue || null,
+        rails,
+      });
+      adopt(res.layout);
+      setRows(resolveSidebar(res.layout));
+      setLanding(res.layout.landing ?? '');
+      setRails(res.layout.rails);
+      toast.success('Navigation layout saved — your team will see it within a minute.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save navigation layout');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const iconBtn = 'min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl border border-slate-700/60 text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 transition-colors disabled:opacity-30 disabled:hover:bg-transparent';
+
+  return (
+    <Section icon={<ArrowUpDown className="w-5 h-5 text-emerald-400" />} title="Navigation Layout">
+      <p className="text-xs text-slate-500 mb-2">
+        Arrange the main navigation for everyone in {orgName || 'your organisation'}: reorder, rename, group with
+        dividers, and hide what your team doesn’t use.
+      </p>
+      <p className="text-xs text-amber-400/90 mb-5 flex gap-2">
+        <AlertCircle className="w-4 h-4 shrink-0 mt-px" aria-hidden />
+        <span>
+          Hiding an item removes the link, not the access — a member can still open a hidden page by its address or
+          from search. To restrict what a role can do, use Access Policy.
+        </span>
+      </p>
+
+      <OptionGroup label="Main navigation">
+        <ul className="space-y-2">
+          {rows.map((row, i) => {
+            const pinned = row.id === PINNED_NAV_ID;
+            return (
+              <li key={row.id}>
+                {row.dividerBefore && i > 0 && <div className="h-px bg-slate-700/60 mb-2" aria-hidden />}
+                <div className={`flex flex-wrap items-center gap-2 rounded-xl border border-slate-800/60 bg-slate-900/50 p-2 ${row.hidden ? 'opacity-60' : ''}`}>
+                  <button onClick={() => move(i, -1)} disabled={i === 0} aria-label={`Move ${row.defaultLabel} up`} className={iconBtn}>
+                    <ChevronUp className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => move(i, 1)} disabled={i === rows.length - 1} aria-label={`Move ${row.defaultLabel} down`} className={iconBtn}>
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+                  <input
+                    type="text"
+                    value={row.label}
+                    onChange={(e) => patchRow(row.id, { label: e.target.value.slice(0, NAV_LABEL_MAX) })}
+                    onBlur={() => { if (!row.label.trim()) patchRow(row.id, { label: row.defaultLabel }); }}
+                    aria-label={`Label for ${row.defaultLabel}`}
+                    className="flex-1 min-w-[8rem] bg-slate-900/80 border border-slate-700/50 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 min-h-[44px]"
+                  />
+                  {row.label.trim() !== row.defaultLabel && (
+                    <span className="text-[11px] text-slate-500">was “{row.defaultLabel}”</span>
+                  )}
+                  <label className="flex items-center gap-2 text-xs text-slate-400 min-h-[44px] px-1">
+                    <input type="checkbox" checked={row.dividerBefore} disabled={i === 0}
+                      onChange={(e) => patchRow(row.id, { dividerBefore: e.target.checked })}
+                      className="w-4 h-4 rounded accent-emerald-500 disabled:opacity-40" />
+                    Divider above
+                  </label>
+                  <button
+                    onClick={() => patchRow(row.id, { hidden: !row.hidden })}
+                    disabled={pinned}
+                    aria-pressed={row.hidden}
+                    title={pinned ? 'Settings is always shown — it is where this layout is edited' : undefined}
+                    className={`min-h-[44px] px-3 rounded-xl border text-xs font-semibold transition-colors disabled:opacity-40 ${row.hidden ? 'border-amber-500/40 text-amber-300 bg-amber-500/10' : 'border-slate-700/60 text-slate-400 hover:text-slate-100'}`}
+                  >
+                    {pinned ? 'Always shown' : row.hidden ? 'Hidden' : 'Shown'}
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+        <button onClick={resetSidebar}
+          className="mt-3 flex items-center gap-2 text-slate-400 border border-slate-700/60 px-4 py-2.5 rounded-xl text-sm font-semibold hover:text-slate-200 transition-all min-h-[44px]">
+          <RotateCcw className="w-4 h-4" /> Platform default
+        </button>
+      </OptionGroup>
+
+      <div className="mt-6">
+        <label htmlFor="tenant-landing" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Page after sign-in</label>
+        <select
+          id="tenant-landing"
+          value={landingValue}
+          onChange={(e) => setLanding(e.target.value)}
+          className="w-full sm:w-72 bg-slate-900/80 border border-slate-700/50 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 min-h-[44px]"
+        >
+          <option value="">Platform default (Projects)</option>
+          {landingOptions.map((r) => <option key={r.id} value={r.id}>{r.label.trim() || r.defaultLabel}</option>)}
+        </select>
+        <p className="text-[11px] text-slate-600 mt-1.5">A member who can’t see the chosen page lands on Projects instead.</p>
+      </div>
+
+      <div className="mt-6 space-y-4">
+        <p className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Category rails</p>
+        <p className="text-[11px] text-slate-600 -mt-2">
+          Arrange a rail the way you want it on its own page (Arrange button), then capture it here as your
+          organisation’s default. “Locked” stops members re-arranging it; unlock it first if you need to change it.
+        </p>
+        {RAIL_META.map((m) => {
+          const rail = rails[m.name];
+          const hasDefault = rail.order !== null || rail.hidden.length > 0;
+          return (
+            <div key={m.name} className="rounded-xl border border-slate-800/60 bg-slate-900/50 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-200">{m.title}</p>
+                  <p className="text-[11px] text-slate-500">
+                    {hasDefault
+                      ? `Organisation default set${rail.order ? ` · ${rail.order.length} ordered` : ''}${rail.hidden.length ? ` · ${rail.hidden.length} hidden` : ''}`
+                      : 'Platform default'}
+                  </p>
+                </div>
+                <div className="w-full sm:w-64">
+                  <ToggleRow
+                    options={RAIL_MODE_OPTIONS}
+                    value={rail.mode}
+                    onChange={(v) => setRails((r) => ({ ...r, [m.name]: { ...r[m.name], mode: v as RailMode } }))}
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 mt-3">
+                <button
+                  onClick={() => setRails((r) => ({ ...r, [m.name]: { ...r[m.name], order: prefs[m.orderKey], hidden: [...prefs[m.hiddenKey]] } }))}
+                  className="flex items-center gap-2 bg-slate-800/60 text-slate-200 border border-slate-700/60 px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-slate-800 transition-all min-h-[44px]">
+                  <Copy className="w-4 h-4" /> Use my current arrangement
+                </button>
+                {hasDefault && (
+                  <button
+                    onClick={() => setRails((r) => ({ ...r, [m.name]: { ...r[m.name], order: null, hidden: [] } }))}
+                    className="flex items-center gap-2 text-slate-400 border border-slate-700/60 px-4 py-2.5 rounded-xl text-sm font-semibold hover:text-slate-200 transition-all min-h-[44px]">
+                    <RotateCcw className="w-4 h-4" /> Clear default
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex justify-end pt-5">
+        <button onClick={save} disabled={saving}
+          className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-500/20 border border-emerald-500/30 transition-all disabled:opacity-50 min-h-[44px]">
+          <Save className="w-4 h-4" /> {saving ? 'Saving…' : 'Save navigation layout'}
         </button>
       </div>
     </Section>

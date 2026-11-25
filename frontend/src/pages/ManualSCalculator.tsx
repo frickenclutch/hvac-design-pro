@@ -28,6 +28,7 @@ import { useRetailerStore } from '../features/retailer/store/useRetailerStore';
 import RetailerFinderPanel from '../features/retailer/components/RetailerFinderPanel';
 import { getCachedProject } from '../features/projects/projectStorage';
 import type { SystemType } from '../engines/costEstimator';
+import { stampTenantBrand, loadTenantPdfBrand } from '../features/reports/tenantPdfBrand';
 
 // ── User + project scoped persistence ────────────────────────────────────────
 function getStorageKey(projectId: string | null): string {
@@ -601,6 +602,8 @@ export default function ManualSCalculator() {
     doc.text(new Date().toISOString().slice(0, 10), pw - margin, ph - 24, { align: 'right' });
 
     const safeName = (activeProjectName || 'Manual_S').replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '');
+    // Tenant logo + name in the top strip of every page (no-op when unbranded).
+    stampTenantBrand(doc, await loadTenantPdfBrand());
     doc.save(`ManualS_EquipmentSelection_${safeName}_${new Date().toISOString().slice(0, 10)}.pdf`);
   }, [result, activeProjectName, coolingType, coolingModel, ahriRef, heatingModel,
       totalCoolingBtu, sensibleCoolingBtu, derivedLatent, heatingBtu,
@@ -783,7 +786,7 @@ export default function ManualSCalculator() {
         {/* Action Buttons */}
         <div className="flex flex-col sm:flex-row gap-3 mb-10">
           <button onClick={runCalculation}
-            className="flex-1 py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold text-base sm:text-lg hover:bg-emerald-400 hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all flex items-center justify-center gap-3 min-h-[48px]">
+            className="flex-1 py-4 rounded-2xl bg-emerald-500 text-slate-950 font-bold text-base sm:text-lg hover:bg-emerald-400 hover:shadow-[0_0_30px_rgb(var(--accent-glow-strong-rgb)/0.3)] transition-all flex items-center justify-center gap-3 min-h-[48px]">
             Check Equipment Selection <ArrowRight className="w-5 h-5" />
           </button>
           <button onClick={openRetailerFinder}

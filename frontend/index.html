@@ -24,6 +24,28 @@
     <!-- SEO -->
     <meta name="description" content="Professional HVAC load calculation, duct design, and CAD workspace. ACCA Manual J/D/S compliant." />
     <title>HVAC DesignPro</title>
+    <!-- A white-labelled tenant's tab should never flash the platform name
+         while the bundle loads. Reads the same cached branding the app paints
+         from; assigns document.title (text, never markup). -->
+    <script>
+      try {
+        var b = null;
+        var org = JSON.parse(localStorage.getItem('hvac_session_org') || 'null');
+        if (org && typeof org.id === 'string') {
+          b = JSON.parse(localStorage.getItem('hvac_branding_' + org.id) || 'null');
+        } else {
+          var q = new URLSearchParams(location.search);
+          var slug = q.has('org') ? (q.get('org') || '').trim().toLowerCase() : localStorage.getItem('hvac_signin_org');
+          if (slug && /^[a-z0-9][a-z0-9-]{0,62}$/.test(slug)) {
+            var c = JSON.parse(localStorage.getItem('hvac_branding_public_' + slug) || 'null');
+            b = c && c.branding;
+          }
+        }
+        if (b && b.whiteLabel === true && typeof b.displayName === 'string' && b.displayName.trim()) {
+          document.title = b.displayName.slice(0, 60);
+        }
+      } catch (e) { /* keep the default title */ }
+    </script>
   </head>
   <body>
     <div id="root"></div>

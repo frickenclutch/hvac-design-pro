@@ -14,6 +14,7 @@ import { ENGINE_VERSIONS } from '../engines/versions';
 import { useProjectAutosave } from '../utils/useProjectAutosave';
 import NumericInput from '../components/NumericInput';
 import { isAedPlaceholder } from '../features/calculations/legacyPlaceholders';
+import { stampTenantBrand, loadTenantPdfBrand } from '../features/reports/tenantPdfBrand';
 
 // ── Display formatting ──────────────────────────────────────────────────────
 function fmt(value: number): string {
@@ -377,6 +378,8 @@ export default function AedAnalysis() {
     doc.text(`Engine ${ENGINE_VERSIONS.aed}  —  ACCA Manual J 8th Edition Section N (AED)`, margin, ph - 20);
     doc.text(new Date().toISOString().slice(0, 10), pw - margin, ph - 20, { align: 'right' });
 
+    // Tenant logo + name in the top strip of every page (no-op when unbranded).
+    stampTenantBrand(doc, await loadTenantPdfBrand());
     doc.save(`AED_Analysis_${new Date().toISOString().slice(0, 10)}.pdf`);
   };
 
