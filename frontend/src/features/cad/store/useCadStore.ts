@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import * as fabric from 'fabric';
 import { scopedKey } from '../../../utils/storage';
 import { applyDuctRoomAssignments } from '../../../engines/ductRoomAssign';
+import type { ScanModel } from '../../../engines/roomScan';
 
 // ── Tool Types ──────────────────────────────────────────────────────────────────
 export type ToolType =
@@ -20,6 +21,22 @@ export type ToolType =
   | 'draw_radiant'
   | 'calibrate_scale';
 
+// ── Measurement provenance ──────────────────────────────────────────────────────
+// How a geometry entity's dimensions were established — the ConvertedRoom
+// `exposureBasis` idea ("how was this arrived at, so the UI can flag weak
+// cases") generalized to the geometry itself, so review surfaces and reports
+// can grade what they're standing on. Absent ⇒ 'manual': every drawing saved
+// before this field existed stays valid, and loadDrawing() spreads floors
+// wholesale so the fields round-trip untouched.
+//   manual — drawn by hand at whatever the user intended
+//   traced — traced over an underlay (vector trace / calibrated sheet)
+//   ai     — LET vision extraction (review-confirmed)
+//   scan   — MEASURED by a device (LiDAR). True-dimension: its px coordinates
+//            encode real feet at the pxPerFt it was imported at. See the
+//            anchoring note on setProjectScale.
+export type MeasurementProvenance = 'manual' | 'traced' | 'ai' | 'scan';
+export type MeasureConfidence = 'high' | 'medium' | 'low';
+
 // ── Wall ────────────────────────────────────────────────────────────────────────
 export type WallMaterial = 'insulated_stud' | 'cmu' | 'concrete';
 
@@ -33,6 +50,11 @@ export interface WallSegment {
   rValue: number;
   material: WallMaterial;
   fabricId: string;
+  // Measurement pedigree (optional — absent on hand-drawn/legacy entities)
+  provenance?: MeasurementProvenance;
+  /** scan_captures.id that measured this entity (provenance === 'scan'). */
+  captureId?: string;
+  measureConfidence?: MeasureConfidence;
 }
 
 // ── Openings (windows & doors) ──────────────────────────────────────────────────
@@ -50,6 +72,10 @@ export interface Opening {
   // Door properties
   swingDirection?: 'left' | 'right' | 'double';
   fabricId: string;
+  // Measurement pedigree (optional — absent on hand-drawn/legacy entities)
+  provenance?: MeasurementProvenance;
+  captureId?: string;
+  measureConfidence?: MeasureConfidence;
 }
 
 // ── HVAC Units ──────────────────────────────────────────────────────────────────
@@ -184,6 +210,9 @@ export interface DetectedRoom {
    *  persisted have rooms without it, and every consumer must degrade rather
    *  than assume it (duct assignment falls back to centroid proximity). */
   polygon?: { x: number; y: number }[];
+  // Measurement pedigree (optional — absent on hand-drawn/legacy rooms)
+  provenance?: MeasurementProvenance;
+  captureId?: string;
 }
 
 // ── Annotations ─────────────────────────────────────────────────────────────────
@@ -315,6 +344,17 @@ export interface UnderlayMigrationRequest {
 export interface VectorTraceRequest {
   underlayId: string;
   underlayName: string;
+}
+
+// LiDAR scan import: a parsed RoomPlan capture awaiting review. The dialog
+// owns north alignment, room selection, and the confirm/discard lifecycle.
+// captureId is the server-side scan_captures row when the upload reached D1 —
+// null in draft mode or offline. The geometry still imports either way
+// (offline-first); only the server audit record is conditional.
+export interface ScanImportRequest {
+  fileName: string;
+  model: ScanModel;
+  captureId: string | null;
 }
 
 // ── Serialized drawing ────────────────────────────────────────────────────────────
@@ -547,6 +587,8 @@ interface CadState {
   setCalibrationRequest: (req: CalibrationRequest | null) => void;
   aiExtractRequest: AiExtractRequest | null;
   setAiExtractRequest: (req: AiExtractRequest | null) => void;
+  scanImportRequest: ScanImportRequest | null;
+  setScanImportRequest: (req: ScanImportRequest | null) => void;
   vectorTraceRequest: VectorTraceRequest | null;
   setVectorTraceRequest: (req: VectorTraceRequest | null) => void;
   underlayMigration: UnderlayMigrationRequest | null;
@@ -733,6 +775,12 @@ export const useCadStore = create<CadState>((set, get) => {
 
     // ── Project scale ─────────────────────────────────────────────────────────
     projectScale: { pxPerFt: 40 },
+    // Scan anchoring rule: 'scan'-provenance geometry is true-dimension — its
+    // px coordinates encode real measured feet at the pxPerFt it was imported
+    // at. Nothing calls this setter today; any future scale UI MUST either
+    // rescale scan entities' px coords by (new/old) so their real dimensions
+    // hold, or refuse while scan geometry exists. Silently reinterpreting a
+    // measurement would corrupt the one intake path that has no scale problem.
     setProjectScale: (scale) => set({ projectScale: scale }),
 
     // ── Live drawing HUD ──────────────────────────────────────────────────────
@@ -745,6 +793,8 @@ export const useCadStore = create<CadState>((set, get) => {
     setCalibrationRequest: (req) => set({ calibrationRequest: req }),
     aiExtractRequest: null,
     setAiExtractRequest: (req) => set({ aiExtractRequest: req }),
+    scanImportRequest: null,
+    setScanImportRequest: (req) => set({ scanImportRequest: req }),
 
     vectorTraceRequest: null,
     setVectorTraceRequest: (req) => set({ vectorTraceRequest: req }),

@@ -1,0 +1,39 @@
+category,system_type,tonnage,model,description,unit,unit_price,match_key
+equipment,heat_pump,1.5,,Heat pump outdoor unit / condenser - 1.5 ton,each,FILL_ME,equipment:heat_pump:1.5
+equipment,heat_pump,2,,Heat pump outdoor unit / condenser - 2 ton,each,FILL_ME,equipment:heat_pump:2
+equipment,heat_pump,2.5,,Heat pump outdoor unit / condenser - 2.5 ton,each,FILL_ME,equipment:heat_pump:2.5
+equipment,heat_pump,3,,Heat pump outdoor unit / condenser - 3 ton,each,FILL_ME,equipment:heat_pump:3
+equipment,heat_pump,3.5,,Heat pump outdoor unit / condenser - 3.5 ton,each,FILL_ME,equipment:heat_pump:3.5
+equipment,heat_pump,4,,Heat pump outdoor unit / condenser - 4 ton,each,FILL_ME,equipment:heat_pump:4
+equipment,heat_pump,5,,Heat pump outdoor unit / condenser - 5 ton,each,FILL_ME,equipment:heat_pump:5
+equipment,ac_furnace,1.5,,AC condenser + gas furnace - 1.5 ton,each,FILL_ME,equipment:ac_furnace:1.5
+equipment,ac_furnace,2,,AC condenser + gas furnace - 2 ton,each,FILL_ME,equipment:ac_furnace:2
+equipment,ac_furnace,2.5,,AC condenser + gas furnace - 2.5 ton,each,FILL_ME,equipment:ac_furnace:2.5
+equipment,ac_furnace,3,,AC condenser + gas furnace - 3 ton,each,FILL_ME,equipment:ac_furnace:3
+equipment,ac_furnace,3.5,,AC condenser + gas furnace - 3.5 ton,each,FILL_ME,equipment:ac_furnace:3.5
+equipment,ac_furnace,4,,AC condenser + gas furnace - 4 ton,each,FILL_ME,equipment:ac_furnace:4
+equipment,ac_furnace,5,,AC condenser + gas furnace - 5 ton,each,FILL_ME,equipment:ac_furnace:5
+equipment,mini_split,1.5,,Ductless mini-split system - 1.5 ton,each,FILL_ME,equipment:mini_split:1.5
+equipment,mini_split,2,,Ductless mini-split system - 2 ton,each,FILL_ME,equipment:mini_split:2
+equipment,mini_split,2.5,,Ductless mini-split system - 2.5 ton,each,FILL_ME,equipment:mini_split:2.5
+equipment,mini_split,3,,Ductless mini-split system - 3 ton,each,FILL_ME,equipment:mini_split:3
+equipment,mini_split,3.5,,Ductless mini-split system - 3.5 ton,each,FILL_ME,equipment:mini_split:3.5
+equipment,mini_split,4,,Ductless mini-split system - 4 ton,each,FILL_ME,equipment:mini_split:4
+equipment,mini_split,5,,Ductless mini-split system - 5 ton,each,FILL_ME,equipment:mini_split:5
+equipment,packaged,1.5,,Packaged rooftop / self-contained unit - 1.5 ton,each,FILL_ME,equipment:packaged:1.5
+equipment,packaged,2,,Packaged rooftop / self-contained unit - 2 ton,each,FILL_ME,equipment:packaged:2
+equipment,packaged,2.5,,Packaged rooftop / self-contained unit - 2.5 ton,each,FILL_ME,equipment:packaged:2.5
+equipment,packaged,3,,Packaged rooftop / self-contained unit - 3 ton,each,FILL_ME,equipment:packaged:3
+equipment,packaged,3.5,,Packaged rooftop / self-contained unit - 3.5 ton,each,FILL_ME,equipment:packaged:3.5
+equipment,packaged,4,,Packaged rooftop / self-contained unit - 4 ton,each,FILL_ME,equipment:packaged:4
+equipment,packaged,5,,Packaged rooftop / self-contained unit - 5 ton,each,FILL_ME,equipment:packaged:5
+equipment,,,,Air handler / indoor fan coil (split systems),each,FILL_ME,equipment:air_handler
+ductwork,,,,Duct material per linear ft - ducts in CONDITIONED space,ft,FILL_ME,ductwork:conditioned
+ductwork,,,,Duct material per linear ft - ducts in ATTIC (insulated),ft,FILL_ME,ductwork:attic
+ductwork,,,,Duct material per linear ft - ducts in CRAWLSPACE,ft,FILL_ME,ductwork:crawlspace
+ductwork,,,,Duct material per linear ft - ducts in GARAGE,ft,FILL_ME,ductwork:garage
+ductwork,,,,Duct material per linear ft - ducts in UNCONDITIONED BASEMENT,ft,FILL_ME,ductwork:basement_uncond
+misc,,,,Refrigerant line set,each,FILL_ME,misc:lineset
+controls,,,,Thermostat,each,FILL_ME,controls:thermostat
+misc,,,,Condensate pump / drain kit,each,FILL_ME,misc:condensate
+misc,,,,Air filter (media),each,FILL_ME,misc:filter
